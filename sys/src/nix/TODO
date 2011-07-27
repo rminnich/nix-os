@@ -1,0 +1,7 @@
+- smp for regular kernel
+- send multiple sipis to cores
+- change core roles
+- automatic selection of roles (policies)
+- be sure that debugging and tracing still work despite ACs
+- detect when do we need to flush the tlb in the AC
+

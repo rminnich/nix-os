@@ -1,0 +1,5 @@
+TEXT sleep(SB), 1, $0
+MOVQ RARG, a0+0(FP)
+MOVQ $17, RARG
+SYSCALL
+RET

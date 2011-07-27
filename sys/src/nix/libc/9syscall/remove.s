@@ -1,0 +1,5 @@
+TEXT remove(SB), 1, $0
+MOVQ RARG, a0+0(FP)
+MOVQ $25, RARG
+SYSCALL
+RET

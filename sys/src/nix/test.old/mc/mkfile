@@ -1,0 +1,9 @@
+</$objtype/mkfile
+
+BIN=$home/bin/$objtype
+TARG=\
+	seg\
+	wr\
+	rd\
+
+</sys/src/cmd/mkmany

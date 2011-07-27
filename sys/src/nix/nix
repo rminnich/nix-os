@@ -1,0 +1,11 @@
+#!/bin/rc
+unmount /sys/include >[2]/dev/null
+unmount /sys/src/libc >[2]/dev/null
+bind -b /sys/src/nix/include /sys/include
+bind -c /sys/src/nix/libc /sys/src/libc
+cd /sys/src/nix
+for(d in man/*){
+	unmount /sys/$d >[2]/dev/null
+	bind -b $d /sys/$d
+}
+exit ''

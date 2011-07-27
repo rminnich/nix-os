@@ -1,0 +1,16 @@
+
+To compile and use it you have to:
+
+!	bind -c libc /sys/src/libc
+!	bind  -b include /sys/include
+
+
+This is 9k, from jmk, changed by rminnich, and
+further changed to use 2M pages.
+
+This is the first version that worked with such pgsz.
+You might be also interested in a (non-working) version
+that was a previous attempt, found in the dump
+at /sys/src/9kron2M, and removed when this tree was created.
+
+

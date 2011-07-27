@@ -1,0 +1,17 @@
+#!/bin/rc
+rfork e
+path=(/usr/forsyth/bin/amd64 $path)
+fn e{
+	$* || exit $status
+}
+e bind -c '#g' /mnt/segment
+n=birtwhistle
+base=0x10000000
+length=65536
+e mkdir /mnt/segment/$n
+e echo va $base $length >/mnt/segment/$n/ctl
+cat /mnt/segment/$n/ctl
+wr birtwhistle 'hola!'
+rd birtwhistle 20 | xd -c
+wr birtwhistle 'hola! ¿qué tal?'
+rd birtwhistle 20 | xd -c

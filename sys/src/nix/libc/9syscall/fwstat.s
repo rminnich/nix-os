@@ -1,0 +1,5 @@
+TEXT fwstat(SB), 1, $0
+MOVQ RARG, a0+0(FP)
+MOVQ $45, RARG
+SYSCALL
+RET

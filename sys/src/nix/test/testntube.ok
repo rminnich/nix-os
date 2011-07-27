@@ -1,0 +1,2 @@
+newseg 6.testntube 0x0 0x10000
+6.testntube!test = 0xfda00058
