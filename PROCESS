@@ -1,0 +1,20 @@
+Add this to .hg/hgrc
+[extensions]
+codereview = sys/lib/codereview/codereview.py
+
+[codereview]
+server = codereview.appspot.com
+
+[ui]
+username=blah@blah
+EOF
+
+hg code-login
+hack hack
+hg change
+get a number
+hg mail use the number from hg change
+
+Once it is lgtm
+
+hg submit that number
