@@ -18,3 +18,7 @@ hg mail use the number from hg change
 Once it is lgtm
 
 hg submit that number
+
+How to update your repo:
+hg sync
+
