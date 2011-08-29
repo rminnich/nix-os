@@ -2213,7 +2213,7 @@ def RietveldSetup(ui, repo):
 	repo_config_path = ''
 	# Read repository-specific options from utils/lib/codereview/codereview.cfg
 	try:
-		repo_config_path = repo.root + '/lib/codereview/codereview.cfg'
+		repo_config_path = repo.root + '/sys/lib/codereview/codereview.cfg'
 		f = open(repo_config_path)
 		for line in f:
 			if line.startswith('defaultcc: '):
