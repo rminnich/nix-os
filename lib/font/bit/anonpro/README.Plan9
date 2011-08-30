@@ -1,0 +1,6 @@
+I just used Andrey's ttf2subf to convert the Anonymous Pro.ttf
+font into a 14 point Plan 9 font. The command line was:
+
+ttf2subf -m antialias -r rgb -f 'Anonymous Pro.ttf' -n anon -s 12
+
+
