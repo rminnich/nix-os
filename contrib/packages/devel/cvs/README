@@ -1,0 +1,5 @@
+CVS 1.11.1p1 - rsc's port almost unchanged, uses mk and ape.
+
+modifed the mkfile to place cvsrc in $home/lib
+
+Steve Simon

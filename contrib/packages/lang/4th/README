@@ -1,0 +1,7 @@
+4tH 3.5d - Forth-like interpreter.
+
+4tH is basic framework for creating application specific scripting
+languages. It is a library of functions centered around a virtual
+machine, which guarantees high performance, ease of use and low overhead.
+
+Originally packaged by: Federico Benavento

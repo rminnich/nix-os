@@ -1,0 +1,57 @@
+#!/bin/rc
+
+rfork en
+
+if (~ $#PKGROOT 0) {
+	PKGROOT=/
+}
+
+if (~ $#ROOT 0) {
+	ROOT=/
+}
+
+if (~ $#* 0) {
+	echo Need at least one package name to remove.
+	exit 'invalid arg'
+}
+
+for (PKGNAME in $*) {
+	@{
+		echo '•••Removing package '^$PKGNAME^'•••'
+		
+		# Go to the directory if it exists
+		if (! test -e $PKGROOT^/contrib/packages/^$PKGNAME) {
+			echo $PKGNAME^: No such package found in $PKGROOT^/contrib/packages/^$PKGNAME
+			exit 'no such package'
+		}
+		cd $PKGROOT^/contrib/packages/^$PKGNAME
+		
+		if (! grep $PKGNAME $ROOT^/contrib/packages/installed >[2=1] >/dev/null) { 
+			echo $PKGNAME^: Already removed!
+		}
+		if not {
+			grep -v '^'^$PKGNAME^'$' $ROOT^/contrib/packages/installed> /tmp/installed-removed
+			cp /tmp/installed-removed $ROOT^/contrib/packages/installed 
+			# ignore directories, remove regular files first
+			echo -n $PKGNAME^: Removing regular files.
+			for (i in `{awk '!/ - 20000000/{print $1}' < db}) {
+				echo -n .
+				#echo rm -f $ROOT^/^$i
+				rm -f $ROOT^/^$i
+			}
+		
+			echo
+		
+			# remove empty directories only
+			# we have to reverse the file first, that's what the first sed is doing
+			dirs=`{awk '/ - 20000000/{print $1}' db | sed '1!G;h;$!d'}
+			echo $PKGNAME^: Removing directories
+			for (i in $dirs) {
+				if (test -e $ROOT^/^$i && ~ `{ls $ROOT^/^$i} '') {
+					#echo rm -rf $ROOT^/$i
+					rm -rf $ROOT^/^$i
+				}
+			}
+		}
+	}
+}

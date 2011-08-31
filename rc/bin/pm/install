@@ -1,0 +1,101 @@
+#!/bin/rc
+
+rfork en
+
+if (~ $#PKGROOT 0) {
+	PKGROOT=/
+}
+
+if (~ $#ROOT 0) {
+	ROOT=/
+}
+
+if (~ $#PKGSERVER 0) {
+	PKGSERVER=jfloren.net
+}
+
+if (~ $#* 0) {
+	echo Need at least one package name
+	exit 'invalid arg'
+}
+
+for (PKGNAME in $*) {
+	@{	
+		echo '•••Installing package '^$PKGNAME^'•••'
+		
+		# Go to the directory if it exists
+		if (! test -e $PKGROOT^/contrib/packages/^$PKGNAME) {
+			echo $PKGNAME^: No such package found in $PKGROOT^/contrib/packages/^$PKGNAME
+			exit 'no such package'
+		}
+		cd $PKGROOT^/contrib/packages/^$PKGNAME
+		
+		# You need to do mk pull before running mk install
+		if (! test -e root.tgz) {
+			echo $PKGNAME^: You must pull first!
+			exit
+		}
+		if (grep '^'^$PKGNAME^'$' $ROOT^/contrib/packages/installed >[2=1] >/dev/null) { echo $PKGNAME^: already installed}
+		if not {
+			# Install all the dependencies
+			echo $PKGNAME^: Also installing dependencies:
+			for (i in `{cat dep}) {
+				echo '	* '^$i
+			}
+			for (i in `{cat dep}) {
+				if (! grep $i $ROOT^/contrib/packages/installed >[2=1] >/dev/null) {
+					@{
+						cd $PKGROOT^/contrib/packages/$i
+						pm/pull $i
+						pm/install $i
+					}
+				} 
+				if not {
+					echo $i^' is already installed, skipping'
+				}
+			}
+			echo $PKGNAME^: Unpacking the root archive...
+			tar xzf root.tgz
+			for (i in `{ls -p root}) {
+				mkdir -p $ROOT^/$i
+				echo $PKGNAME^: Copying files to $ROOT^/$i
+				dircp root/$i $ROOT^/$i
+			}
+			# set permissions
+			echo -n $PKGNAME^: Setting permissions
+			for (i in `{cat db | awk '{print $1}'}) {
+				echo -n .
+				perm = `{grep '^'^$i^' ' db | sed 1q | awk '{print $3}'}
+				group = `{grep '^'^$i^' ' db | sed 1q | awk '{print $5}'}
+				# to the best of my knowledge, a file can be:
+				# a directory XOR (append-only OR exclusive-access)
+				# I'm leaving exclusive access alone
+				# bugger off with your switch statements
+				if (~ $perm 20000000[0-9]*) {
+					#echo chmod `{echo $perm | sed 's/20000000//g'} $ROOT^/$i
+					chmod `{echo $perm | sed 's/20000000//g'} $ROOT^/$i
+				}
+				if not {
+					if (~ $perm 10000000[0-9]*) {
+						#echo chmod +a $ROOT^/$i
+						chmod +a $ROOT^/$i
+						#echo chmod `{echo $perm | sed 's/10000000//g'} $ROOT^/$i
+						chmod `{echo $perm | sed 's/10000000//g'} $ROOT^/$i
+					}
+					if not {
+						#echo chmod $perm $ROOT^/$i
+						chmod $perm $ROOT^/$i
+					}
+				}
+				#echo chgrp $group $ROOT^/$i
+				chgrp $group $ROOT^/$i
+			}
+			echo
+			# inform the world that this package is now installed
+			echo $PKGNAME >> $ROOT^/contrib/packages/installed
+			sort $ROOT^/contrib/packages/installed > /tmp/installed-sorted
+			mv /tmp/installed-sorted $ROOT^/contrib/packages/installed
+			echo $PKGNAME^: successfully installed.
+		}
+	}
+}

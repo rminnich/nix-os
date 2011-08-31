@@ -1,0 +1,38 @@
+#!/bin/rc
+
+rfork en
+
+if (~ $#PKGROOT 0) {
+	PKGROOT=/
+}
+
+if (~ $#ROOT 0) {
+	ROOT=/
+}
+
+if (~ $#PKGSERVER 0) {
+	PKGSERVER=jfloren.net
+}
+
+if (~ $#* 0) {
+	echo Need at least one argument
+	exit 'invalid arg'
+}
+
+for (PKGNAME in $*) {
+	@{
+		# Go to the directory if it exists
+		if (! test -e $PKGROOT^/contrib/packages/^$PKGNAME) {
+			echo $PKGNAME^: No such package found in $PKGROOT^/contrib/packages/^$PKGNAME
+			exit 'no such package'
+		}
+		cd $PKGROOT^/contrib/packages/^$PKGNAME
+		
+		pm/clean $PKGNAME
+		
+		echo $PKGNAME^: Cleaning for dependencies
+		for (i in `{cat dep}) {
+			pm/depclean $i
+		}
+	}
+}
