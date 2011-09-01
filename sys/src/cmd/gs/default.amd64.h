@@ -6,9 +6,9 @@
 #define ARCH_ALIGN_SHORT_MOD 2
 #define ARCH_ALIGN_INT_MOD 4
 #define ARCH_ALIGN_LONG_MOD 4
-#define ARCH_ALIGN_PTR_MOD 8
+#define ARCH_ALIGN_PTR_MOD 4
 #define ARCH_ALIGN_FLOAT_MOD 4
-#define ARCH_ALIGN_DOUBLE_MOD 8
+#define ARCH_ALIGN_DOUBLE_MOD 4
 #define ARCH_ALIGN_STRUCT_MOD 4
 
 	 /* ---------------- Scalar sizes ---------------- */
@@ -18,7 +18,7 @@
 #define ARCH_LOG2_SIZEOF_INT 2
 #define ARCH_LOG2_SIZEOF_LONG 2
 #define ARCH_LOG2_SIZEOF_LONG_LONG 3
-#define ARCH_SIZEOF_PTR 8
+#define ARCH_SIZEOF_PTR 4
 #define ARCH_SIZEOF_FLOAT 4
 #define ARCH_SIZEOF_DOUBLE 8
 #define ARCH_FLOAT_MANTISSA_BITS 24
@@ -29,11 +29,11 @@
 #define ARCH_MAX_UCHAR ((unsigned char)0xff + (unsigned char)0)
 #define ARCH_MAX_USHORT ((unsigned short)0xffff + (unsigned short)0)
 #define ARCH_MAX_UINT ((unsigned int)~0 + (unsigned int)0)
-#define ARCH_MAX_ULONG ((unsigned long)~0L + (unsigned long)0)
+#define ARCH_MAX_ULONG ((uvlong)~0L + (uvlong)0)
 
 	 /* ---------------- Cache sizes ---------------- */
 
-#define ARCH_CACHE1_SIZE 4096
+#define ARCH_CACHE1_SIZE 4194304
 #define ARCH_CACHE2_SIZE 4194304
 
 	 /* ---------------- Miscellaneous ---------------- */
