@@ -29,7 +29,7 @@
 #define ARCH_MAX_UCHAR ((unsigned char)0xff + (unsigned char)0)
 #define ARCH_MAX_USHORT ((unsigned short)0xffff + (unsigned short)0)
 #define ARCH_MAX_UINT ((unsigned int)~0 + (unsigned int)0)
-#define ARCH_MAX_ULONG ((uvlong)~0L + (uvlong)0)
+#define ARCH_MAX_ULONG ((unsigned long long )~0L + (unsigned long long )0)
 
 	 /* ---------------- Cache sizes ---------------- */
 
