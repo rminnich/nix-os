@@ -19,6 +19,23 @@ typedef struct {
 } Ehdr;
 
 typedef struct {
+	uchar	ident[16];	/* ident bytes */
+	ushort	type;		/* file type */
+	ushort	machine;	/* target machine */
+	int	version;	/* file version */
+	uvlong	elfentry;	/* start address */
+	uvlong	phoff;		/* phdr file offset */
+	uvlong	shoff;		/* shdr file offset */
+	int	flags;		/* file flags */
+	ushort	ehsize;		/* sizeof ehdr */
+	ushort	phentsize;	/* sizeof phdr */
+	ushort	phnum;		/* number phdrs */
+	ushort	shentsize;	/* sizeof shdr */
+	ushort	shnum;		/* number shdrs */
+	ushort	shstrndx;	/* shdr string index */
+} Ehdr64;
+
+typedef struct {
 	int	type;		/* entry type */
 	ulong	offset;		/* file offset */
 	ulong	vaddr;		/* virtual address */
@@ -28,6 +45,17 @@ typedef struct {
 	int	flags;		/* entry flags */
 	int	align;		/* memory/file alignment */
 } Phdr;
+
+typedef struct {
+	int	type;		/* entry type */
+	int flags; 		/* how consistent of them */
+	uvlong	offset;		/* file offset */
+	uvlong	vaddr;		/* virtual address */
+	uvlong	paddr;		/* physical address */
+	uvlong	filesz;		/* file size */
+	uvlong	memsz;		/* memory size */
+	uvlong	align;		/* memory/file alignment */
+} Phdr64;
 
 typedef struct {
 	ulong	name;		/* section name */
@@ -41,6 +69,19 @@ typedef struct {
 	ulong	addralign;	/* memory alignment */
 	ulong	entsize;	/* entry size if table */
 } Shdr;
+
+typedef struct {
+	ulong	name;		/* section name */
+	ulong	type;		/* SHT_... */
+	uvlong	flags;		/* SHF_... */
+	uvlong	addr;		/* virtual address */
+	uvlong	offset;		/* file offset */
+	uvlong	size;		/* section size */
+	ulong	link;		/* misc info */
+	ulong	info;		/* misc info */
+	uvlong	addralign;	/* memory alignment */
+	uvlong	entsize;	/* entry size if table */
+} Shdr64;
 
 enum {
 	/* Ehdr codes */

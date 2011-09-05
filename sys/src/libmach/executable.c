@@ -17,6 +17,7 @@ typedef struct {
 			uvlong hdr[1];
 		};
 		Ehdr;			/* elf.h */
+		Ehdr64;			/* elf.h */
 		struct mipsexec;	/* bootexec.h */
 		struct mips4kexec;	/* bootexec.h */
 		struct sparcexec;	/* bootexec.h */
@@ -33,6 +34,7 @@ static	int	common(int, Fhdr*, ExecHdr*);
 static	int	commonllp64(int, Fhdr*, ExecHdr*);
 static	int	adotout(int, Fhdr*, ExecHdr*);
 static	int	elfdotout(int, Fhdr*, ExecHdr*);
+static	int	elf64dotout(int, Fhdr*, ExecHdr*);
 static	int	armdotout(int, Fhdr*, ExecHdr*);
 static	void	setsym(Fhdr*, long, long, long, vlong);
 static	void	setdata(Fhdr*, uvlong, long, vlong, long);
@@ -206,8 +208,17 @@ ExecTable exectab[] =
 		sizeof(Exec)+8,
 		nil,
 		commonllp64 },
+	{ ELF_MAG,			/* any elf64 */
+		"elf 64-bit executable",
+		nil,
+		FNONE,
+		0,
+		&mamd64,
+		sizeof(Ehdr64),
+		nil,
+		elf64dotout },
 	{ ELF_MAG,			/* any elf32 */
-		"elf executable",
+		"elf 32-bit executable",
 		nil,
 		FNONE,
 		0,
@@ -590,7 +601,7 @@ elfdotout(int fd, Fhdr *fp, ExecHdr *hp)
 		werrstr("bad ELF encoding - not big or little endian");
 		return 0;
 	}
-
+print("swab it up\n");
 	ep->type = swab(ep->type);
 	ep->machine = swab(ep->machine);
 	ep->version = swal(ep->version);
@@ -618,10 +629,6 @@ elfdotout(int fd, Fhdr *fp, ExecHdr *hp)
 	case MIPS:
 		mach = &mmips;
 		fp->type = FMIPS;
-		break;
-	case SPARC64:
-		mach = &msparc64;
-		fp->type = FSPARC64;
 		break;
 	case POWER:
 		mach = &mpower;
@@ -653,6 +660,111 @@ elfdotout(int fd, Fhdr *fp, ExecHdr *hp)
 		return 0;
 	}
 	hswal(ph, phsz/sizeof(ulong), swal);
+print("install them\n");
+	/* find text, data and symbols and install them */
+	it = id = is = -1;
+	for(i = 0; i < ep->phnum; i++) {
+		if(ph[i].type == LOAD
+		&& (ph[i].flags & (R|X)) == (R|X) && it == -1)
+			it = i;
+		else if(ph[i].type == LOAD
+		&& (ph[i].flags & (R|W)) == (R|W) && id == -1)
+			id = i;
+		else if(ph[i].type == NOPTYPE && is == -1)
+			is = i;
+	}
+	settext(fp, ep->elfentry, ph[it].vaddr, ph[it].memsz, ph[it].offset);
+	setdata(fp, ph[id].vaddr, ph[id].filesz, ph[id].offset, ph[id].memsz - ph[id].filesz);
+	if(is != -1)
+		setsym(fp, ph[is].filesz, 0, ph[is].memsz, ph[is].offset);
+	free(ph);
+	return 1;
+}
+
+/*
+ * Elf64 binaries.
+ */
+static int
+elf64dotout(int fd, Fhdr *fp, ExecHdr *hp)
+{
+
+	uvlong (*swav)(uvlong);
+	ulong (*swal)(ulong);
+	ushort (*swab)(ushort);
+	Ehdr64 *ep;
+	Phdr64 *ph;
+	int i, it, id, is, phsz, memsz;
+
+	/* bitswap the header according to the DATA format */
+	ep = &hp->e;
+	if(ep->ident[CLASS] != ELFCLASS64) {
+		werrstr("bad ELF class - not 64 bit");
+		return 0;
+	}
+	if(ep->ident[DATA] == ELFDATA2LSB) {
+		swab = leswab;
+		swal = leswal;
+		swav = leswav;
+	} else if(ep->ident[DATA] == ELFDATA2MSB) {
+		swab = beswab;
+		swal = beswal;
+		swav = beswav;
+	} else {
+		werrstr("bad ELF encoding - not big or little endian");
+		return 0;
+	}
+
+	ep->type = swab(ep->type);
+	ep->machine = swab(ep->machine);
+	ep->version = swal(ep->version);
+	ep->elfentry = swav(ep->elfentry);
+	ep->phoff = swav(ep->phoff);
+	ep->shoff = swav(ep->shoff);
+	ep->flags = swal(ep->flags);
+	ep->ehsize = swab(ep->ehsize);
+	ep->phentsize = swab(ep->phentsize);
+	ep->phnum = swab(ep->phnum);
+	ep->shentsize = swab(ep->shentsize);
+	ep->shnum = swab(ep->shnum);
+	ep->shstrndx = swab(ep->shstrndx);
+
+	if(ep->type != EXEC){
+		werrstr("Type %x != EXEC(%x)", ep->type, EXEC);
+		return 0;
+	}
+
+	if(ep->version != CURRENT){
+		werrstr("version %x != CURRENT(%x)", ep->version, CURRENT);
+		return 0;
+	}
+
+
+	/* we could definitely support a lot more machines here */
+	fp->magic = ELF_MAG;
+	fp->hdrsz = (ep->ehsize+ep->phnum*ep->phentsize+16)&~15;
+	switch(ep->machine) {
+	case AMD64:
+		mach = &mamd64;
+		fp->type = FAMD64;
+		break;
+	default:
+		return 0;
+	}
+
+	if(ep->phentsize != sizeof(Phdr64)) {
+		werrstr("bad ELF header size");
+		return 0;
+	}
+	phsz = sizeof(Phdr64)*ep->phnum;
+	ph = malloc(phsz);
+	if(!ph)
+		sysfatal("elf64 program header malloc for %d bytes failed: %r", phsz);
+	seek(fd, ep->phoff, 0);
+	if(read(fd, ph, phsz) < 0) {
+		free(ph);
+		return 0;
+	}
+	hswal(ph, phsz/sizeof(ulong), swal);
 
 	/* find text, data and symbols and install them */
 	it = id = is = -1;
@@ -666,37 +778,16 @@ elfdotout(int fd, Fhdr *fp, ExecHdr *hp)
 		else if(ph[i].type == NOPTYPE && is == -1)
 			is = i;
 	}
-	if(it == -1 || id == -1) {
-		/*
-		 * The SPARC64 boot image is something of an ELF hack.
-		 * Text+Data+BSS are represented by ph[0].  Symbols
-		 * are represented by ph[1]:
-		 *
-		 *		filesz, memsz, vaddr, paddr, off
-		 * ph[0] : txtsz+datsz, txtsz+datsz+bsssz, txtaddr-KZERO, datasize, txtoff
-		 * ph[1] : symsz, lcsz, 0, 0, symoff
-		 */
-		if(ep->machine == SPARC64 && ep->phnum == 2) {
-			ulong txtaddr, txtsz, dataddr, bsssz;
 
-			txtaddr = ph[0].vaddr | 0x80000000;
-			txtsz = ph[0].filesz - ph[0].paddr;
-			dataddr = txtaddr + txtsz;
-			bsssz = ph[0].memsz - ph[0].filesz;
-			settext(fp, ep->elfentry | 0x80000000, txtaddr, txtsz, ph[0].offset);
-			setdata(fp, dataddr, ph[0].paddr, ph[0].offset + txtsz, bsssz);
-			setsym(fp, ph[1].filesz, 0, ph[1].memsz, ph[1].offset);
-			free(ph);
-			return 1;
-		}
-
-		werrstr("No TEXT or DATA sections");
-		free(ph);
-		return 0;
-	}
-
-	settext(fp, ep->elfentry, ph[it].vaddr, ph[it].memsz, ph[it].offset);
-	setdata(fp, ph[id].vaddr, ph[id].filesz, ph[id].offset, ph[id].memsz - ph[id].filesz);
+	/* for now, we only support 4G and smaller text and data segments. Anyone with anything
+	 * larger needs a brain scan anyway 
+	 */
+	memsz = ph[it].memsz;
+	settext(fp, ep->elfentry, ph[it].vaddr, memsz, ph[it].offset);
+	/* needed for bug in 8c. Can't subtract uvlongs as a parameter. */
+	uvlong msfs = ph[id].memsz - ph[id].filesz;
+	memsz = ph[id].offset;
+	setdata(fp, ph[id].vaddr, ph[id].filesz, memsz, msfs);
 	if(is != -1)
 		setsym(fp, ph[is].filesz, 0, ph[is].memsz, ph[is].offset);
 	free(ph);
