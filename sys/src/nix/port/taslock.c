@@ -109,13 +109,13 @@ lock(Lock *l)
 void
 ilock(Lock *l)
 {
-	Mreg s;
+	Mpl pl;
 	uintptr pc;
 
 	pc = getcallerpc(&l);
 	lockstats.locks++;
 
-	s = splhi();
+	pl = splhi();
 	if(TAS(&l->key) != 0){
 		lockstats.glare++;
 		/*
@@ -125,10 +125,10 @@ ilock(Lock *l)
 		 */
 		for(;;){
 			lockstats.inglare++;
-			splx(s);
+			splx(pl);
 			while(l->key)
 				;
-			s = splhi();
+			pl = splhi();
 			if(TAS(&l->key) == 0)
 				goto acquire;
 		}
@@ -137,7 +137,7 @@ acquire:
 	m->ilockdepth++;
 	if(up)
 		up->lastilock = l;
-	l->sr = s;
+	l->pl = pl;
 	l->pc = pc;
 	l->p = up;
 	l->isilock = 1;
@@ -205,7 +205,7 @@ unlock(Lock *l)
 void
 iunlock(Lock *l)
 {
-	Mreg s;
+	Mpl pl;
 
 #ifdef LOCKCYCLES
 	uvlong x;
@@ -228,12 +228,12 @@ iunlock(Lock *l)
 			m->machno, l->m->machno, getcallerpc(&l), l->pc);
 	}
 
-	s = l->sr;
+	pl = l->pl;
 	l->m = nil;
 	l->key = 0;
 	coherence();
 	m->ilockdepth--;
 	if(up)
 		up->lastilock = nil;
-	splx(s);
+	splx(pl);
 }

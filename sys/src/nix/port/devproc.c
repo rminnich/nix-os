@@ -1551,7 +1551,7 @@ procctlreq(Proc *p, char *va, int n)
 		break;
 	case CMcore:
 		core = atoi(cb->f[1]);
-		if(core >= MAXMACH)
+		if(core >= MACHMAX)
 			error("wrong core number");
 		else if(core == 0){
 			if(p->ac == nil)
@@ -1593,6 +1593,7 @@ procctlmemio(Proc *p, uintptr offset, int n, void *va, int read)
 	Segment *s;
 	uintptr soff, l;	/* hmmmm */
 	uchar *b;
+	uintmem pgsz;
 
 	for(;;) {
 		s = seg(p, offset, 1);
@@ -1620,11 +1621,12 @@ procctlmemio(Proc *p, uintptr offset, int n, void *va, int read)
 	pte = s->map[soff/PTEMAPMEM];
 	if(pte == 0)
 		panic("procctlmemio");
-	pg = pte->pages[(soff&(PTEMAPMEM-1))/BIGPGSZ];
+	pgsz = m->pgsz[s->pgszi];
+	pg = pte->pages[(soff&(PTEMAPMEM-1))/pgsz];
 	if(pagedout(pg))
 		panic("procctlmemio1");
 
-	l = BIGPGSZ - (offset&(BIGPGSZ-1));
+	l = pgsz - (offset&(pgsz-1));
 	if(n > l)
 		n = l;
 
@@ -1635,7 +1637,7 @@ procctlmemio(Proc *p, uintptr offset, int n, void *va, int read)
 		nexterror();
 	}
 	b = (uchar*)VA(k);
-	b += offset&(BIGPGSZ-1);
+	b += offset&(pgsz-1);
 	if(read == 1)
 		memmove(va, b, n);	/* This can fault */
 	else

@@ -66,7 +66,6 @@ static	Segment* globalsegattach(Proc*, char*);
 static	int	cmddone(void*);
 static	void	segmentkproc(void*);
 static	void	docmd(Globalseg*, int);
-static Segment* mkseg(uintptr va, uintptr len);
 
 /*
  *  returns with globalseg incref'd
@@ -152,6 +151,10 @@ segmentgen(Chan *c, char*, Dirtab*, int, int s, Dir *dp)
 	case Qdata:
 	case Qfree:
 		g = getgseg(c);
+		if(waserror()){
+			putgseg(g);
+			nexterror();
+		}
 		q.vers = 0;
 		q.type = QTFILE;
 		switch(s){
@@ -173,9 +176,11 @@ segmentgen(Chan *c, char*, Dirtab*, int, int s, Dir *dp)
 			break;
 
 		default:
+			poperror();
 			putgseg(g);
 			return -1;
 		}
+		poperror();
 		putgseg(g);
 		break;
 	}
@@ -457,6 +462,7 @@ segmentread(Chan *c, void *a, long n, vlong voff)
 /*
  * BUG: we allocate virtual addresses but never give them
  * back when the segment is destroyed.
+ * BUG: what if we overlap other segments attached by the user?
  */
 static ulong
 placeseg(ulong len)
@@ -509,13 +515,13 @@ segmentwrite(Chan *c, void *a, long n, vlong voff)
 				error("already has a virtual address");
 			if(cb->nf < 3)
 				cmderror(cb, Ebadarg);
-			va = strtoull(cb->f[1], 0, 0);
-			len = strtoull(cb->f[2], 0, 0);
+			va = strtoul(cb->f[1], 0, 0);
+			len = strtoul(cb->f[2], 0, 0);
 			if(va == 0)
 				va = placeseg(len);
-			top = BIGPGROUND(va+len);
+			top = BIGPGROUND(va + len);
 			va = va&~(BIGPGSZ-1);
-			len = (top-va)/BIGPGSZ;
+			len = (top - va) / BIGPGSZ;
 			if(len == 0)
 				cmderror(cb, "empty segment");
 

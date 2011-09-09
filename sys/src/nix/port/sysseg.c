@@ -30,9 +30,10 @@ addphysseg(Physseg* new)
 		return -1;
 	}
 
-	if(new->lgpgsize == 0)
-		new->lgpgsize = BIGPGSHFT;
-
+	if(new->pgszi < 0)
+		new->pgszi = getpgszi(2*MiB);	/* 2M pages by default */
+	if(new->pgszi < 0)
+		panic("addphysseg");
 	*ps = *new;
 	unlock(&physseglock);
 
@@ -62,10 +63,11 @@ uintptr
 ibrk(uintptr addr, int seg)
 {
 	Segment *s, *ns;
-	uintptr newtop;
+	uintptr newtop, rtop;
 	long newsize;
 	int i, mapsize;
 	Pte **map;
+	uintmem pgsz;
 
 	s = up->seg[seg];
 	if(s == 0)
@@ -75,42 +77,67 @@ ibrk(uintptr addr, int seg)
 		return s->top;
 
 	qlock(&s->lk);
+	if(waserror()) {
+		qunlock(&s->lk);
+		nexterror();
+	}
 
 	/* We may start with the bss overlapping the data */
 	if(addr < s->base) {
-		if(seg != BSEG || up->seg[DSEG] == 0 || addr < up->seg[DSEG]->base) {
-			qunlock(&s->lk);
+		if(seg != BSEG || up->seg[DSEG] == 0 || addr < up->seg[DSEG]->base) 
 			error(Enovmem);
-		}
 		addr = s->base;
 	}
 
-	newtop = BIGPGROUND(addr);
-	newsize = (newtop-s->base)/BIGPGSZ;
+	pgsz = m->pgsz[s->pgszi];
+	if(seg == BSEG && addr >= ROUNDUP(s->top, 1*GiB) + 1*GiB)
+		newtop = ROUNDUP(addr, 1*GiB);
+	else
+		newtop = ROUNDUP(addr, pgsz);
+	newsize = (newtop-s->base)/pgsz;
 	if(newtop < s->top) {
-		mfreeseg(s, newtop, (s->top-newtop)/BIGPGSZ);
+		mfreeseg(s, newtop, (s->top-newtop)/pgsz);
 		s->top = newtop;
 		s->size = newsize;
+		poperror();
 		qunlock(&s->lk);
 		mmuflush();
 		return newtop;
 	}
+	if(newsize > (SEGMAPSIZE*s->ptepertab))
+		error(Enovmem);
 
 	for(i = 0; i < NSEG; i++) {
 		ns = up->seg[i];
 		if(ns == 0 || ns == s)
 			continue;
-		if(newtop >= ns->base && newtop < ns->top) {
-			qunlock(&s->lk);
+		if(newtop >= ns->base && newtop < ns->top)
 			error(Esoverlap);
-		}
 	}
 
-	if(newsize > (SEGMAPSIZE*PTEPERTAB)) {
-		qunlock(&s->lk);
-		error(Enovmem);
-	}
-	mapsize = HOWMANY(newsize, PTEPERTAB);
+	if(seg == BSEG && newtop >= ROUNDUP(s->top, 1*GiB) + 1*GiB){
+		DBG("segment using 1G pages\n");
+		/*
+		 * brk the bss up to the 1G boundary, and create
+		 * a segment placed at that boundary, using 1G pages if it can.
+		 * This is both back compatible, transparent,
+		 * and permits using 1G pages.
+		 */
+		rtop = ROUNDUP(newtop,1*GiB);
+		newtop = ROUNDUP(s->top, 1*GiB);
+		newsize -= (rtop-newtop)/BIGPGSZ;
+assert(newsize >= 0);
+		DBG("ibrk: newseg %#ullx %ullx\n", newtop, (rtop-newtop)/BIGPGSZ);
+		ns = newseg(SG_BSS, newtop, (rtop-newtop)/BIGPGSZ);
+		ns->color= s->color;
+		up->seg[HSEG] = ns;
+		DBG("ibrk: newtop %#ullx newsize %#ulx \n", newtop, newsize);
+		/* now extend the bss up to newtop */
+	}else
+		rtop = newtop;
+
+
+	mapsize = HOWMANY(newsize, s->ptepertab);
 	if(mapsize > s->mapsize){
 		map = smalloc(mapsize*sizeof(Pte*));
 		memmove(map, s->map, s->mapsize*sizeof(Pte*));
@@ -122,9 +149,10 @@ ibrk(uintptr addr, int seg)
 
 	s->top = newtop;
 	s->size = newsize;
+	poperror();
 	qunlock(&s->lk);
 
-	return newtop;
+	return rtop;
 }
 
 void
@@ -140,9 +168,21 @@ syssegbrk(Ar0* ar0, va_list list)
 	 * void* segbrk(void* saddr, void* addr);
 	 */
 	addr = PTR2UINT(va_arg(list, void*));
+	if(addr == 0){
+		if(up->seg[HSEG])
+			ar0->v = UINT2PTR(up->seg[HSEG]->top);
+		else
+			ar0->v = UINT2PTR(up->seg[BSEG]->top);
+		return;
+	}
 	for(i = 0; i < NSEG; i++) {
 		s = up->seg[i];
-		if(s == nil || addr < s->base || addr >= s->top)
+		if(s == nil)
+			continue;
+		/* Ok to extend an empty segment */
+		if(addr < s->base || addr > s->top)
+			continue;
+		if(addr == s->top && (s->base < s->top))
 			continue;
 		switch(s->type&SG_TYPE) {
 		case SG_TEXT:
@@ -203,6 +243,8 @@ segattach(Proc* p, int attr, char* name, uintptr va, usize len)
 		s = (*_globalsegattach)(p, name);
 		if(s != nil){
 			p->seg[sno] = s;
+			if(p == up && up->prepagemem)
+				nixprepage(sno);
 			return s->base;
 		}
 	}
@@ -260,7 +302,7 @@ segattach(Proc* p, int attr, char* name, uintptr va, usize len)
 	s->pseg = ps;
 	p->seg[sno] = s;
 
-	if(up->prepagemem)
+	if(p == up && up->prepagemem)
 		nixprepage(sno);
 
 	return va;

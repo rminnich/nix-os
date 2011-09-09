@@ -87,10 +87,10 @@ schedinit(void)		/* never returns */
 			/*
 			 * Holding locks from pexit:
 			 * 	procalloc
-			 *	palloc
+			 *	pga
 			 */
 			mmurelease(up);
-			unlock(&palloc);
+			unlock(&pga);
 
 			psrelease(up);
 			unlock(&procalloc);
@@ -153,7 +153,7 @@ sched(void)
 		if(up->nlocks)
 		if(up->state != Moribund)
 		if(up->delaysched < 20
-		|| palloc.Lock.p == up
+		|| pga.Lock.p == up
 		|| procalloc.Lock.p == up){
 			up->delaysched++;
  			delayedscheds++;
@@ -429,14 +429,14 @@ dequeueproc(Schedq *rq, Proc *tp)
 void
 ready(Proc *p)
 {
-	Mreg s;
+	Mpl pl;
 	int pri;
 	Schedq *rq;
 	void (*pt)(Proc*, int, vlong);
 
-	s = splhi();
+	pl = splhi();
 	if(edfready(p)){
-		splx(s);
+		splx(pl);
 		return;
 	}
 
@@ -454,7 +454,7 @@ ready(Proc *p)
 	pt = proctrace;
 	if(pt)
 		pt(p, SReady, 0);
-	splx(s);
+	splx(pl);
 }
 
 /*
@@ -478,7 +478,7 @@ yield(void)
 static void
 rebalance(void)
 {
-	Mreg s;
+	Mpl pl;
 	int pri, npri, t;
 	Schedq *rq;
 	Proc *p;
@@ -500,11 +500,11 @@ another:
 		updatecpu(p);
 		npri = reprioritize(p);
 		if(npri != pri){
-			s = splhi();
+			pl = splhi();
 			p = dequeueproc(rq, p);
 			if(p)
 				queueproc(&runq[npri], p);
-			splx(s);
+			splx(pl);
 			goto another;
 		}
 	}
@@ -688,7 +688,7 @@ procwired(Proc *p, int bm)
 {
 	Proc *pp;
 	int i;
-	char nwired[MAXMACH];
+	char nwired[MACHMAX];
 	Mach *wm;
 
 	if(bm < 0){
@@ -741,10 +741,10 @@ procpriority(Proc *p, int pri, int fixed)
 void
 sleep(Rendez *r, int (*f)(void*), void *arg)
 {
-	Mreg s;
+	Mpl pl;
 	void (*pt)(Proc*, int, vlong);
 
-	s = splhi();
+	pl = splhi();
 
 	if(up->nlocks)
 		print("process %d sleeps with %d locks held, last lock %#p locked at pc %#p, sleep called from %#p\n",
@@ -806,13 +806,13 @@ sleep(Rendez *r, int (*f)(void*), void *arg)
 
 	if(up->notepending) {
 		up->notepending = 0;
-		splx(s);
+		splx(pl);
 		if(up->procctl == Proc_exitme && up->closingfgrp)
 			forceclosefgrp();
 		error(Eintr);
 	}
 
-	splx(s);
+	splx(pl);
 }
 
 static int
@@ -870,10 +870,10 @@ tsleep(Rendez *r, int (*fn)(void*), void *arg, long ms)
 Proc*
 wakeup(Rendez *r)
 {
-	Mreg s;
+	Mpl pl;
 	Proc *p;
 
-	s = splhi();
+	pl = splhi();
 
 	lock(r);
 	p = r->p;
@@ -889,7 +889,7 @@ wakeup(Rendez *r)
 	}
 	unlock(r);
 
-	splx(s);
+	splx(pl);
 
 	return p;
 }
@@ -904,7 +904,7 @@ wakeup(Rendez *r)
 int
 postnote(Proc *p, int dolock, char *n, int flag)
 {
-	Mreg s;
+	Mpl pl;
 	int ret;
 	Rendez *r;
 	Proc *d, **l;
@@ -938,7 +938,7 @@ postnote(Proc *p, int dolock, char *n, int flag)
 
 	/* this loop is to avoid lock ordering problems. */
 	for(;;){
-		s = splhi();
+		pl = splhi();
 		lock(&p->rlock);
 		r = p->r;
 
@@ -959,11 +959,11 @@ postnote(Proc *p, int dolock, char *n, int flag)
 
 		/* give other process time to get out of critical section and try again */
 		unlock(&p->rlock);
-		splx(s);
+		splx(pl);
 		sched();
 	}
 	unlock(&p->rlock);
-	splx(s);
+	splx(pl);
 
 	if(p->state != Rendezvous){
 		if(p->state == Semdown)
@@ -1199,7 +1199,7 @@ pexit(char *exitstr, int freemem)
 
 	/* Sched must not loop for these locks */
 	lock(&procalloc);
-	lock(&palloc);
+	lock(&pga);
 
 	stopac();
 	stopnixproc();
@@ -1268,7 +1268,9 @@ dumpaproc(Proc *p)
 		return;
 
 	bss = 0;
-	if(p->seg[BSEG])
+	if(p->seg[HSEG])
+		bss = p->seg[HSEG]->top;
+	else if(p->seg[BSEG])
 		bss = p->seg[BSEG]->top;
 
 	s = p->psstate;
@@ -1421,7 +1423,7 @@ kproc(char *name, void (*func)(void *), void *arg)
 void
 procctl(Proc *p)
 {
-	Mreg s;
+	Mpl pl;
 	char *state;
 
 	switch(p->procctl) {
@@ -1443,7 +1445,7 @@ procctl(Proc *p)
 		state = p->psstate;
 		p->psstate = "Stopped";
 		/* free a waiting debugger */
-		s = spllo();
+		pl = spllo();
 		qlock(&p->debug);
 		if(p->pdbg) {
 			wakeup(&p->pdbg->sleep);
@@ -1454,7 +1456,7 @@ procctl(Proc *p)
 		p->state = Stopped;
 		sched();
 		p->psstate = state;
-		splx(s);
+		splx(pl);
 		return;
 
 	case Proc_toac:

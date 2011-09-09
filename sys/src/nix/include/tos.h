@@ -1,8 +1,8 @@
 typedef struct Callq Callq;
 typedef struct Nixcall Nixcall;
 typedef struct Nixret Nixret;
-typedef struct Tos Tos;
 typedef struct Plink Plink;
+typedef struct Tos Tos;
 
 #pragma incomplete Plink
 

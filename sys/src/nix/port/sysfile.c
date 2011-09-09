@@ -1577,4 +1577,3 @@ sys_fwstat(Ar0*, va_list)
 {
 	error("old fwstat system call - recompile");
 }
-

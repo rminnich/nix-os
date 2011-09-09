@@ -880,7 +880,7 @@ smbfree(Block *b)
 {
 	Bpool *p;
 
-	b->rp = b->wp = (uchar*)PGROUND((uintptr)b->base);
+	b->rp = b->wp = (uchar*)ROUNDUP((uintptr)b->base, 4*KiB);
  	b->flag &= ~(Bpktck|Btcpck|Budpck|Bipck);
 
 	p = &smpool;
@@ -897,7 +897,7 @@ bgbfree(Block *b)
 {
 	Bpool *p;
 
-	b->rp = b->wp = (uchar*)PGROUND((uintptr)b->base);
+	b->rp = b->wp = (uchar*)ROUNDUP((uintptr)b->base, 4*KiB);
  	b->flag &= ~(Bpktck|Btcpck|Budpck|Bipck);
 
 	p = &bgpool;
@@ -1000,14 +1000,14 @@ open0(Ether *e, Ctlr *c)
 	c->bg.m = entries-1;
 	c->bg.host = emalign(entries * sizeof *c->bg.host);
 
-	sz = c->sm.pool->size + BY2PG;
+	sz = c->sm.pool->size + 4*KiB;
 	for(i = 0; i < c->sm.n; i++){
 		if((b = allocb(sz)) == 0)
 			break;
 		b->free = smbfree;
 		freeb(b);
 	}
-	sz = c->bg.pool->size + BY2PG;
+	sz = c->bg.pool->size + 4*KiB;
 	for(i = 0; i < c->bg.n; i++){
 		if((b = allocb(sz)) == 0)
 			break;

@@ -5,18 +5,28 @@
 #include	"fns.h"
 #include	"../port/error.h"
 
+/*
+ * There's no pager process here.
+ * One process waiting for memory becomes the pager,
+ * during the call to kickpager()
+ */
+
 enum
 {
 	Minpages = 2
 };
 
-Image 	swapimage;
-QLock	pagerlck;
+static QLock	pagerlck;
+static struct
+{
+	ulong ntext;
+	ulong nbig;
+	ulong nall;
+} pstats;
 
 void
 swapinit(void)
 {
-	swapimage.notext = 1;
 }
 
 void
@@ -125,29 +135,25 @@ pageout(Proc *p, Segment *s)
 	return n;
 }
 
-/*
- * Someone thinks memory is needed.
- * Try to page out some text pages and keep on doing so
- * while needpages() and we could do something about it.
- * We ignore prepaged processes in a first pass.
- */
-void
-kickpager(void)
+static void
+pageouttext(int pgszi, int color)
 {
+
 	Proc *p;
+	Pgsza *pa;
 	int i, n, np, x;
 	Segment *s;
 	int prepaged;
-	static int nwant;
 
-	DBG("kickpager() %#p\n", up);
-	if(waserror())
-		panic("error in kickpager");
-	qlock(&pagerlck);
-	if(bigpalloc.freecount > Minpages)
-		goto Done;
+	USED(color);
+	pa = &pga.pgsza[pgszi];
 	n = x = 0;
 	prepaged = 0;
+
+	/*
+	 * Try first to steal text pages from non-prepaged processes,
+	 * then from anyone.
+	 */
 Again:
 	do{
 		if((p = psincref(x)) == nil)
@@ -171,20 +177,131 @@ Again:
 		if(np > 0)
 			DBG("pager: %d from proc #%d %#p\n", np, x, p);
 		x++;
-	}while(bigpalloc.freecount < Minpages);
-	if(bigpalloc.freecount  < Minpages){
-		if(prepaged++ == 0)
-			goto Again;
-		panic("no physical memory");
+	}while(pa->freecount < Minpages);
+
+	if(pa->freecount < Minpages && prepaged++ == 0)
+		goto Again;
+}
+
+static void
+freepages(int si, int once)
+{
+	Pgsza *pa;
+	Page *p;
+
+	for(; si < m->npgsz; si++){
+		pa = &pga.pgsza[si];
+		if(pa->freecount > 0){
+			DBG("kickpager() up %#p: releasing %udK pages\n",
+				up, m->pgsz[si]/KiB);
+			lock(&pga);
+			if(pa->freecount == 0){
+				unlock(&pga);
+				continue;
+			}
+			p = pa->head;
+			pageunchain(p);
+			unlock(&pga);
+			if(p->ref != 0)
+				panic("freepages pa %#ullx", p->pa);
+			pgfree(p);
+			if(once)
+				break;
+		}
 	}
+}
+
+static int
+tryalloc(int pgszi, int color)
+{
+	Page *p;
+
+	p = pgalloc(m->pgsz[pgszi], color);
+	if(p != nil){
+		lock(&pga);
+		pagechainhead(p);
+		unlock(&pga);
+		return 0;
+	}
+	return -1;
+}
+
+/*
+ * Someone thinks pages of size m->pgsz[pgszi] are needed
+ * and is trying to make them available.
+ * Many processes may be calling this at the same time,
+ * in which case they will enter one by one. Only when more than
+ * Minpages are available they will simply return.
+ */
+void
+kickpager(int pgszi, int color)
+{
+	Pgsza *pa;
+
+	if(DBGFLG>1)
+		DBG("kickpager() %#p\n", up);
+	if(waserror())
+		panic("error in kickpager");
+	qlock(&pagerlck);
+	pa = &pga.pgsza[pgszi];
+
+	/*
+	 * First try allocating from physical memory.
+	 */
+	tryalloc(pgszi, color);
+	if(pa->freecount > Minpages)
+		goto Done;
+
+	/*
+	 * If pgszi is <= page size for text (assumed to be 2M)
+	 * try to release text pages.
+	 */
+	if(m->pgsz[pgszi] <= 2*MiB){
+		pstats.ntext++;
+		DBG("kickpager() up %#p: reclaiming text pages\n", up);
+		pageouttext(pgszi, color);
+		tryalloc(pgszi, color);
+		if(pa->freecount > Minpages){
+			DBG("kickpager() found %uld free\n", pa->freecount);
+			goto Done;
+		}
+	}
+
+	/*
+	 * Try releasing memory from one bigger page, perhaps from text
+	 * pages released in the previous step.
+	 */
+	pstats.nbig++;
+	freepages(pgszi+1, 1);
+	while(tryalloc(pgszi, color) != -1 && pa->freecount < Minpages)
+		;
+	if(pa->freecount > 1){
+		DBG("kickpager() found %uld free\n", pa->freecount);
+		goto Done;
+	}
+	/*
+	 * Try releasing memory from all pages.
+	 */
+	pstats.nall++;
+	DBG("kickpager() up %#p: releasing all pages\n", up);
+	freepages(0, 0);
+	tryalloc(pgszi, color);
+	if(pa->freecount > 1){
+		DBG("kickpager() found %uld free\n", pa->freecount);
+		goto Done;
+	}
+	panic("kickpager(): no physical memory");
 Done:
+	poperror();
 	qunlock(&pagerlck);
-	DBG("kickpager() done %#p\n", up);
+	if(DBGFLG>1)
+		DBG("kickpager() done %#p\n", up);
 }
 
 void
 pagersummary(void)
 {
+	print("ntext %uld nbig %uld nall %uld\n",
+		pstats.ntext, pstats.nbig, pstats.nall);
 	print("no swap\n");
 }
-

@@ -57,6 +57,7 @@ void
 syscallfmt(int syscallno, va_list list)
 {
 	long l;
+	ulong ul;
 	Fmt fmt;
 	void *v;
 	vlong vl;
@@ -320,12 +321,26 @@ syscallfmt(int syscallno, va_list list)
 			fmtprint(&fmt, " %lld", vl);
 		}
 		break;
-	case MREAD:
-	case MWRITE:
+	case ZPREAD:
 		i[0] = va_arg(list, int);
 		v = va_arg(list, void*);
 		i[1] = va_arg(list, int);
-		fmtprint(&fmt, "%d %#p %d", i[0], v, i[1]);
+		ul = va_arg(list, usize);
+		vl = va_arg(list, vlong);
+		fmtprint(&fmt, "%d %#p %d %ld %ulld", i[0], v, i[1], ul, vl);
+		break;
+	case ZPWRITE:
+		i[0] = va_arg(list, int);
+		v = va_arg(list, void*);
+		i[1] = va_arg(list, int);
+		vl = va_arg(list, vlong);
+		fmtprint(&fmt, "%d %#p %d %ulld", i[0], v, i[1], vl);
+		break;
+	case ZFREE:
+		v = va_arg(list, void*);
+		i[1] = va_arg(list, int);
+		fmtprint(&fmt, "%#p %d", v, i[1]);
+	case NIXSYSCALL:
 		break;
 	}
 	up->syscalltrace = fmtstrflush(&fmt);

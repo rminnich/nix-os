@@ -70,13 +70,13 @@ xinit(void)
 			n = kpages;
 		if(m->base >= maxkpa)
 			n = 0;
-		else if(n > 0 && m->base+n*BY2PG >= maxkpa)
-			n = (maxkpa - m->base)/BY2PG;
+		else if(n > 0 && m->base+n*PGSZ >= maxkpa)
+			n = (maxkpa - m->base)/PGSZ;
 		/* first give to kernel */
 		if(n > 0){
 			m->kbase = PTR2UINT(KADDR(m->base));
-			m->klimit = PTR2UINT(KADDR(m->base+n*BY2PG));
-			xhole(m->base, n*BY2PG);
+			m->klimit = PTR2UINT(KADDR(m->base+n*PGSZ));
+			xhole(m->base, n*PGSZ);
 			kpages -= n;
 		}
 		/* if anything left over, give to user */
@@ -85,7 +85,7 @@ xinit(void)
 				print("xinit: losing %lud pages\n", m->npage-n);
 				continue;
 			}
-			pm->base = m->base+n*BY2PG;
+			pm->base = m->base+n*PGSZ;
 			pm->npage = m->npage - n;
 			pm++;
 		}

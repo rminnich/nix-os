@@ -376,12 +376,12 @@ iprintcanlock(Lock *l)
 int
 iprint(char *fmt, ...)
 {
-	Mreg s;
+	Mpl pl;
 	int i, n, locked;
 	va_list arg;
 	char buf[PRINTSIZE];
 
-	s = splhi();
+	pl = splhi();
 	va_start(arg, fmt);
 	n = vseprint(buf, buf+sizeof(buf), fmt, arg) - buf;
 	va_end(arg);
@@ -395,7 +395,7 @@ iprint(char *fmt, ...)
 		}
 	if(locked)
 		unlock(&iprintlock);
-	splx(s);
+	splx(pl);
 
 	return n;
 }
@@ -405,7 +405,7 @@ void
 panic(char *fmt, ...)
 {
 	int n;
-	Mreg s;
+	Mpl pl;
 	va_list arg;
 	char buf[PRINTSIZE];
 
@@ -415,7 +415,7 @@ panic(char *fmt, ...)
 		for(;;);
 	panicking = 1;
 
-	s = splhi();
+	pl = splhi();
 	strcpy(buf, "panic: ");
 	va_start(arg, fmt);
 	n = vseprint(buf+strlen(buf), buf+sizeof(buf), fmt, arg) - buf;
@@ -423,11 +423,12 @@ panic(char *fmt, ...)
 	iprint("%s\n", buf);
 	if(consdebug)
 		(*consdebug)();
-	splx(s);
+	splx(pl);
 	prflush();
 	buf[n] = '\n';
 	putstrn(buf, n+1);
 	dumpstack();
+	delay(1000);	/* give time to consoles */
 
 	exit(1);
 }
@@ -485,7 +486,7 @@ pprint(char *fmt, ...)
 static void
 echo(char *buf, int n)
 {
-	Mreg s;
+	Mpl pl;
 	static int ctrlt, pid;
 	char *e, *p;
 
@@ -515,10 +516,10 @@ echo(char *buf, int n)
 		ctrlt = 0;
 		switch(*p){
 		case 'S':
-			s = splhi();
+			pl = splhi();
 			dumpstack();
 			procdump();
-			splx(s);
+			splx(pl);
 			return;
 		case 's':
 			dumpstack();
@@ -542,9 +543,9 @@ echo(char *buf, int n)
 			consdebug();
 			return;
 		case 'p':
-			s = spllo();
+			pl = spllo();
 			procdump();
-			splx(s);
+			splx(pl);
 			return;
 		case 'q':
 			scheddump();
@@ -817,8 +818,8 @@ consread(Chan *c, void *buf, long n, vlong off)
 {
 	ulong l;
 	Mach *mp;
-	char *b, *bp, ch;
-	char tmp[256];		/* must be >= 18*NUMSIZE (Qswap) */
+	char *b, *bp, ch, *s;
+	char tmp[512];		/* Qswap is 381 bytes at clu */
 	int i, k, id, send;
 	long offset;
 
@@ -939,7 +940,7 @@ consread(Chan *c, void *buf, long n, vlong off)
 		return 0;
 
 	case Qsysstat:
-		b = smalloc(MAXMACH*(NUMSIZE*10+2+1) + 1);	/* +1 for NUL */
+		b = smalloc(MACHMAX*(NUMSIZE*10+2+1) + 1);	/* +1 for NUL */
 		bp = b;
 		for(id = 0; id < MACHMAX; id++) {
 			mp = sys->machptr[id];
@@ -992,19 +993,12 @@ consread(Chan *c, void *buf, long n, vlong off)
 		return n;
 
 	case Qswap:
-		l = snprint(tmp, sizeof tmp,
-			"%llud memory\n"
-			"%d pagesize\n"
-			"%llud kernel\n"
-			"%lud/%lud user\n"
-			"%lud/%lud swap\n",
-			(uvlong)conf.npage*BY2PG,
-			BY2PG,
-			(uvlong)conf.npage-conf.upages,
-			palloc.user-palloc.freecount, palloc.user,
-			conf.nswap-swapalloc.free, conf.nswap);
+		tmp[0] = 0;
+		s = seprintpagestats(tmp, tmp + sizeof tmp);
+		s = seprintphysstats(s, tmp + sizeof tmp);
 		b = buf;
-		i = readstr(offset, b, n, tmp);
+		l = s - tmp;
+		i = readstr(offset, b, l, tmp);
 		b += i;
 		n -= i;
 		if(offset > l)

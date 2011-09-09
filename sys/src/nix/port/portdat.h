@@ -16,21 +16,22 @@ typedef struct Image	Image;
 typedef struct Kzio 	Kzio;
 typedef struct Log	Log;
 typedef struct Logflag	Logflag;
+typedef struct Mhead	Mhead;
+typedef struct Mnt	Mnt;
 typedef struct Mntcache Mntcache;
-typedef struct Mount	Mount;
 typedef struct Mntrpc	Mntrpc;
 typedef struct Mntwalk	Mntwalk;
-typedef struct Mnt	Mnt;
-typedef struct Mhead	Mhead;
+typedef struct Mount	Mount;
 typedef struct Note	Note;
 typedef struct Page	Page;
-typedef struct Path	Path;
-typedef struct Palloc	Palloc;
 typedef struct Pallocmem	Pallocmem;
+typedef struct Path	Path;
 typedef struct Perf	Perf;
-typedef struct PhysUart	PhysUart;
+typedef struct Pgalloc Pgalloc;
 typedef struct Pgrp	Pgrp;
+typedef struct Pgsza	Pgsza;
 typedef struct Physseg	Physseg;
+typedef struct PhysUart	PhysUart;
 typedef struct Proc	Proc;
 typedef struct Procalloc	Procalloc;
 typedef struct Pte	Pte;
@@ -42,9 +43,9 @@ typedef struct Rgrp	Rgrp;
 typedef struct RWlock	RWlock;
 typedef struct Schedq	Schedq;
 typedef struct Segment	Segment;
-typedef struct Sems	Sems;
 typedef struct Sem	Sem;
 typedef struct Sema	Sema;
+typedef struct Sems	Sems;
 typedef struct Timer	Timer;
 typedef struct Timers	Timers;
 typedef struct Uart	Uart;
@@ -63,9 +64,6 @@ typedef int    Devgen(Chan*, char*, Dirtab*, int, int, Dir*);
 
 #include <fcall.h>
 
-#ifndef physaddr
-#define	physaddr	uintptr
-#endif
 struct Ref
 {
 	Lock;
@@ -198,7 +196,6 @@ struct Path
 	int	malen;			/* allocated length of mtpt */
 };
 
-
 struct Dev
 {
 	int	dc;
@@ -317,18 +314,18 @@ enum
 struct Page
 {
 	Lock;
-	physaddr	pa;			/* Physical address in memory */
+	uintmem	pa;			/* Physical address in memory */
 	uintptr	va;			/* Virtual address for user */
 	ulong	daddr;			/* Disc address on swap */
 	int	ref;			/* Reference count */
 	uchar	modref;			/* Simulated modify/reference bits */
 	uchar	color;			/* Cache coloring */
-	uchar	lgsize;		/* log2(page size) */
-	char	cachectl[MAXMACH];	/* Cache flushing control for mmuput */
+	char	cachectl[MACHMAX];	/* Cache flushing control for mmuput */
 	Image	*image;			/* Associated text or swap image */
 	Page	*next;			/* Lru free list */
 	Page	*prev;
 	Page	*hash;			/* Image hash chains */
+	int	pgszi;			/* size index in m->pgsz[] */
 };
 
 struct Swapalloc
@@ -355,15 +352,32 @@ struct Image
 //subtype
 	Segment *s;			/* TEXT segment for image if running */
 	Image	*hash;			/* Qid hash chains */
-	Image	*next;			/* Free list */
+	Image	*next;			/* Free list or lru list */
+	Image	*prev;			/* lru list */
 	int	notext;			/* no file associated */
 };
 
+/*
+ *  virtual MMU
+ */
+#define PTEMAPMEM	(1ULL*GiB)
+#define SEGMAPSIZE	1984
+#define SSEGMAPSIZE	16		/* XXX: shouldn't be 32 at least? */
+
+/*
+ * Interface between fixfault and mmuput.
+ */
+#define PTEVALID		(1<<0)
+#define PTEWRITE		(1<<1)
+#define PTERONLY		(0<<1)
+#define PTEUSER		(1<<2)
+#define PTEUNCACHED	(1<<4)
+
 struct Pte
 {
-	Page	*pages[PTEPERTAB];	/* Page map for this chunk of pte */
 	Page	**first;		/* First used entry */
-	Page	**last;			/* Last used entry */
+	Page	**last;		/* Last used entry */
+	Page	*pages[];	/* Page map for this chunk of pte */
 };
 
 /* Segment types */
@@ -395,9 +409,9 @@ struct Physseg
 {
 	ulong	attr;			/* Segment attributes */
 	char	*name;			/* Attach name */
-	physaddr	pa;			/* Physical address */
+	uintmem	pa;			/* Physical address */
 	usize	size;			/* Maximum segment size in pages */
-	uchar	lgpgsize;		/* log2(size of pages in segment) */
+	int	pgszi;			/* Page size index in Mach  */
 	Page	*(*pgalloc)(Segment*, uintptr);	/* Allocation if we need it */
 	void	(*pgfree)(Page*);
 	uintptr	gva;			/* optional global virtual address */
@@ -439,13 +453,17 @@ struct Zseg
 	Rendez	rr;	/* process waiting to read free addresses */
 };
 
+#define NOCOLOR ((uchar)~0)
+
 struct Segment
 {
 	Ref;
 	QLock	lk;
 	ushort	steal;		/* Page stealer lock */
 	ushort	type;		/* segment type */
-	uchar	lgpgsize;	/* log2(size of pages in segment) */
+	int	pgszi;		/* page size index in Mach MMMU */
+	uint	ptepertab;
+	uchar	color;
 	uintptr	base;		/* virtual base */
 	uintptr	top;		/* virtual top */
 	usize	size;		/* size in pages */
@@ -538,24 +556,27 @@ enum
 
 struct Pallocmem
 {
-	physaddr	base;
+	uintmem	base;
 	ulong	npage;
-	ulong	nbigpage;
 };
 
-struct Palloc
+struct Pgsza
+{
+	ulong	freecount;	/* how many pages in the free list? */
+	Ref	npages;		/* how many pages of this size? */
+	Page	*head;		/* MRU */
+	Page	*tail;		/* LRU */
+};
+
+struct Pgalloc
 {
 	Lock;
-	Pallocmem mem[8];
-	Page	*head;			/* most recently used */
-	Page	*tail;			/* least recently used */
-	ulong	freecount;		/* how many pages on free list now */
-	Page	*pages;			/* array of all pages */
-	ulong	user;			/* how many user pages */
-	Page	*hash[PGHSIZE];
+	int	userinit;	/* working in user init mode */
+	Pgsza	pgsza[NPGSZ];	/* allocs for m->npgsz page sizes */
+	Page*	hash[PGHSIZE];	/* only used for user pages */
 	Lock	hashlock;
-	Rendez	r;			/* Sleep for free mem */
-	QLock	pwait;			/* Queue of procs waiting for memory */
+	Rendez	r;		/* sleep for free mem */
+	QLock	pwait;		/* queue of procs waiting for this pgsz */
 };
 
 struct Waitq
@@ -609,10 +630,11 @@ enum
 
 /*
  *  process memory segments - NSEG always last !
+ *  HSEG is a potentially huge bss segment.
  */
 enum
 {
-	SSEG, TSEG, DSEG, BSEG, ESEG, LSEG, SEG1, SEG2, SEG3, SEG4, NSEG
+	SSEG, TSEG, DSEG, BSEG, HSEG, ESEG, LSEG, SEG1, SEG2, SEG3, SEG4, NSEG
 };
 
 enum
@@ -832,6 +854,13 @@ struct Proc
 	int	nqsyscall;	/* # of syscalls in the last quantum */
 	int	nfullq;
 
+	/* might want a struct someday  but this is good for now.
+	 * if that day comes, better use a pointer to a Linux struct, so
+	 * we don't pay the price for all processes.
+	 */
+	int 	linux;		/* bit 0 is "linux emulation". Others debug */
+	int	linuxexec;	/* Plan 9 process starting a Linux process */
+
 	/*
 	 *  machine specific fpu, mmu and notify
 	 */
@@ -870,12 +899,11 @@ extern	int	kbdbuttons;
 extern  Ref	noteidalloc;
 extern	int	nphysseg;
 extern	int	nsyscall;
-extern	Palloc	palloc, bigpalloc;
+extern	Pgalloc pga;
 extern	Physseg	physseg[];
 extern	Procalloc	procalloc;
 extern	uint	qiomaxatomic;
 extern	char*	statename[];
-extern  Image	swapimage;
 extern	char*	sysname;
 extern struct {
 	char*	n;
@@ -1067,13 +1095,11 @@ struct Fastcall {
 	vlong	offset;
 };
 
-
-
 #define DEVDOTDOT -1
 
 #pragma	varargck	type	"I"	uchar*
 #pragma	varargck	type	"V"	uchar*
 #pragma	varargck	type	"E"	uchar*
 #pragma	varargck	type	"M"	uchar*
+#pragma	varargck	type	"W"	u64int
 #pragma	varargck	type	"Z"	Kzio*
-#pragma	varargck	type	"m"	Mreg

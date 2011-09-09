@@ -276,7 +276,6 @@ devzread(Chan *c, Kzio io[], int nio, usize tot, vlong offset)
 		nexterror();
 	}
 	io[0].size = c->dev->read(c, io[0].data, tot, offset);
-	nio = 1;
 	poperror();
 	return 1;
 }

@@ -12,7 +12,8 @@
 static struct Imagealloc
 {
 	Lock;
-	Image	*free;
+	Image	*mru;			/* head of LRU list */
+	Image	*lru;			/* tail of LRU list */
 	Image	*hash[IHASHSIZE];
 	QLock	ireclaim;		/* mutex on reclaiming free images */
 
@@ -27,37 +28,142 @@ static struct {
 	int	loops;			/* times the main loop was run */
 	uvlong	ticks;			/* total time in the main loop */
 	uvlong	maxt;			/* longest time in main loop */
+	int	noluck;			/* # of times we couldn't get one */
+	int	nolock;			/* # of times we couldn't get the lock */
 } irstats;
 
+static void
+dumplru(void)
+{
+	Image *i;
+
+	print("lru:");
+	for(i = imagealloc.mru; i != nil; i = i->next)
+		print(" %p(c%p,r%d)", i, i->c, i->ref);
+	print("\n");
+}
+
+/*
+ * imagealloc and i must be locked.
+ */
+static void
+imageunused(Image *i)
+{
+	if(i->prev != nil)
+		i->prev->next = i->next;
+	else
+		imagealloc.mru = i->next;
+	if(i->next != nil)
+		i->next->prev = i->prev;
+	else
+		imagealloc.lru = i->prev;
+	i->next = i->prev = nil;
+}
+
+/*
+ * imagealloc and i must be locked.
+ */
+static void
+imageused(Image *i)
+{
+	imageunused(i);
+	i->next = imagealloc.mru;
+	i->next->prev = i;
+	imagealloc.mru = i;
+	if(imagealloc.lru == nil)
+		imagealloc.lru = i;
+}
+
+/*
+ * imagealloc must be locked.
+ */
+static Image*
+lruimage(void)
+{
+	Image *i;
+
+	for(i = imagealloc.lru; i != nil; i = i->prev)
+		if(i->c == nil){
+			/*
+			 * i->c will be set before releasing the
+			 * lock on imagealloc, which means it's in use.
+			 */
+			return i;
+		}
+	return nil;
+}
+
+/*
+ * On clu, set conf.nimages = 10 to exercise reclaiming.
+ * It won't be able to get through all of cpurc, but will reclaim.
+ */
 void
 initimage(void)
 {
 	Image *i, *ie;
 
-	imagealloc.free = malloc(conf.nimage*sizeof(Image));
-	if(imagealloc.free == nil)
+	DBG("initimage: %uld images\n", conf.nimage);
+	imagealloc.mru = malloc(conf.nimage*sizeof(Image));
+	if(imagealloc.mru == nil)
 		panic("imagealloc: no memory");
-	ie = &imagealloc.free[conf.nimage-1];
-	for(i = imagealloc.free; i < ie; i++)
+	ie = &imagealloc.mru[conf.nimage];
+	for(i = imagealloc.mru; i < ie; i++){
+		i->c = nil;
+		i->ref = 0;
+		i->prev = i-1;
 		i->next = i+1;
-	i->next = 0;
+	}
+	imagealloc.mru[0].prev = nil;
+	imagealloc.mru[conf.nimage-1].next = nil;
+	imagealloc.lru = &imagealloc.mru[conf.nimage-1];
 	imagealloc.freechan = malloc(NFREECHAN * sizeof(Chan*));
 	imagealloc.szfreechan = NFREECHAN;
+
 }
 
 static void
 imagereclaim(void)
 {
-	uvlong ticks;
+	Image *i;
+	uvlong ticks0, ticks;
 
 	irstats.calls++;
 	/* Somebody is already cleaning the page cache */
 	if(!canqlock(&imagealloc.ireclaim))
 		return;
+	DBG("imagereclaim maxt %ulld noluck %d nolock %d\n",
+		irstats.maxt, irstats.noluck, irstats.nolock);
+	ticks0 = fastticks(nil);
+	if(!canlock(&imagealloc)){
+		/* never happen in the experiments I made */
+		qunlock(&imagealloc.ireclaim);
+		return;
+	}
 
-	ticks = pagereclaim(1000);
+	for(i = imagealloc.lru; i != nil; i = i->prev){
+		if(canlock(i)){
+			i->ref++;	/* make sure it does not go away */
+			unlock(i);
+			pagereclaim(i);
+			lock(i);
+			DBG("imagereclaim: image %p(c%p, r%d)\n", i, i->c, i->ref);
+			if(i->ref == 1){	/* no pages referring to it, it's ours */
+				unlock(i);
+				unlock(&imagealloc);
+				putimage(i);
+				break;
+			}else
+				--i->ref;
+			unlock(i);
+		}
+	}
 
+	if(i == nil){
+		irstats.noluck++;
+		unlock(&imagealloc);
+	}
 	irstats.loops++;
+	ticks = fastticks(nil) - ticks0;
 	irstats.ticks += ticks;
 	if(ticks > irstats.maxt)
 		irstats.maxt = ticks;
@@ -128,14 +234,12 @@ attachimage(int type, Chan *c, uintptr base, usize len)
 	 * imagereclaim dumps pages from the free list which are cached by image
 	 * structures. This should free some image structures.
 	 */
-	while(!(i = imagealloc.free)) {
+	while(!(i = lruimage())) {
 		unlock(&imagealloc);
 		imagereclaim();
 		sched();
 		lock(&imagealloc);
 	}
-
-	imagealloc.free = i->next;
 
 	lock(i);
 	incref(c);
@@ -149,6 +253,7 @@ attachimage(int type, Chan *c, uintptr base, usize len)
 	i->hash = *l;
 	*l = i;
 found:
+	imageused(i);
 	unlock(&imagealloc);
 
 	if(i->s == 0) {
@@ -193,9 +298,6 @@ putimage(Image *i)
 			l = &f->hash;
 		}
 
-		i->next = imagealloc.free;
-		imagealloc.free = i;
-
 		/* defer freeing channel till we're out of spin lock's */
 		if(imagealloc.nfreechan == imagealloc.szfreechan){
 			imagealloc.szfreechan += NFREECHAN;
@@ -207,6 +309,7 @@ putimage(Image *i)
 			imagealloc.freechan = cp;
 		}
 		imagealloc.freechan[imagealloc.nfreechan++] = c;
+		i->c = nil;		/* flag as unused in lru list */
 		unlock(&imagealloc);
 
 		return;

@@ -1,97 +1,15 @@
-
-diff -n /sys/src/nix/k8/dat.h /sys/src/9kronsc/k8/dat.h
-/sys/src/nix/k8/dat.h:26,27 d /sys/src/9kronsc/k8/dat.h:25
-< typedef struct PmcCtr PmcCtr;
-< typedef struct PmcCtl PmcCtl;
-/sys/src/nix/k8/dat.h:188,216 d /sys/src/9kronsc/k8/dat.h:185
-<  * hw perf counters
-<  */
-< struct PmcCtl {
-< 	u32int coreno;
-< 	int enab;
-< 	int user;
-< 	int os;
-< 	int nodesc;
-< 	char descstr[KNAMELEN];
-< 	int reset;
-< };
-< 
-< struct PmcCtr{
-< 	int stale;
-< 	Rendez r;
-< 	u64int ctr;
-< 	int ctrset;
-< 	PmcCtl;
-< 	int ctlset;
-< };
-< 
-< enum {
-< 	PmcMaxCtrs = 4,
-< 	PmcIgn = 0,
-< 	PmcGet = 1,
-< 	PmcSet = 2,
-< };
-< 
-< /*
-/sys/src/nix/k8/dat.h:272,274 d /sys/src/9kronsc/k8/dat.h:240
-< 	Lock pmclock;
-< 	PmcCtr pmc[PmcMaxCtrs];
-< 
-/sys/src/nix/k8/dat.h:328 c /sys/src/9kronsc/k8/dat.h:294
-< #define kmap(p)		(KMap*)(KADDR((p)->pa))
+diff -n /sys/src/nix/port/cache.c /sys/src/nixpa/port/cache.c
+/sys/src/nix/port/cache.c:114 c /sys/src/nixpa/port/cache.c:114
+< //	if(conf.npage*BY2PG > 200*MB)
 ---
-> #define kmap(p)		(KMap*)((p)->pa|kseg0)
-Only in /sys/src/9kronsc/k8: dev.6
-Only in /sys/src/9kronsc/k8: devarch.6
-diff -n /sys/src/nix/k8/devarch.c /sys/src/9kronsc/k8/devarch.c
-/sys/src/nix/k8/devarch.c:37 d /sys/src/9kronsc/k8/devarch.c:36
-< 	Qmapram,
-/sys/src/nix/k8/devarch.c:53 d /sys/src/9kronsc/k8/devarch.c:51
-< 	"mapram",	{ Qmapram, 0 },	0,	0444,
-/sys/src/nix/k8/devarch.c:352 d /sys/src/9kronsc/k8/devarch.c:349
-< 	Map *mp;
-/sys/src/nix/k8/devarch.c:400,433 c /sys/src/9kronsc/k8/devarch.c:397,403
-< 	switch((ulong)c->qid.path){
-< 	case Qioalloc:
-< 		lock(&iomap);
-< 		for(map = iomap.map; n > 0 && map != nil; map = map->next){
-< 			if(offset-- > 0)
-< 				continue;
-< 			sprint(p, "%#8lux %#8lux %-12.12s\n", map->start, map->end-1, map->tag);
-< 			p += Linelen;
-< 			n--;
-< 		}
-< 		unlock(&iomap);
-< 		break;
-< 	case Qmapram:
-< 		USED(mp);
-< /* shit */
-< #ifdef NOTYET
-< 		for(mp = rmapram.map; mp->size; mp++){
-< 			/*
-< 			 * Up to MemMinMiB is already set up.
-< 			 */
-< 			if(mp->addr < MemMinMiB*MiB){
-< 				if(mp->addr+mp->size <= MemMinMiB*MiB)
-< 					continue;
-< 				pa = MemMinMiB*MiB;
-< 				size = mp->size - MemMinMiB*MiB-mp->addr;
-< 			}
-< 			else{
-< 				pa = mp->addr;
-< 				size = mp->size;
-< 			}
-< #endif
-< 		error("Not yet");
-< 	
-< 		break;
+> //	if(conf.npage*PGSZ > 200*MB)
+/sys/src/nix/port/cache.c:116 c /sys/src/nixpa/port/cache.c:116
+< //	if(conf.npage*BY2PG > 400*MB)
 ---
-> 	lock(&iomap);
-> 	for(map = iomap.map; n > 0 && map != nil; map = map->next){
-> 		if(offset-- > 0)
-> 			continue;
-> 		sprint(p, "%#8lux %#8lux %-12.12s\n", map->start, map->end-1, map->tag);
-> 		p += Linelen;
-> 		n--;
-/sys/src/nix/k8/devarch.c:434 a /sys/src/9kronsc/k8/devarch.c:405
-> 	unlock(&iomap);
+> //	if(conf.npage*PGSZ > 400*MB)
+/sys/src/nix/port/cache.c:363 c /sys/src/nixpa/port/cache.c:363
+< 		p = auxpage();
+---
+> 		p = auxpage(BIGPGSZ);
+diff -n /sys/src/nix/port/devcons.c /sys/src/nixpa/port/devcons.c
+/sys/src/nix/po

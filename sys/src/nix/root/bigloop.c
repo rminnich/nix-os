@@ -9,10 +9,10 @@ main(int argc, char *argv[])
 
 	if (argc > 1)
 		num = strtoul(argv[1], 0, 0);
-	print("Try to malloc %ulld bytes in %d loops\n", num*0x200000ULL, num);
+	print("Try to malloc %ulld bytes in %ld loops\n", num*0x200000ULL, num);
 	for(i = 0; i < num; i++)
-		if (mallocz(0x200000, i) == nil){
-			print("%d malloc failed\n", i);
+		if (sbrk(0x200000) == nil){
+			print("%d sbrk failed\n", i);
 			break;
 		}
 	print("Did it\n");

@@ -12,10 +12,10 @@ struct Timers
 	Timer	*head;
 };
 
-static Timers timers[MAXMACH];
+static Timers timers[MACHMAX];
 
-ulong intrcount[MAXMACH];
-ulong fcallcount[MAXMACH];
+ulong intrcount[MACHMAX];
+ulong fcallcount[MACHMAX];
 
 static vlong
 tadd(Timers *tt, Timer *nt)

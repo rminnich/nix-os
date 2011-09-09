@@ -407,6 +407,13 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 		nexterror();
 	}
 	up->seg[ESEG] = newseg(SG_STACK, TSTKTOP-USTKSIZE, USTKSIZE/BIGPGSZ);
+	/*
+	 * The color for the new stack determines the colors for the new segments.
+	 * Even a cached text image changes its color to that of the stack.
+	 * This will make new pages allocated for these segments prefer the color
+	 * for the core where the program will run.
+	 */
+	// up->seg[ESEG]->color = acpicorecolor(core);
 
 	/*
 	 * Stack is a pointer into the temporary stack
@@ -539,11 +546,11 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 	 * Free old memory.
 	 * Special segments maintained across exec.
 	 */
-	for(i = SSEG; i <= BSEG; i++) {
+	for(i = SSEG; i <= HSEG; i++) {
 		putseg(up->seg[i]);
 		up->seg[i] = nil;		/* in case of error */
 	}
-	for(i = BSEG+1; i< NSEG; i++) {
+	for(i = HSEG+1; i< NSEG; i++) {
 		s = up->seg[i];
 		if(s && (s->type&SG_CEXEC)) {
 			putseg(s);
@@ -557,6 +564,7 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 	img = attachimage(SG_TEXT|SG_RONLY, chan, UTZERO, (textlim-UTZERO)/BIGPGSZ);
 	s = img->s;
 	up->seg[TSEG] = s;
+	s->color = up->seg[ESEG]->color;
 	s->flushme = 1;
 	s->fstart = 0;
 	s->flen = hdrsz+textsz;
@@ -565,6 +573,7 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 	/* Data. Shared. */
 	s = newseg(SG_DATA, textlim, (datalim-textlim)/BIGPGSZ);
 	up->seg[DSEG] = s;
+	s->color = up->seg[ESEG]->color;
 
 	/* Attached by hand */
 	incref(img);
@@ -574,6 +583,7 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 
 	/* BSS. Zero fill on demand for TS */
 	up->seg[BSEG] = newseg(SG_BSS, datalim, (bsslim-datalim)/BIGPGSZ);
+	up->seg[BSEG]->color= up->seg[ESEG]->color;
 
 	/*
 	 * Move the stack
@@ -581,6 +591,9 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 	s = up->seg[ESEG];
 	up->seg[ESEG] = nil;
 	up->seg[SSEG] = s;
+	/* the color of the stack was decided when we created it before,
+	 * it may have nothing to do with the color of other segments.
+	 */
 	qunlock(&up->seglock);
 	poperror();				/* seglock */
 

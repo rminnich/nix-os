@@ -1410,7 +1410,7 @@ ndbwrite(Fs *f, char *a, ulong off, int n)
 ulong
 scalednconv(void)
 {
-	if(cpuserver && conf.npage*BY2PG >= 128*MB)
+	if(cpuserver && conf.npage*PGSZ >= 128*MB)
 		return Nchans*4;
 	return Nchans;
 }

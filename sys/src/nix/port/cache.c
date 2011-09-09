@@ -111,9 +111,9 @@ cinit(void)
 	mc = cache.head;
 
 	/* a better algorithm would be nice */
-//	if(conf.npage*BY2PG > 200*MB)
+//	if(conf.npage*PGSZ > 200*MB)
 //		maxcache = 10*MAXCACHE;
-//	if(conf.npage*BY2PG > 400*MB)
+//	if(conf.npage*PGSZ > 400*MB)
 //		maxcache = 50*MAXCACHE;
 
 	for(i = 0; i < NFILE-1; i++) {
@@ -360,7 +360,7 @@ cchain(uchar *buf, ulong offset, int len, Extent **tail)
 		if(e == 0)
 			break;
 
-		p = auxpage();
+		p = auxpage(BIGPGSZ);
 		if(p == 0) {
 			extentfree(e);
 			break;

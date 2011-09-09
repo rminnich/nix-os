@@ -791,7 +791,7 @@ i82563rballoc(void)
 static void
 i82563rbfree(Block* b)
 {
-	b->rp = b->wp = (uchar*)PGROUND((uintptr)b->base);
+	b->rp = b->wp = (uchar*)ROUNDUP((uintptr)b->base, 4*KiB);
  	b->flag &= ~(Bpktck|Btcpck|Budpck|Bipck);
 	ilock(&i82563rblock);
 	b->next = i82563rbpool;
@@ -1255,7 +1255,7 @@ i82563attach(Ether* edev)
 		error(Enomem);
 
 	for(ctlr->nrb = 0; ctlr->nrb < Nrb; ctlr->nrb++){
-		if((bp = allocb(ctlr->rbsz + BY2PG)) == nil)
+		if((bp = allocb(ctlr->rbsz + 4*KiB)) == nil)
 			break;
 		bp->free = i82563rbfree;
 		freeb(bp);

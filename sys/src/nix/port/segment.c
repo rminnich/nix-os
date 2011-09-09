@@ -5,32 +5,56 @@
 #include	"fns.h"
 #include	"../port/error.h"
 
-extern void freezseg(Segment*);
+uintmem
+segppn(Segment *s, uintmem pa)
+{
+	uintmem pgsz;
 
+	pgsz = m->pgsz[s->pgszi];
+	pa &= ~(pgsz-1);
+	return pa;
+}
+
+/*
+ * Sizes are given in multiples of BIGPGSZ.
+ * The actual page size used is either BIGPGSZ or 1*GiB
+ * if base is aligned to 1G and size is >= 1G and we support 1G pages.
+ */
 Segment *
-newseg(int type, uintptr base, usize size)
+newseg(int type, uintptr base, u64int size)
 {
 	Segment *s;
 	int mapsize;
+	uint pgsz;
 
-	if(size > (SEGMAPSIZE*PTEPERTAB))
+	if(size > SEGMAPSIZE*(PTEMAPMEM/BIGPGSZ))
 		error(Enovmem);
 
+	pgsz = BIGPGSZ;
+	if(size*BIGPGSZ >= 1*GiB && getpgszi(1*GiB) >= 0 &&
+	   (base&(1ULL*GiB-1)) == 0 && ((size*BIGPGSZ)&(1ULL*GiB-1)) == 0){
+		DBG("newseg: using 1G pages\n");
+		pgsz = 1*GiB;
+	}
 	s = smalloc(sizeof(Segment));
 	s->ref = 1;
 	s->type = type;
 	s->base = base;
+	s->ptepertab = PTEMAPMEM/pgsz;
 	s->top = base+(size*BIGPGSZ);
 	s->size = size;
-	s->lgpgsize = 0;
+	s->pgszi = getpgszi(pgsz);
+	if(s->pgszi < 0)
+		panic("newseg: getpgszi %d", pgsz);
 	s->sema.prev = &s->sema;
 	s->sema.next = &s->sema;
+	s->color = NOCOLOR;
 
-	mapsize = HOWMANY(size, PTEPERTAB);
+	mapsize = HOWMANY(size*BIGPGSZ/pgsz, s->ptepertab);
 	if(mapsize > nelem(s->ssegmap)){
 		mapsize *= 2;
-		if(mapsize > (SEGMAPSIZE*PTEPERTAB))
-			mapsize = (SEGMAPSIZE*PTEPERTAB);
+		if(mapsize > (SEGMAPSIZE*s->ptepertab))
+			mapsize = (SEGMAPSIZE*s->ptepertab);
 		s->map = smalloc(mapsize*sizeof(Pte*));
 		s->mapsize = mapsize;
 	}
@@ -70,6 +94,7 @@ putseg(Segment *s)
 {
 	Pte **pp, **emap;
 	Image *i;
+	extern void freezseg(Segment*);
 
 	if(s == 0)
 		return;
@@ -177,12 +202,15 @@ dupseg(Segment **seg, int segno, int share)
 		n->image = s->image;
 		n->fstart = s->fstart;
 		n->flen = s->flen;
+		n->pgszi = s->pgszi;
+		n->color = s->color;
+		n->ptepertab = s->ptepertab;
 		break;
 	}
 	size = s->mapsize;
 	for(i = 0; i < size; i++)
 		if(pte = s->map[i])
-			n->map[i] = ptecpy(pte);
+			n->map[i] = ptecpy(n, pte);
 
 	n->flushme = s->flushme;
 	if(s->ref > 1)
@@ -203,12 +231,15 @@ segpage(Segment *s, Page *p)
 {
 	Pte **pte;
 	uintptr soff;
+	uintmem pgsz;
 	Page **pg;
 
-	if(s->lgpgsize == 0)
-		s->lgpgsize = p->lgsize;
-	if(s->lgpgsize != p->lgsize)
-		panic("segpage: s->lgpgsize != p->lgsize");
+	if(s->pgszi < 0)
+		s->pgszi = p->pgszi;
+	if(s->color == NOCOLOR)
+		s->color = p->color;
+	if(s->pgszi != p->pgszi)
+		panic("segpage: s->pgszi != p->pgszi");
 
 	if(p->va < s->base || p->va >= s->top)
 		panic("segpage: p->va < s->base || p->va >= s->top");
@@ -216,9 +247,9 @@ segpage(Segment *s, Page *p)
 	soff = p->va - s->base;
 	pte = &s->map[soff/PTEMAPMEM];
 	if(*pte == 0)
-		*pte = ptealloc();
-
-	pg = &(*pte)->pages[(soff&(PTEMAPMEM-1))/BIGPGSZ];
+		*pte = ptealloc(s);
+	pgsz = m->pgsz[s->pgszi];
+	pg = &(*pte)->pages[(soff&(PTEMAPMEM-1))/pgsz];
 	*pg = p;
 	if(pg < (*pte)->first)
 		(*pte)->first = pg;
@@ -234,11 +265,13 @@ mfreeseg(Segment *s, uintptr start, int pages)
 {
 	int i, j, size;
 	uintptr soff;
+	uintmem pgsz;
 	Page *pg;
 	Page *list;
 
+	pgsz = m->pgsz[s->pgszi];
 	soff = start-s->base;
-	j = (soff&(PTEMAPMEM-1))/BIGPGSZ;
+	j = (soff&(PTEMAPMEM-1))/pgsz;
 
 	size = s->mapsize;
 	list = nil;
@@ -246,11 +279,11 @@ mfreeseg(Segment *s, uintptr start, int pages)
 		if(pages <= 0)
 			break;
 		if(s->map[i] == 0) {
-			pages -= PTEPERTAB-j;
+			pages -= s->ptepertab-j;
 			j = 0;
 			continue;
 		}
-		while(j < PTEPERTAB) {
+		while(j < s->ptepertab) {
 			pg = s->map[i]->pages[j];
 			/*
 			 * We want to zero s->map[i]->page[j] and putpage(pg),
@@ -329,13 +362,14 @@ static void
 prepageseg(int i)
 {
 	Segment *s;
-	uintptr addr;
+	uintptr addr, pgsz;
 
 	s = up->seg[i];
 	if(s == nil)
 		return;
 	DBG("prepage: base %#p top %#p\n", s->base, s->top);
-	for(addr = s->base; addr < s->top; addr += BIGPGSZ)
+	pgsz = m->pgsz[s->pgszi];
+	for(addr = s->base; addr < s->top; addr += pgsz)
 		fault(addr, i == TSEG);
 }
 
