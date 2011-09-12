@@ -3,6 +3,7 @@ typedef void Syscall(Ar0*, va_list);
 Syscall linuxuname;
 Syscall	linuxbrk;
 Syscall linuxopen;
+Syscall linuxclose;
 Syscall syssegbrk;
 Syscall linuxwritev;
 Syscall linuxsocketcall;
@@ -25,12 +26,12 @@ Syscall linuxclone;
 Syscall gasm;
 Syscall linuxcga;
 Syscall getrusage;
-Syscall arch_prctl;
+void arch_prctl(Ar0*,Ureg*,va_list); //see linux_syscall.c
 extern Syscall sys_write;
 extern Syscall sys_read;
 extern Syscall sysopen;
 extern Syscall syspread;
-
+extern Syscall sysclose;
 struct syscall {
 	char*	n;
 	Syscall*f;
@@ -41,7 +42,8 @@ struct syscall {
 struct syscall linuxsystab[] = {
 	[0]	{"read", sys_read, 3, {.i = 0}},
 	[1]		{"write", sys_write, 3, {.i = -1}},
-	[2]		{"linuxopen", sysopen, 2, {.i = -1}},
+	[2]		{"linuxopen", sysopen, 2, {.i = -1}},/* note: can just use sysopen instead of linuxopen! */
+	[3] {"linuxclose", sysclose, 1, {.p = (void *)-1}}, 
 	[102]		{"getuid", linuxgeteuid, 0, {.i = -1}},
 	[12]		{"linuxbrk", linuxbrk, 1, {.i = -1}},
 	[104]		{"getgid", linuxgeteuid, 0, {.i = -1}},
@@ -60,9 +62,9 @@ struct syscall linuxsystab[] = {
 	[20]	{"writev", linuxwritev, 1, {.i = 0}},
 //	[197]	{"fstat64", fstat64, 1, {.i = -1}},
 //	[221]	{"futex", futex, 1, {.i = 0}},
-	[158] {"arch_prctl", arch_prctl, 2, {.p = (void *)-1}},
+	[158] {"arch_prctl", /* fix later */futex, 2, {.p = (void *)-1}},
 
-	[3] {"close", nil, 1, {.p = (void *)-1}},
+/* leave blank lines for things you move up above -- the holes make it easier to see what's been supported. */
 	[4] {"stat", nil, 1, {.p = (void *)-1}},
 	[5] {"fstat", nil, 1, {.p = (void *)-1}},
 	[6] {"lstat", nil, 1, {.p = (void *)-1}},

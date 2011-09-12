@@ -10,6 +10,7 @@
 #include	"../port/pmc.h"
 
 #include	"io.h"
+#include	"amd64.h"
 
 extern int notify(Ureg*);
 
@@ -316,6 +317,11 @@ trap(Ureg* ureg)
 	char buf[ERRMAX];
 	Vctl *ctl, *v;
 
+	vno = ureg->type;
+
+if(m->machno != 0 && m->nixtype != NIXAC)
+print("cpu%d trap %ulld\n", m->machno, ureg->type);
+
 	m->perf.intrts = perfticks();
 	user = userureg(ureg);
 	if(user && (m->nixtype == NIXTC)){
@@ -327,7 +333,6 @@ trap(Ureg* ureg)
 
 	_pmcupdate(m);
 
-	vno = ureg->type;
 	if(ctl = vctl[vno]){
 		if(ctl->isintr){
 			m->intr++;
@@ -437,6 +442,7 @@ dumpgpr(Ureg* ureg)
 	iprint("r15\t%#16.16llux\n", ureg->r15);
 	iprint("ds  %#4.4ux   es  %#4.4ux   fs  %#4.4ux   gs  %#4.4ux\n",
 		ureg->ds, ureg->es, ureg->fs, ureg->gs);
+	iprint("ureg fs\t%#ux\n", *(unsigned int *)&ureg->ds);
 	iprint("type\t%#llux\n", ureg->type);
 	iprint("error\t%#llux\n", ureg->error);
 	iprint("pc\t%#llux\n", ureg->ip);
@@ -445,6 +451,8 @@ dumpgpr(Ureg* ureg)
 	iprint("sp\t%#llux\n", ureg->sp);
 	iprint("ss\t%#llux\n", ureg->ss);
 	iprint("type\t%#llux\n", ureg->type);
+	iprint("FS\t%#llux\n", rdmsr(FSbase));
+	iprint("GS\t%#llux\n", rdmsr(GSbase));
 
 	iprint("m\t%#16.16p\nup\t%#16.16p\n", m, up);
 }
@@ -623,6 +631,7 @@ userpc(Ureg* ureg)
 
 /* This routine must save the values of registers the user is not permitted
  * to write from devproc and then restore the saved values before returning.
+ * TODO: fix this because the segment registers are wrong for 64-bit mode. 
  */
 void
 setregisters(Ureg* ureg, char* pureg, char* uva, int n)

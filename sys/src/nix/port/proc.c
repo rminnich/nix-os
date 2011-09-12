@@ -1339,7 +1339,10 @@ procflushseg(Segment *s)
 
 	/*
 	 *  wait for all processors to take a clock interrupt
-	 *  and flush their mmu's
+	 *  and flush their mmu's.
+	 *  NIX BUG: this won't work if another core is in AC mode.
+	 *  In that case we must IPI it, but only if that core is
+	 *  using this segment.
 	 */
 	for(nm = 0; nm < conf.nmach; nm++)
 		if(MACHP(nm) != m)

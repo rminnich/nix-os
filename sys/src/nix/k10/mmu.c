@@ -18,26 +18,6 @@
 
 #define PPN(x)		((x)&~(PGSZ-1))
 
-/*
- * Nemo: NB:
- * m->pml4 is always the same.
- * sched->procsave->flushtbl zeroes the entries in pml4 up to
- * pml4->daddr (which is the number of entries used by the user, or
- * the index in the upper page table for this entry)
- * the new process will fault and we populate again the page table
- * as needed.
- *
- * mmuptp[0] is used to keep a free list of pages.
- * mmuptp[1-3] are used to keep PT pages for each level
- * 4K pages: pml4 -> lvl3 -> lvl2 -> lvl1 ->pg
- * 2M pages: pml4 -> lvl3 -> lvl2 -> pg
- *
- * Therefore, we can't use pml4 in other processors. Each one
- * has to play the same trick at least, using its own pml4.
- * For NIX, we have to fill up the pml4 of the application core
- * so it wont fault.
- */
-
 void
 mmuflushtlb(u64int)
 {
@@ -211,7 +191,6 @@ mmuswitch(Proc* proc)
 	}
 
 	if(m->pml4->daddr){
-if(proc->ac)print("mmuswitch: clear u for pml4\n");
 		memset(UINT2PTR(m->pml4->va), 0, m->pml4->daddr*sizeof(PTE));
 		m->pml4->daddr = 0;
 	}
@@ -264,15 +243,17 @@ mmurelease(Proc* proc)
  * For 1*GiB pages, we use two levels.
  */
 void
-mmuput(uintptr va, uintmem pa, uint attr, Page *pg)
+mmuput(uintptr va, Page *pg, uint attr)
 {
 	int lvl, user, x, pgsz;
 	PTE *pte;
 	Page *page, *prev;
 	Mpl pl;
+	uintmem pa;
 
 	DBG("up %#p mmuput %#p %#Px %#ux\n", up, va, pa, attr);
 
+	pa = pg->pa;
 	assert(pg->pgszi >= 0);
 	pgsz = m->pgsz[pg->pgszi];
 	if(pa & (pgsz-1))
@@ -506,7 +487,7 @@ vmap(uintptr pa, usize size)
 	uintptr va;
 	usize o, sz;
 
-	print("vmap(%#p, %lud) pc=%#p\n", pa, size, getcallerpc(&pa));
+	DBG("vmap(%#p, %lud) pc=%#p\n", pa, size, getcallerpc(&pa));
 
 	if(m->machno != 0)
 		panic("vmap");
@@ -574,7 +555,7 @@ vunmap(void* v, usize size)
 	 * resources used for the allocation (e.g. page table
 	 * pages).
 	 */
-	print("vunmap(%#p, %lud)\n", v, size);
+	DBG("vunmap(%#p, %lud)\n", v, size);
 }
 
 int

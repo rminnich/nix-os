@@ -180,7 +180,7 @@ void		microdelay(int);
 uvlong		mk64fract(uvlong, uvlong);
 void		mkqid(Qid*, vlong, ulong, int);
 void		mmuflush(void);
-void		mmuput(uintptr, uintmem, uint, Page*);
+void		mmuput(uintptr, Page*, uint);
 void		mmurelease(Proc*);
 void		mmuswitch(Proc*);
 Chan*		mntauth(Chan*, char*);

@@ -118,21 +118,57 @@ squidboy(int apicno)
 		;
 
 	DBG("mach %d is go\n", m->machno);
-	acmmuswitch();
-	decref(&squids);
-	acinit();
-	acsched();
+	switch(m->nixtype){
+	case NIXAC:
+		acmmuswitch();
+		decref(&squids);
+		acinit();
+		acsched();
+		panic("squidboy");
+		break;
+	case NIXTC:
+		/*
+		 * We only need the idt and syscall entry point actually.
+		 * At boot time the boot processor might set our role after
+		 * we have decided to become an AC.
+		 */
+		vsvminit(MACHSTKSZ, NIXTC);
+
+		decref(&squids);
+		/*
+		 * Caution: no clock sync.
+		 */
+		timersinit();
+		lock(&active);
+		active.machs |= 1<<m->machno;
+		unlock(&active);
+ndnr();
+		schedinit();
+		break;
+	}
+	panic("squidboy returns (type %d)", m->nixtype);
 }
 
 static void
 testiccs(void)
 {
 	int i;
+	Mach *mp;
 	extern void testicc(int);
+	char *n[] = {
+		[NIXAC] "AC",
+		[NIXTC] "TC",
+		[NIXKC]	"KC"
+	};
 
 	/* setup arguments for all */
 	for(i = 1; i < MACHMAX; i++)
-		testicc(i);
+		if((mp = sys->machptr[i]) != nil && mp->online != 0){
+			print("cpu%d machno %d role %s\n",
+				i, mp->machno, n[mp->nixtype]);
+		if(mp->nixtype == NIXAC)
+			testicc(i);
+	}
 	print("bootcore: all cores done\n");
 }
 
@@ -156,6 +192,8 @@ nixsquids(void)
 			 */
 			mp->icc = mallocalign(sizeof *m->icc, ICCLNSZ, 0, 0);
 			mp->icc->fn = nil;
+			if(i < 4)
+				mp->nixtype = NIXTC;
 			incref(&squids);
 		}
 	active.thunderbirdsarego = 1;
@@ -250,19 +288,19 @@ main(u32int ax, u32int bx)
 	confinit();
 	archinit();
 	mallocinit();
-	acpiinit();
-	umeminit();
-	trapinit();
 
 	/*
-	 * Printinit will cause the first malloc
-	 * call to happen (printinit->qopen->malloc).
+	 * Acpiinit will cause the first malloc
+	 * call to happen.
 	 * If the system dies here it's probably due
 	 * to malloc not being initialised
 	 * correctly, or the data segment is misaligned
 	 * (it's amazing how far you can get with
 	 * things like that completely broken).
 	 */
+	acpiinit();
+	umeminit();
+	trapinit();
 	printinit();
 
 	/*
@@ -273,7 +311,7 @@ main(u32int ax, u32int bx)
 	 */
 	i8259init(32);
 
-	mpsinit(32);	/* Use at most 6 cores; BUG: use an argument */
+	mpsinit(32);	/* Use at most 32 cores */
 	apiconline();
 	sipi();
 

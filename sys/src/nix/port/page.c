@@ -279,13 +279,6 @@ newpage(int clear, Segment **s, uintptr va, usize size)
 	return p;
 }
 
-/*
- * Caching/free policy imlemented in putpage.
- * Make sure elsewhere that pg->pa low bits are not
- * set e.g. with attribute bits.
- *
- * TODO: change mmuput to take pa from page argument.
- */
 void
 putpage(Page *p)
 {

@@ -51,9 +51,13 @@ struct  rusage {
         long    ru_nivcsw;              /* involuntary " */
 };
 
-/*Linux kerne.org 2.6.35-30-generic #54-Ubuntu SMP Tue Jun 7 18:41:54 UTC 2011 x86_64 GNU/Linux\n*/
 struct utsname linuxutsname = {
-	 "Linux", "mynode", "2.6.35", "NIX", "x86_64", "GNUsucks"
+	/* from a real system */
+	"Linux", 
+	"nix",
+	"2.6.35-30-generic",
+	"#54-Ubuntu SMP Tue Jun 7 18:41:54 UTC 2011", 
+	"x86_64",
 };
 
 void
@@ -78,11 +82,6 @@ linuxuname(Ar0*ar, va_list list)
 	if (up->linux & 128) print("%d:linuxuname va %p\n", up->pid, va);
 	validaddr(va, 1, 1);
 	memmove(va, &linuxutsname, sizeof(linuxutsname));
-	// if this does not work we will need a /proc for bgl 
-	// uname is just such a piece of shit. Some systems want things of the size in the struct,
-	// others don't. Idiots. 
-//#define BULLSHIT "Linux\0 NIX\0 2.6.19\0NIX\0x86_64\0GNUsucks"
-//	memmove(va, BULLSHIT, strlen(BULLSHIT)+1);
 	if (up->linux&128) print("Returns %s\n", linuxutsname.release);
 	ar->i = 0;
 }
@@ -168,8 +167,26 @@ linuxopen(Ar0 *ar0, va_list list)
 	void sysopen(Ar0 *, va_list);
 	aname = va_arg(list, char*);
 	omode = va_arg(list, int);
-	USED(aname,omode);
+	if (up->linux & 128){
+		validaddr(aname, 1, 0);
+		print("%d:linuxopen (%s,%o):", up->pid, aname, omode);
+	}
 	sysopen(ar0, list);
+	if (up->linux & 128) print("=%d\n", ar0->i);
+}
+
+void
+linuxclose(Ar0 *ar0, va_list list)
+{
+	int fd;
+	void sysclose(Ar0 *, va_list);
+
+	fd = va_arg(list, int);
+	if (up->linux & 128)
+		print("%d:linuxclose (%d):", up->pid, fd);
+
+	sysclose(ar0, list);
+	if (up->linux & 128) print("=%d\n", ar0->i);
 }
 
 void

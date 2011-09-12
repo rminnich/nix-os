@@ -31,6 +31,7 @@ void
 linuxsyscall(unsigned int, Ureg* ureg)
 {
 	void noted(Ureg*, uintptr);
+	void arch_prctl(Ar0 *ar, Ureg *ureg, va_list list);
 	unsigned int scallnr;
 	void notify(Ureg *);
 	char *e;
@@ -85,6 +86,11 @@ linuxsyscall(unsigned int, Ureg* ureg)
 
 		up->psstate = linuxsystab[scallnr].n;
 
+		/* note: arch_prctl needs ureg. Unless someone thinks of a better way.
+		 * one way is to change the way we construct linuxargs, 
+		 * and add ureg is scallnr == 158. The current if below is a hack, 
+		 * I know.
+		 */
 		linuxargs[0] = ureg->di;
 		linuxargs[1] = ureg->si;
 		linuxargs[2] = ureg->dx;
@@ -98,7 +104,11 @@ linuxsyscall(unsigned int, Ureg* ureg)
 			print("\n");
 		}
 		if (up->linux&32) dumpregs(ureg);
-		linuxsystab[scallnr].f(&ar0, (va_list)linuxargs);
+		/* this one is special .. sigh */
+		if (scallnr == 158)
+			arch_prctl(&ar0, ureg, (va_list)linuxargs);
+		else
+			linuxsystab[scallnr].f(&ar0, (va_list)linuxargs);
 		if (up->linux & 64){print("AFTER: ");dumpregs(ureg);}
 		poperror();
 	}else{

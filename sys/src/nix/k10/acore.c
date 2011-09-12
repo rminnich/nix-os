@@ -57,6 +57,10 @@ testicc(int i)
 	Mach *mp;
 
 	if((mp = sys->machptr[i]) != nil && mp->online != 0){
+		if(mp->nixtype != NIXAC){
+			print("testicc: core %d is not an AC\n", i);
+			return;
+		}
 		print("calling core %d... ", i);
 		mp->icc->flushtlb = 0;
 		snprint((char*)mp->icc->data, ICCLNSZ, "<%d>", i);

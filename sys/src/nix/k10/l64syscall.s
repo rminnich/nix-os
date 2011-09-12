@@ -134,8 +134,10 @@ dolinuxsyscall:
 	MOVQ	R10, (9*8)(SP)
 	MOVQ	R8, (7*8)(SP)
 	MOVQ	R9, (8*8)(SP)
-
-	MOVW	$SSEL(SiUDS, SsRPL3), (15*8+0)(SP)
+	MOVL	$FSbase, RARG
+	CALL 	rdmsr(SB)
+	MOVL	AX, (10*8+0)(SP) // use the unused R11 slot
+	MOVW	DS, (15*8+0)(SP)
 	MOVW	ES, (15*8+2)(SP)
 	MOVW	FS, (15*8+4)(SP)
 	MOVW	GS, (15*8+6)(SP)
@@ -149,6 +151,7 @@ TEXT linuxsyscallreturn(SB), 1, $-4
 	MOVQ	16(SP), AX			/* Ureg.ax */
 	MOVQ	(16+6*8)(SP), BP		/* Ureg.bp */
 _linuxsyscallreturn:
+	MOVL	(16+10*8)(SP), R11		/* R11 for wrmsr  below */
 	ADDQ	$(17*8), SP			/* registers + arguments */
 	CLI
 	SWAPGS
@@ -156,6 +159,17 @@ _linuxsyscallreturn:
 	MOVW	2(SP), ES
 	MOVW	4(SP), FS
 	MOVW	6(SP), GS
+	PUSHQ AX
+	MOVL	$FSbase, RARG
+	XORQ	CX, CX
+	MOVL	R11, CX
+	PUSHQ	CX
+	/* dummy */
+	PUSHQ	RARG
+	CALL wrmsr(SB)
+	POPQ	AX
+	POPQ	AX
+	POPQ	AX
 
 	MOVQ	24(SP), CX			/* ip */
 	MOVQ	40(SP), R11			/* flags */

@@ -68,7 +68,7 @@ fixfault(Segment *s, uintptr addr, int read, int dommuput)
 	int ref;
 	Pte **p, *etp;
 	uintptr soff;
-	uintmem mmuphys, pgsz;
+	uintmem pgsz;
 	uint mmuattr;
 	Page **pg, *lkp, *new;
 	Page *(*fn)(Segment*, uintptr);
@@ -90,7 +90,6 @@ fixfault(Segment *s, uintptr addr, int read, int dommuput)
 	if(pg > etp->last)
 		etp->last = pg;
 
-	mmuphys = 0;
 	mmuattr = 0;
 	switch(type) {
 	default:
@@ -101,7 +100,6 @@ fixfault(Segment *s, uintptr addr, int read, int dommuput)
 		if(pagedout(*pg))
 			pio(s, addr, soff, pg);
 
-		mmuphys = segppn(s, (*pg)->pa);
 		mmuattr = PTERONLY|PTEVALID;
 		(*pg)->modref = PG_REF;
 		break;
@@ -128,7 +126,6 @@ fixfault(Segment *s, uintptr addr, int read, int dommuput)
 		 *  we're the only user of the segment.
 		 */
 		if(read && conf.copymode == 0 && s->ref == 1) {
-			mmuphys = segppn(s, (*pg)->pa);
 			mmuattr = PTERONLY|PTEVALID;
 			(*pg)->modref |= PG_REF;
 			break;
@@ -155,7 +152,6 @@ fixfault(Segment *s, uintptr addr, int read, int dommuput)
 
 			unlock(lkp);
 		}
-		mmuphys = segppn(s, (*pg)->pa);
 		mmuattr = PTEWRITE|PTEVALID;
 		(*pg)->modref = PG_MOD|PG_REF;
 		break;
@@ -175,7 +171,6 @@ fixfault(Segment *s, uintptr addr, int read, int dommuput)
 			}
 		}
 
-		mmuphys = segppn(s, (*pg)->pa);
 		mmuattr = PTEVALID;
 		if((s->pseg->attr & SG_RONLY) == 0)
 			mmuattr |= PTEWRITE;
@@ -186,9 +181,10 @@ fixfault(Segment *s, uintptr addr, int read, int dommuput)
 	}
 	qunlock(&s->lk);
 
-	if(dommuput)
-		mmuput(addr, mmuphys, mmuattr, *pg);
-
+	if(dommuput){
+		assert(segppn(s, (*pg)->pa) == (*pg)->pa);
+		mmuput(addr, *pg, mmuattr);
+	}
 	return 0;
 }
 
