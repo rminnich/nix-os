@@ -28,7 +28,7 @@ for (PKGNAME in $*) {
 		}
 		cd $PKGROOT^/contrib/packages/^$PKGNAME
 		
-		echo '•••Cleaning for package '^$PKGNAME^'•••'
+		echo '###Cleaning for package '^$PKGNAME^'###'
 		# we're leaving this for now
 		#rm -r root.tgz
 		if (test -e root) {

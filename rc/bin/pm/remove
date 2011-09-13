@@ -21,7 +21,7 @@ if (! test -e $ROOT^/contrib/packages/installed) {
 
 for (PKGNAME in $*) {
 	@{
-		echo '•••Removing package '^$PKGNAME^'•••'
+		echo '###Removing package '^$PKGNAME^'###'
 		
 		# Go to the directory if it exists
 		if (! test -e $PKGROOT^/contrib/packages/^$PKGNAME) {
@@ -38,8 +38,8 @@ for (PKGNAME in $*) {
 			cp /tmp/installed-removed $ROOT^/contrib/packages/installed 
 			# ignore directories, remove regular files first
 			echo -n $PKGNAME^: Removing regular files.
+			echo may take a while. be patient.
 			for (i in `{awk '!/ - 20000000/{print $1}' < db}) {
-				echo -n .
 				#echo rm -f $ROOT^/^$i
 				rm -f $ROOT^/^$i
 			}

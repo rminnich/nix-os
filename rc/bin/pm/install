@@ -14,6 +14,12 @@ if (~ $#PKGSERVER 0) {
 	PKGSERVER=jfloren.net
 }
 
+verb=''
+if(~ $1 -v){
+	verb=-v
+	shift
+}
+
 if (~ $#* 0) {
 	echo Need at least one package name
 	exit 'invalid arg'
@@ -25,7 +31,7 @@ if (! test -e $ROOT^/contrib/packages/installed) {
 
 for (PKGNAME in $*) {
 	@{	
-		echo '•••Installing package '^$PKGNAME^'•••'
+		echo '###Installing package '^$PKGNAME^'###'
 		
 		# Go to the directory if it exists
 		if (! test -e $PKGROOT^/contrib/packages/^$PKGNAME) {
@@ -36,19 +42,19 @@ for (PKGNAME in $*) {
 		
 		# You need to do mk pull before running mk install
 		if (! test -e root.tgz) {
-			echo $PKGNAME^: You must pull first!
-			exit
+			echo $PKGNAME^: pulling
+			if(! pm/pull $PKGNAME){
+				echo pull of $PKGNAME failed >[1=2]
+				exit pull
+			}
 		}
 		if (grep '^'^$PKGNAME^'$' $ROOT^/contrib/packages/installed >[2=1] >/dev/null) { echo $PKGNAME^: already installed}
 		if not {
 			# Install all the dependencies
-			echo $PKGNAME^: Also installing dependencies:
-			for (i in `{cat dep}) {
-				echo '	* '^$i
-			}
 			for (i in `{cat dep}) {
 				if (! grep $i $ROOT^/contrib/packages/installed >[2=1] >/dev/null) {
 					@{
+					echo $PKGNAME^: Also installing dependency: $i
 						cd $PKGROOT^/contrib/packages/$i
 						pm/pull $i
 						pm/install $i
@@ -59,26 +65,9 @@ for (PKGNAME in $*) {
 				}
 			}
 			echo $PKGNAME^: Unpacking the root archive...
-			tar xzf root.tgz
-			for (i in `{ls -p root}) {
-				mkdir -p $ROOT^/$i
-				echo $PKGNAME^: Copying files to $ROOT^/$i
-				dircp root/$i $ROOT^/$i
-			}
-			# set permissions
-			echo -n $PKGNAME^: Setting permissions
-			awk '{ 
-				perm = $3
-				if ($3 ~ /20000000/) {
-					sub(/20000000/, "", perm)
-				} else if ($3 ~ /10000000/) {
-					sub(/10000000/, "", perm)
-				}
-				print "echo -n .;"
-				print "chmod "perm,"'$ROOT^/^'"$1";"		
-				print "chgrp "$5,"'$ROOT^/^'"$1";"
-			}' < db | rc
-			echo
+			tar xzTf root.tgz
+			@{builtin cd root && tar cif /fd/1 .} | @ {builtin cd $ROOT && tar x$verb^Tf /fd/0}
+
 			# inform the world that this package is now installed
 			echo $PKGNAME >> $ROOT^/contrib/packages/installed
 			sort $ROOT^/contrib/packages/installed > /tmp/installed-sorted
