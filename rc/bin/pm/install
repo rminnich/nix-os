@@ -14,15 +14,38 @@ if (~ $#PKGSERVER 0) {
 	PKGSERVER=jfloren.net
 }
 
-verb=''
-if(~ $1 -v){
-	verb=-v
-	shift
+USAGE='usage: install [-v] [-f] package'
+flagfmt='v,f'
+
+if(! ifs=() eval `{aux/getflags $*}) {
+	echo $USAGE
+	exit usage
 }
+verb=''
+force=n
+if(! ~ $#flagv 0) verb=v
+if(! ~ $#flagf 0) force=y
 
 if (~ $#* 0) {
 	echo Need at least one package name
 	exit 'invalid arg'
+}
+
+fn checkoverwrites {
+	 ovw=n
+	 for(f in `{tar ztf root.tgz | grep -v '/$' | sed 's/^root//'}){
+	 	if(test -e $ROOT$f){
+	 		echo $PKGNAME: $f already exists >[1=2]
+			# copy it to .old?
+	 		ovw=y
+	 	}
+	 }
+	 if(~ $ovw y){
+	 	echo aborting because of overwritten files. >[1=2]
+	 	echo run with -f to force install >[1=2]
+	 	exit overwrites
+	 }
+
 }
 
 if (! test -e $ROOT^/contrib/packages/installed) {
@@ -64,10 +87,15 @@ for (PKGNAME in $*) {
 					echo $i^' is already installed, skipping'
 				}
 			}
+			if(! ~ $force y)
+				checkoverwrites
+
 			echo $PKGNAME^: Unpacking the root archive...
 			tar xzTf root.tgz
 			@{builtin cd root && tar cif /fd/1 .} | @ {builtin cd $ROOT && tar x$verb^Tf /fd/0}
-
+			rm -r root
+			tar ztf root.tgz > root.lst
+			rm -f root.tgz
 			# inform the world that this package is now installed
 			echo $PKGNAME >> $ROOT^/contrib/packages/installed
 			sort $ROOT^/contrib/packages/installed > /tmp/installed-sorted
