@@ -25,10 +25,10 @@ struct Nixret
 struct Callq
 {
 	int	ksleep;
-	uint	qr;
-	uint	qw;
-	uint	rr;
-	uint	rw;
+	unsigned int	qr;
+	unsigned int	qw;
+	unsigned int	rr;
+	unsigned int	rw;
 	Nixcall q[CALLQSZ];
 	Nixret	r[CALLQSZ];
 };

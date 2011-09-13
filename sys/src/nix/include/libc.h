@@ -359,7 +359,7 @@ extern	uintptr	getcallerpc(void*);
 extern	char*	getenv(char*);
 extern	int	getfields(char*, char**, int, int, char*);
 extern	int	gettokens(char *, char **, int, char *);
-extern	int	getcore(int*);
+extern	int	getcpucore(int*);
 extern	char*	getuser(void);
 extern	char*	getwd(char*, int);
 extern	int	iounit(int);
@@ -716,11 +716,11 @@ struct Zio
 };
 
 /* kernel interface */
-extern	void	zfree(Zio io[], int nio);
-extern	int	zpread(int fd, Zio io[], int nio, usize count, vlong offset);
-extern	int	zwrite(int fd, Zio io[], int nio);
-extern	int	zread(int fd, Zio io[], int nio, usize count);
-extern	int	zpwrite(int fd, Zio io[], int nio, vlong offset);
+extern	void	zcfree(Zio io[], int nio);
+extern	int	zcpread(int fd, Zio io[], int nio, usize count, vlong offset);
+extern	int	zcwrite(int fd, Zio io[], int nio);
+extern	int	zcread(int fd, Zio io[], int nio, usize count);
+extern	int	zcpwrite(int fd, Zio io[], int nio, vlong offset);
 
 
 /*

@@ -56,7 +56,7 @@ struct Alt {
 };
 
 struct Ref {
-	long	ref;
+	int	ref;
 };
 
 int	alt(Alt alts[]);
