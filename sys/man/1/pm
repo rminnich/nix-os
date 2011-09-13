@@ -1,0 +1,123 @@
+.TH PM 1
+.SH NAME
+install, list, pull, clean, depclean, remove \- package management scripts
+.SH SYNOPSIS
+.B pm/install
+.I category/name
+.br
+.B pm/list
+[
+.B -i
+|
+.B -v
+]
+[
+.I category
+]
+.br
+.B pm/pull
+.I category/name
+.br
+.B pm/clean
+.I category/name
+.br
+.B pm/depclean
+.I category/name
+.br
+.B contrib/remove
+.I category/name
+.SH DESCRIPTION
+.I PM 
+is a package management system inspired by
+.IR contrib
+and
+.IR 9pm ,
+but with greater focus on speed and maintainability. Packages are stored as
+.B .tgz
+files on an HTTP server, rather than as discrete files on sources, for improved speed. Packages do not install sources to
+.B /sys/src;
+rather, sources are placed in 
+.B /contrib/src,
+to keep the
+.B /sys/src
+tree clean.
+.PP
+Packages are described by a category and a name. Categories include 
+.I devel,
+.I lib,
+and
+.I network.
+Package names include
+.I mercurial,
+.I openssl,
+and
+.I openssh.
+A full accounting of categories may be obtained by simply listing the directories in
+.IR /contrib/packages/ .
+Listing of individual packages is accomplished through the
+.B pm/list
+command.
+.TP
+.I pm/install 
+Installs the package and any necessary dependencies. The specified package will be automatically downloaded using the
+.B pm/pull
+command, as will any dependencies.
+.TP
+.I pm/list
+List the available packages, one per line, with no additional description, suitable for further processing. The
+.B -i
+option gives a listing of all currently installed packages. The
+.B -v
+option gives a description of each package. If a category is specified, only packages under that category are listed.
+.TP
+.I pm/pull
+Download the specified package from the package repository. This is not necessary for installation tasks, but may be of interest if you wish to examine the package prior to installing.
+.TP
+.I pm/clean
+Removes downloaded files for the specified package, to save space.
+.TP
+.I pm/depclean
+Cleans up the specified packages and all of its dependencies, recursively.
+.TP
+.I pm/remove
+Deletes files installed by the specified package. Does not remove dependency packages, as they may be needed by other packages.
+.SH EXAMPLES
+.LP
+Install Mercurial.
+.sp 1
+.EX
+% pm/pull devel/mercurial
+% pm/install devel/mercurial
+.EE
+.PP
+Remove the downloaded tar files and any temporary directories created in the process of installing Mercurial and its dependencies.
+.sp 1
+.EX
+% pm/depclean devel/mercurial
+.EE
+.PP
+Remove Mercurial, leaving any dependencies installed.
+.sp 1
+.EX
+% pm/remove devel/mercurial
+.EE
+.SH FILES
+.TP
+.B /contrib/packages/installed
+listing of currently installed packages.
+.TP
+.B /contrib/packages/*
+directories representing package categories.
+.TP
+.B /contrib/packages/*/*
+directories for individual packages.
+.SH SOURCE
+.B /rc/bin/pm
+.SH SEE ALSO
+.IR proto (2),
+.IR replica (1),
+.IR replica (8),
+.IR contrib (1),
+.SH BUGS
+Send bug reports to
+.I john@jfloren.net
