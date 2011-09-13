@@ -3,6 +3,9 @@
 install, list, pull, clean, depclean, remove \- package management scripts
 .SH SYNOPSIS
 .B pm/install
+[
+.B -f
+]
 .I category/name
 .br
 .B pm/list
@@ -61,7 +64,9 @@ command.
 .I pm/install 
 Installs the package and any necessary dependencies. The specified package will be automatically downloaded using the
 .B pm/pull
-command, as will any dependencies.
+command, as will any dependencies. By default, existing files will not be overwritten. The
+.B -f
+option forces the overwriting of existing files.
 .TP
 .I pm/list
 List the available packages, one per line, with no additional description, suitable for further processing. The
@@ -73,12 +78,6 @@ option gives a description of each package. If a category is specified, only pac
 .I pm/pull
 Download the specified package from the package repository. This is not necessary for installation tasks, but may be of interest if you wish to examine the package prior to installing.
 .TP
-.I pm/clean
-Removes downloaded files for the specified package, to save space.
-.TP
-.I pm/depclean
-Cleans up the specified packages and all of its dependencies, recursively.
-.TP
 .I pm/remove
 Deletes files installed by the specified package. Does not remove dependency packages, as they may be needed by other packages.
 .SH EXAMPLES
@@ -86,14 +85,7 @@ Deletes files installed by the specified package. Does not remove dependency pac
 Install Mercurial.
 .sp 1
 .EX
-% pm/pull devel/mercurial
 % pm/install devel/mercurial
-.EE
-.PP
-Remove the downloaded tar files and any temporary directories created in the process of installing Mercurial and its dependencies.
-.sp 1
-.EX
-% pm/depclean devel/mercurial
 .EE
 .PP
 Remove Mercurial, leaving any dependencies installed.
