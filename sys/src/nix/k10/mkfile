@@ -100,3 +100,7 @@ sipi.h:		l64sipi.$O
 	     -e '1,2d' -e '3s/^ .. .. .. .. .. .. .. ..//'	\
 	     -e 's/ ([0-9a-f][0-9a-f])/0x\1,/g'
 	 echo '};'} > $target
+
+../root/nvram: 
+	dd -if /dev/zero -of ../root/nvram -bs 512 -count 1
+	nvram=../root/nvram auth/wrkey
