@@ -19,6 +19,10 @@ if (~ $#* 0) {
 	exit 'invalid arg'
 }
 
+if (! test -e $ROOT^/contrib/packages/installed) {
+	touch $ROOT^/contrib/packages/installed
+}
+
 for (PKGNAME in $*) {
 	@{	
 		echo '•••Installing package '^$PKGNAME^'•••'

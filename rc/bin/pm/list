@@ -41,6 +41,10 @@ fn doprint {
 		}
 }
 
+if (! test -e $ROOT^/contrib/packages/installed) {
+	touch $ROOT^/contrib/packages/installed
+}
+
 if (~ $INSTALLED 1) {
 	@{ cd $PKGROOT^/contrib/packages/
 		if (~ $VERBOSE 1) echo '======================'
