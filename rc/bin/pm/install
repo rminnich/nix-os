@@ -67,33 +67,17 @@ for (PKGNAME in $*) {
 			}
 			# set permissions
 			echo -n $PKGNAME^: Setting permissions
-			for (i in `{cat db | awk '{print $1}'}) {
-				echo -n .
-				perm = `{grep '^'^$i^' ' db | sed 1q | awk '{print $3}'}
-				group = `{grep '^'^$i^' ' db | sed 1q | awk '{print $5}'}
-				# to the best of my knowledge, a file can be:
-				# a directory XOR (append-only OR exclusive-access)
-				# I'm leaving exclusive access alone
-				# bugger off with your switch statements
-				if (~ $perm 20000000[0-9]*) {
-					#echo chmod `{echo $perm | sed 's/20000000//g'} $ROOT^/$i
-					chmod `{echo $perm | sed 's/20000000//g'} $ROOT^/$i
+			awk '{ 
+				perm = $3
+				if ($3 ~ /20000000/) {
+					sub(/20000000/, "", perm)
+				} else if ($3 ~ /10000000/) {
+					sub(/10000000/, "", perm)
 				}
-				if not {
-					if (~ $perm 10000000[0-9]*) {
-						#echo chmod +a $ROOT^/$i
-						chmod +a $ROOT^/$i
-						#echo chmod `{echo $perm | sed 's/10000000//g'} $ROOT^/$i
-						chmod `{echo $perm | sed 's/10000000//g'} $ROOT^/$i
-					}
-					if not {
-						#echo chmod $perm $ROOT^/$i
-						chmod $perm $ROOT^/$i
-					}
-				}
-				#echo chgrp $group $ROOT^/$i
-				chgrp $group $ROOT^/$i
-			}
+				print "echo -n .;"
+				print "chmod "perm,"'$ROOT^/^'"$1";"		
+				print "chgrp "$5,"'$ROOT^/^'"$1";"
+			}' < db | rc
 			echo
 			# inform the world that this package is now installed
 			echo $PKGNAME >> $ROOT^/contrib/packages/installed
