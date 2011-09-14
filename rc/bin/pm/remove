@@ -36,25 +36,22 @@ for (PKGNAME in $*) {
 		if not {
 			grep -v '^'^$PKGNAME^'$' $ROOT^/contrib/packages/installed> /tmp/installed-removed
 			cp /tmp/installed-removed $ROOT^/contrib/packages/installed 
-			# ignore directories, remove regular files first
-			echo -n $PKGNAME^: Removing regular files.
-			echo may take a while. be patient.
-			for (i in `{awk '!/ - 20000000/{print $1}' < db}) {
-				#echo rm -f $ROOT^/^$i
-				rm -f $ROOT^/^$i
+
+			rms=()
+			files=''
+			if(test -e root.tgz)
+				files=`{tar ztf root.tgz}
+			if not
+				files=`{cat root.lst}
+			for(f in $files){
+				rms=($f $rms)
 			}
-		
-			echo
-		
-			# remove empty directories only
-			# we have to reverse the file first, that's what the first sed is doing
-			dirs=`{awk '/ - 20000000/{print $1}' db | sed '1!G;h;$!d'}
-			echo $PKGNAME^: Removing directories
-			for (i in $dirs) {
-				if (test -e $ROOT^/^$i && ~ `{ls $ROOT^/^$i} '') {
-					#echo rm -rf $ROOT^/$i
-					rm -rf $ROOT^/^$i
-				}
+			for(f in $rms){
+				if(~ $ROOT /)
+					echo rm -f $f
+				if not
+					echo rm -f $ROOT$f
+				rm -f $ROOT$f
 			}
 		}
 	}
