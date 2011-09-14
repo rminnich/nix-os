@@ -1,5 +1,0 @@
-TEXT dup(SB), 1, $0
-MOVQ RARG, a0+0(FP)
-MOVQ $5, RARG
-SYSCALL
-RET

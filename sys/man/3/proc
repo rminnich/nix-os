@@ -7,6 +7,7 @@ proc \- running processes
 .sp 0.3v
 .B /proc/trace
 .BI /proc/ n /args
+.BI /proc/ n /core
 .BI /proc/ n /ctl
 .BI /proc/ n /fd
 .BI /proc/ n /fpregs
@@ -53,6 +54,10 @@ can be accessed through
 Writes are permitted only while the process is in the
 .B Stopped
 state and only to user addresses or registers.
+.PP
+The read-only
+.B core
+file contains the AC number for the process, or 0 if the process is at a TC.
 .PP
 The read-only
 .B proc
@@ -136,6 +141,12 @@ the amount of memory used by the process, except its stack,
 in units of 1024 bytes
 .IP \-
 the base and current scheduling priority, each 11 character numbers
+.IP \-
+the number of traps for the process
+.IP \-
+the number of system calls made by the process
+.IP \-
+the number of inter-core calls made by the process.
 .PP
 The read-only
 .B args
@@ -334,6 +345,17 @@ Set the base priority for the process to the integer
 Wire the process to processor
 .IR n .
 .TP 10n
+.B "core\ \fIn
+Send the process to AC number
+.IR n ,
+if
+.I n
+is greater than zero. Send it back to a TC if
+.I n
+is zero. Send the process to any AC if
+.I n
+is less than zero.
+.TP 10n
 .B trace
 Without an argument, toggle trace event generation for this process into
 .B /proc/trace
@@ -397,7 +419,7 @@ command below contains further details.
 .TP 10n
 .B "yieldonblock
 Make the real-time process yield on blocking I/O.
-The description of the
+  The description of the
 .B admit
 command below contains further details.
 .TP 10n

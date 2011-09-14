@@ -1,4 +1,4 @@
-.TH CONS 3
+.TH CONS 3 
 .SH NAME
 cons \- console, clocks, process/process group ids, user, null, reboot, etc.
 .SH SYNOPSIS
@@ -262,7 +262,7 @@ If the binary number fits in 32 bits, it is formatted as an
 leading blanks and one trailing blank; totaling 12 bytes.
 Otherwise, it
 is formatted as 21 digit decimal numbers with leading blanks and one
-trailing blank; totaling 22 bytes.
+trailing blank; totaling 22 bytes.  
 .PP
 The
 .B cputime
@@ -295,6 +295,8 @@ TLB faults, TLB purges, load average, idle time and time spent servicing interru
 The load average is in units of milli-CPUs and is decayed over time;
 idle time and interrupt time are percentage units;
 the others are total counts from boot time.
+Afer these 10 numbers, the number of core and the role for the core (TC, AC, or KC)
+is shown.
 If the machine is a multiprocessor,
 .B sysstat
 holds one line per processor.

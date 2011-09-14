@@ -1,6 +1,6 @@
 .TH EXEC 2
 .SH NAME
-exec, execl, _privates, _nprivates, _tos \- execute a file
+exec, execl, execac, _privates, _nprivates, _tos \- execute a file
 .SH SYNOPSIS
 .B #include <u.h>
 .br
@@ -12,6 +12,9 @@ void* exec(char *name, char* argv[])
 .PP
 .B
 void* execl(char *name, ...)
+.PP
+.B
+void* execac(int core, char *name, char* argv[])
 .PP
 .B
 void	**_privates;
@@ -92,6 +95,19 @@ will be an array of the parameters that follow
 in the call.  The last argument to
 .I execl
 must be a null pointer.
+.PP
+.I Execac
+is like
+.I exec
+except that it moves the process to an AC. When
+.I core
+is zero, the process is allocated to a TC. When
+.I core
+is positive, the process is allocated to that particular core number
+(using an AC role). When
+.I core
+is less than zero, the kernel picks a suitable core (with the AC role)
+for the process.
 .PP
 For a file beginning
 .BR #! ,

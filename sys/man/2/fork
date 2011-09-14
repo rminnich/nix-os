@@ -42,7 +42,7 @@ the set of rendezvous tags
 and open files.
 .I Flags
 is the logical OR of some subset of
-.TF RFCNAMEG
+.TF RFCPREPAGE
 .TP
 .B RFPROC
 If set a new process is created; otherwise changes affect the
@@ -130,6 +130,20 @@ Otherwise, the child inherits a copy of those segments.
 Other segment types, in particular stack segments, will be unaffected.
 May be set only with
 .BR RFPROC .
+.TP
+.B RFPREPAGE
+If set, the process (or the child) sets a flag so that any future segment
+attached are prepaged. The flag is inherited by descendants. Segments
+of the process making the call are also prepaged, but see the bugs section.
+.TP
+.B RFCPREPAGE
+clears the previous flag.
+.TP
+.B RFCORE
+If set, the process moves to an AC.
+.TP
+.B RFCCORE
+If set, the process moves to a TC.
 .PD
 .PP
 File descriptors in a shared file descriptor table are kept
@@ -164,3 +178,11 @@ is just a call of
 .SH DIAGNOSTICS
 These functions set
 .IR errstr .
+.SH BUGS
+The
+.B RFPREPAGE
+flag combined with
+.B RFPROC
+should prepage all memory in the child process. As of now, it is not
+doing so (it always prepages the memory of the caller process). The
+flag to prepaginate further attachments is handled correctly in any case.

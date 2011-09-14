@@ -1,5 +1,0 @@
-TEXT mount(SB), 1, $0
-MOVQ RARG, a0+0(FP)
-MOVQ $46, RARG
-SYSCALL
-RET

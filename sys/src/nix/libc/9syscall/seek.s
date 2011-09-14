@@ -1,5 +1,0 @@
-TEXT _seek(SB), 1, $0
-MOVQ RARG, a0+0(FP)
-MOVQ $39, RARG
-SYSCALL
-RET
