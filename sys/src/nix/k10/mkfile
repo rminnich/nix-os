@@ -30,8 +30,6 @@ $p$CONF.gz:	$p$CONF
 install:V:	$p$CONF $p$CONF.gz
 	cp $p$CONF /$objtype/$p$CONF 
 	cp $p$CONF.gz /$objtype/$p$CONF.gz
-	cp $p$CONF /n/9/$objtype/$p$CONF 
-	cp $p$CONF.gz /n/9/$objtype/$p$CONF.gz
 
 init.out:	init9.$O initcode.$O /$objtype/lib/libc.a
 	$LD -l -R1 -s -o init.out init9.$O initcode.$O -lc
