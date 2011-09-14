@@ -14,22 +14,33 @@ if (~ $#PKGSERVER 0) {
 	PKGSERVER=jfloren.net
 }
 
-if (~ $#* 0) {
-	echo Need at least one package name
-	exit 'invalid arg'
+fn fail {
+	echo $* >[1=2]
+	exit fail
 }
 
-for (PKGNAME in $*) {
+if (~ $#* 0) {
+	fail Need at least one package name
+}
+
+cd $PKGROOT^/contrib/packages || exit 'dir not found'
+names=()
+for(name in $*) {
+	if(~ $name */*){
+		names=($names $name)
+	}
+	if not {
+		names=($names $name/*)
+	}
+}
+for (PKGNAME in $names) {
 	@{	
 		# Go to the directory if it exists
-		if (! test -e $PKGROOT^/contrib/packages/^$PKGNAME) {
-			echo $PKGNAME^: No such package found in $PKGROOT^/contrib/packages/^$PKGNAME
-			exit 'no such package'
-		}
-		cd $PKGROOT^/contrib/packages/^$PKGNAME
+		cd $PKGROOT^/contrib/packages/^$PKGNAME || fail $PKGNAME: No such package in $PKGROOT^/contrib/packages
 		
 		echo -n Fetching root.tgz...
-		hget -o root.tgz http://^$PKGSERVER^/contrib/packages/^$PKGNAME^/root.tgz 
+		hget -o root.tgz http://^$PKGSERVER^/contrib/packages/^$PKGNAME^/root.tgz || fail hget failed
 		echo Done.
 	}
 }
+exit ''

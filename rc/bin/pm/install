@@ -23,8 +23,15 @@ if(! ifs=() eval `{aux/getflags $*}) {
 }
 verb=''
 force=n
-if(! ~ $#flagv 0) verb=v
-if(! ~ $#flagf 0) force=y
+flags=''
+if(! ~ $#flagv 0) {
+	verb=v
+	flags=-v
+}
+if(! ~ $#flagf 0) {
+	force=y
+	flags=($flags -f)
+}
 
 if (~ $#* 0) {
 	echo Need at least one package name
@@ -48,30 +55,40 @@ fn checkoverwrites {
 
 }
 
+fn fail {
+	echo $* >[1=2]
+	exit fail
+}
+
 if (! test -e $ROOT^/contrib/packages/installed) {
 	touch $ROOT^/contrib/packages/installed
 }
 
-for (PKGNAME in $*) {
-	@{	
+cd $PKGROOT^/contrib/packages || exit 'dir not found'
+names=()
+for(name in $*) {
+	if(~ $name */*){
+		names=($names $name)
+	}
+	if not {
+		names=($names $name/*)
+	}
+}
+for (PKGNAME in $names) {
+	@{
 		echo '###Installing package '^$PKGNAME^'###'
 		
 		# Go to the directory if it exists
-		if (! test -e $PKGROOT^/contrib/packages/^$PKGNAME) {
-			echo $PKGNAME^: No such package found in $PKGROOT^/contrib/packages/^$PKGNAME
-			exit 'no such package'
-		}
-		cd $PKGROOT^/contrib/packages/^$PKGNAME
+		cd $PKGROOT^/contrib/packages/^$PKGNAME || fail $PKGNAME: No such package in $PKGROOT^/contrib/packages
 		
 		# You need to do mk pull before running mk install
 		if (! test -e root.tgz) {
 			echo $PKGNAME^: pulling
-			if(! pm/pull $PKGNAME){
-				echo pull of $PKGNAME failed >[1=2]
-				exit pull
-			}
+			pm/pull $PKGNAME || fail $PKGNAME: pull failed
 		}
-		if (grep '^'^$PKGNAME^'$' $ROOT^/contrib/packages/installed >[2=1] >/dev/null) { echo $PKGNAME^: already installed}
+		if (grep '^'^$PKGNAME^'$' $ROOT^/contrib/packages/installed >[2=1] >/dev/null) {
+			echo $PKGNAME^: already installed, skipping.
+		}
 		if not {
 			# Install all the dependencies
 			for (i in `{cat dep}) {
@@ -79,8 +96,8 @@ for (PKGNAME in $*) {
 					@{
 					echo $PKGNAME^: Also installing dependency: $i
 						cd $PKGROOT^/contrib/packages/$i
-						pm/pull $i
-						pm/install $i
+						pm/pull $i || fail $i: pull failed
+						pm/install $i || fail $i: install failed
 					}
 				} 
 				if not {
@@ -90,17 +107,19 @@ for (PKGNAME in $*) {
 			if(! ~ $force y)
 				checkoverwrites
 
-			echo $PKGNAME^: Unpacking the root archive...
-			tar xzTf root.tgz
-			@{builtin cd root && tar cif /fd/1 .} | @ {builtin cd $ROOT && tar x$verb^Tf /fd/0}
-			rm -r root
-			tar ztf root.tgz > root.lst
+			echo $PKGNAME: Unpacking the root archive...
+			tar xzTf root.tgz || fail $PKGNAME: unpack failed.
+			test -d root || fail $PKGNAME: root not found.
+			{ @{builtin cd root && tar cif /fd/1 .} | @ {builtin cd $ROOT && tar x$verb^Tf /fd/0}
+			} || fail  $PKGNAME: unpack failed.
+			rm -fr root
+			tar ztf root.tgz > root.lst || fail $PKGNAME: list.
 			rm -f root.tgz
 			# inform the world that this package is now installed
 			echo $PKGNAME >> $ROOT^/contrib/packages/installed
-			sort $ROOT^/contrib/packages/installed > /tmp/installed-sorted
-			mv /tmp/installed-sorted $ROOT^/contrib/packages/installed
-			echo $PKGNAME^: successfully installed.
+			sort $ROOT^/contrib/packages/installed > $ROOT^/contrib/packages/installed.new
+			mv $ROOT^/contrib/packages/installed.new $ROOT^/contrib/packages/installed
+			echo $PKGNAME^: installed.
 		}
 	}
 }

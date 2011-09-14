@@ -2,6 +2,11 @@
 
 rfork en
 
+fn fail {
+	echo $* >[1=2]
+	exit fail
+}
+
 if (~ $#PKGROOT 0) {
 	PKGROOT=/
 }
@@ -19,16 +24,22 @@ if (! test -e $ROOT^/contrib/packages/installed) {
 	touch $ROOT^/contrib/packages/installed
 }
 
-for (PKGNAME in $*) {
+cd $PKGROOT^/contrib/packages || exit 'dir not found'
+names=()
+for(name in $*) {
+	if(~ $name */*){
+		names=($names $name)
+	}
+	if not {
+		names=($names $name/*)
+	}
+}
+for (PKGNAME in $names) {
 	@{
 		echo '###Removing package '^$PKGNAME^'###'
 		
 		# Go to the directory if it exists
-		if (! test -e $PKGROOT^/contrib/packages/^$PKGNAME) {
-			echo $PKGNAME^: No such package found in $PKGROOT^/contrib/packages/^$PKGNAME
-			exit 'no such package'
-		}
-		cd $PKGROOT^/contrib/packages/^$PKGNAME
+		cd $PKGROOT^/contrib/packages/^$PKGNAME || fail $PKGNAME: No such package in $PKGROOT^/contrib/packages
 		
 		if (! grep $PKGNAME $ROOT^/contrib/packages/installed >[2=1] >/dev/null) { 
 			echo $PKGNAME^: Already removed!
@@ -56,3 +67,4 @@ for (PKGNAME in $*) {
 		}
 	}
 }
+exit ''
