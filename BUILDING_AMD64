@@ -1,0 +1,10 @@
+
+cd /sys/src
+objtype=386
+mk libs
+cd ape/lib
+mk install
+cd /sys/src
+objtype=amd64
+mk install
+
