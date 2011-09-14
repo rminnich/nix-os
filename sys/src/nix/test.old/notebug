@@ -1,6 +1,0 @@
-Delete
-intrac: ipi to cpu1
-actrap: cpu1: IPI
-runacore: trap
-
-

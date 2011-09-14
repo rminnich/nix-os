@@ -1,3 +1,0 @@
-#!/bin/rc
-6.test* -c 2 6.ainf &
-echo did it crash'?'
