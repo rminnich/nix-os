@@ -55,3 +55,11 @@ _cas64r1:
 _cas64r0:
 	DECL	AX
 	RET
+
+/*
+ * void mfence(void);
+ */
+TEXT mfence(SB),0,$0
+	MFENCE
+	RET
+

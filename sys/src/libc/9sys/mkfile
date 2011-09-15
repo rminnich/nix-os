@@ -20,12 +20,14 @@ OFILES=\
 	dirwstat.$O\
 	fcallfmt.$O\
 	fork.$O\
-	getnetconninfo.$O\
+	getcore.$O\
 	getenv.$O\
+	getnetconninfo.$O\
 	getpid.$O\
 	getppid.$O\
 	getwd.$O\
 	iounit.$O\
+	nixcall.$O\
 	nsec.$O\
 	nulldir.$O\
 	postnote.$O\
@@ -47,13 +49,19 @@ OFILES=\
 	times.$O\
 	tm2sec.$O\
 	truerand.$O\
+	upsem.$O\
 	wait.$O\
 	waitpid.$O\
 	werrstr.$O\
 	write.$O\
 	writev.$O\
+	zcread.$O\
+	zcwrite.$O\
+	zp.$O\
 
-HFILES=/sys/include/libc.h
+HFILES=\
+	/sys/include/libc.h\
+	/sys/include/tos.h\
 
 UPDATE=\
 	mkfile\

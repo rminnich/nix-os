@@ -16,6 +16,7 @@ SFILES=\
 	memmove.s\
 	memset.s\
 	muldiv.s\
+	rdpmc.s\
 	setjmp.s\
 	sqrt.s\
 	strcat.s\

@@ -363,6 +363,7 @@ extern	int	encodefmt(Fmt*);
 extern	void	exits(char*);
 extern	double	frexp(double, int*);
 extern	uintptr	getcallerpc(void*);
+extern	int	getcoreno(int*);
 extern	char*	getenv(char*);
 extern	int	getfields(char*, char**, int, int, char*);
 extern	int	gettokens(char *, char **, int, char *);
@@ -585,7 +586,11 @@ enum
 	RFCENVG		= (1<<11),
 	RFCFDG		= (1<<12),
 	RFREND		= (1<<13),
-	RFNOMNT		= (1<<14)
+	RFNOMNT		= (1<<14),
+	RFPREPAGE	= (1<<15),
+	RFCPREPAGE	= (1<<16),
+	RFCORE		= (1<<17),
+	RFCCORE		= (1<<18),
 };
 
 typedef
@@ -697,6 +702,100 @@ extern	void	rerrstr(char*, uint);
 extern	char*	sysname(void);
 extern	void	werrstr(char*, ...);
 #pragma	varargck	argpos	werrstr	1
+
+extern	int	zp(int*);
+
+/*
+ * Atomics
+ */
+extern int	casl(ulong *p, ulong ov, ulong nv);
+extern int	ainc(int *); 
+extern int	adec(int *); 
+extern void	mfence(void);
+
+/*
+ * Zero-copy I/O
+ */
+
+typedef struct Zio Zio;
+struct Zio
+{
+	void*	data;
+	ulong	size;
+};
+
+/* kernel interface */
+extern	void	zfree(Zio io[], int nio);
+extern	int	zpread(int fd, Zio io[], int nio, usize count, vlong offset);
+extern	int	zcwrite(int fd, Zio io[], int nio);
+extern	int	zcread(int fd, Zio io[], int nio, usize count);
+extern	int	zpwrite(int fd, Zio io[], int nio, vlong offset);
+
+
+/*
+ * NIX core types
+ */
+enum
+{
+	NIXTC = 0,
+	NIXKC,
+	NIXAC,
+};
+
+
+/*
+ * NIX system calls and library functions.
+ */
+extern	int	execac(int, char*, char*[]);
+
+extern int	altsems(int *ss[], int n);
+extern int	downsem(int *s, int dontblock);
+extern void	semstats(void);
+extern void	upsem(int *s);
+extern int	semtrytimes;
+
+/*
+ * Internal NIX system calls, used by library functions.
+ */
+extern	void	semsleep(int*, int);
+extern	void	semwakeup(int*);
+extern	int	semalt(int*[], int);
+extern	void	semstats(void);
+extern	int	semdebug;
+
+/*
+ * NIX queue based system call mechanism
+ */
+typedef struct Nixcall Nixcall;
+typedef struct Nixret Nixret;
+#pragma incomplete Nixcall
+#pragma incomplete Nixret
+
+extern void	nixcall(Nixcall*,int);
+extern void*	nixret(Nixret*);
+extern void	nixsyscall(void);
+
+/*
+ * NIX threads using the queue based system call mechanism
+ */
+extern int newthr(char*, void (*f)(int, void*[]), int, void*[]);
+extern int gettid(void);
+extern int tsyscall(int nr, ...);
+extern void texits(char *sts);
+
+/*
+ * Performance counters
+ */
+enum
+{
+	PmcOs = 1,
+	PmcUser = 2,
+	PmcEnable = 4,
+};
+
+extern int confpmc(int, int, int, char *);
+extern uvlong rdpmc(int);
+
 
 extern char *argv0;
 #define	ARGBEGIN	for((argv0||(argv0=*argv)),argv++,argc--;\

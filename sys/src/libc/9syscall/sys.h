@@ -48,3 +48,12 @@
 #define	AWAIT		47
 #define	PREAD		50
 #define	PWRITE		51
+#define	SEMSLEEP	52
+#define	SEMWAKEUP	53
+#define	SEMALT		54
+#define	EXECAC		55
+#define	NIXSYSCALL	56
+#define	ZPREAD		57
+#define	ZPWRITE		58
+#define	ZFREE		59
+

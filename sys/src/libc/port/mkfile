@@ -17,6 +17,7 @@ CFILES=\
 	cistrstr.c\
 	charstod.c\
 	cleanname.c\
+	confpmc.c\
 	crypt.c\
 	ctype.c\
 	encodefmt.c\
@@ -58,6 +59,7 @@ CFILES=\
 	qsort.c\
 	quote.c\
 	rand.c\
+	rdpmc.c\
 	readn.c\
 	rune.c\
 	runestrcat.c\

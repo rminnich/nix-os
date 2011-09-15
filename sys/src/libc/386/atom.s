@@ -73,3 +73,13 @@ TEXT	cas64+0(SB),0,$0
 	JNE	fail
 	MOVL	$1,AX
 	RET
+
+/*
+ * void mfence(void);
+ */
+TEXT mfence(SB),0,$0
+	BYTE $0x0f
+	BYTE $0xae
+	BYTE $0xf0
+	RET
+

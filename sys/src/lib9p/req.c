@@ -13,7 +13,7 @@ increqref(void *v)
 	r = v;
 	if(r){
 if(chatty9p > 1)
-	fprint(2, "increfreq %p %ld\n", r, r->ref.ref);
+	fprint(2, "increfreq %p %d\n", r, r->ref.ref);
 		incref(&r->ref);
 	}
 }
@@ -73,7 +73,7 @@ closereq(Req *r)
 		return;
 
 if(chatty9p > 1)
-	fprint(2, "closereq %p %ld\n", r, r->ref.ref);
+	fprint(2, "closereq %p %d\n", r, r->ref.ref);
 
 	if(decref(&r->ref) == 0){
 		if(r->fid)

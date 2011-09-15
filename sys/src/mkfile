@@ -30,9 +30,11 @@ LIBS=\
 	libregexp\
 	libscribble\
 	libsec\
+	libseg\
 	libstdio\
 	libsunrpc\
 	libthread\
+	libtube\
 	libventi\
 
 
@@ -49,6 +51,7 @@ all install clean nuke:VQ:
 	date
 	for (i in $LIBS $SUBSYS $CMDS) @{
 		cd $i
+		echo cd $i
 		mk $target
 	}
 	date

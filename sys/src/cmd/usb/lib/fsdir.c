@@ -54,7 +54,7 @@ usbfsdirdump(void)
 	for(i = 1; i < nfs; i++)
 		if(fs[i] != nil)
 			if(fs[i]->dev != nil)
-				fprint(2, "%s\t%s dev %#p refs %ld\n",
+				fprint(2, "%s\t%s dev %#p refs %d\n",
 					argv0, fs[i]->name, fs[i]->dev, fs[i]->dev->ref);
 			else
 				fprint(2, "%s:\t%s\n", argv0, fs[i]->name);
@@ -95,7 +95,7 @@ usbfsdelnth(int i)
 	if(fs[i] != nil){
 		dprint(2, "%s: fsdel %s", argv0, fs[i]->name);
 		if(fs[i]->dev != nil){
-			dprint(2, " dev %#p ref %ld\n",
+			dprint(2, " dev %#p ref %d\n",
 				fs[i]->dev, fs[i]->dev->ref);
 		}else
 			dprint(2, "no dev\n");

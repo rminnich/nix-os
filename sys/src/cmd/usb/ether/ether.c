@@ -248,7 +248,7 @@ seprintstats(char *s, char *se, Ether *e)
 	s = seprint(s, se, "input errs: %ld\n", e->nierrs);
 	s = seprint(s, se, "output errs: %ld\n", e->noerrs);
 	s = seprint(s, se, "mbps: %d\n", e->mbps);
-	s = seprint(s, se, "prom: %ld\n", e->prom.ref);
+	s = seprint(s, se, "prom: %d\n", e->prom.ref);
 	s = seprint(s, se, "addr: ");
 	s = seprintaddr(s, se, e->addr);
 	s = seprint(s, se, "\n");
@@ -276,7 +276,7 @@ seprintifstats(char *s, char *se, Ether *e)
 		if(c->ref == 0)
 			s = seprint(s, se, "c[%d]: free\n", i);
 		else{
-			s = seprint(s, se, "c[%d]: refs %ld t %#x h %d p %d\n",
+			s = seprint(s, se, "c[%d]: refs %d t %#x h %d p %d\n",
 				c->nb, c->ref, c->type, c->headersonly, c->prom);
 		}
 	}
@@ -1178,7 +1178,7 @@ ethermain(Dev *dev, int argc, char **argv)
 	proccreate(etherwriteproc, e, 16*1024);
 	incref(e->dev);
 	proccreate(etherreadproc, e, 16*1024);
-	deprint(2, "%s: dev ref %ld\n", argv0, dev->ref);
+	deprint(2, "%s: dev ref %d\n", argv0, dev->ref);
 	incref(e->dev);
 	usbfsadd(&e->fs);
 	return 0;
