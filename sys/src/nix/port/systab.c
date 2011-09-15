@@ -61,9 +61,9 @@ extern void syssemwakeup(Ar0*, va_list);
 extern void syssemalt(Ar0*, va_list);
 extern void sysexecac(Ar0*, va_list);
 extern void sysnixsyscall(Ar0*, va_list);
-extern void syszpread(Ar0*, va_list);
-extern void syszpwrite(Ar0*, va_list);
-extern void syszfree(Ar0*, va_list);
+extern void sysziopread(Ar0*, va_list);
+extern void sysziopwrite(Ar0*, va_list);
+extern void sysziofree(Ar0*, va_list);
 struct {
 	char*	n;
 	void (*f)(Ar0*, va_list);
@@ -124,9 +124,9 @@ struct {
 	[SEMALT]	{ "Semalt", syssemalt, { .i = -1 } },
 	[EXECAC]	{ "Execac", sysexecac, { .v = (void*)-1 } },
 	[NIXSYSCALL]	{ "Nixsyscall", sysnixsyscall, { .i = -1 } },
-	[ZPREAD]	{ "Zpread", syszpread, { .l = -1 } },
-	[ZPWRITE]	{ "Zpwrite", syszpwrite, { .l = -1 } },
-	[ZFREE]		{ "Zfree", syszfree, { .i = -1 } },
+	[ZIOPREAD]	{ "Ziopread", sysziopread, { .l = -1 } },
+	[ZIOPWRITE]	{ "Ziopwrite", sysziopwrite, { .l = -1 } },
+	[ZIOFREE]	{ "Ziofree", sysziofree, { .i = -1 } },
 };
 
 int nsyscall = nelem(systab);

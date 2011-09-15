@@ -703,7 +703,7 @@ extern	char*	sysname(void);
 extern	void	werrstr(char*, ...);
 #pragma	varargck	argpos	werrstr	1
 
-extern	int	zp(int*);
+extern	int	ziop(int*);
 
 /*
  * Atomics
@@ -725,11 +725,11 @@ struct Zio
 };
 
 /* kernel interface */
-extern	void	zfree(Zio io[], int nio);
-extern	int	zpread(int fd, Zio io[], int nio, usize count, vlong offset);
-extern	int	zcwrite(int fd, Zio io[], int nio);
-extern	int	zcread(int fd, Zio io[], int nio, usize count);
-extern	int	zpwrite(int fd, Zio io[], int nio, vlong offset);
+extern	void	ziofree(Zio io[], int nio);
+extern	int	ziopread(int fd, Zio io[], int nio, usize count, vlong offset);
+extern	int	ziowrite(int fd, Zio io[], int nio);
+extern	int	zioread(int fd, Zio io[], int nio, usize count);
+extern	int	ziopwrite(int fd, Zio io[], int nio, vlong offset);
 
 
 /*

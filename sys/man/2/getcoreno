@@ -1,4 +1,4 @@
-.TH GETCORE 2
+.TH GETCORENO 2
 .SH NAME
 getcore \- get core number and role
 .SH SYNOPSIS
@@ -7,9 +7,9 @@ getcore \- get core number and role
 .B #include <libc.h>
 .PP
 .B
-int	getcore(int *rolep)
+int	getcoreno(int *rolep)
 .SH DESCRIPTION
-.I Getcore
+.I Getcoreno
 returns the number for the core used by the process and, if
 .I rlope
 is not nil, fills the pointed integer with the core role, one of:
@@ -23,6 +23,6 @@ It uses
 .I tos
 and does not perform any system call or trap.
 .SH SOURCE
-.B /sys/src/libc/9sys/getcore.c
+.B /sys/src/libc/9sys/getcoreno.c
 .SH SEE ALSO
 .IR cons (3)

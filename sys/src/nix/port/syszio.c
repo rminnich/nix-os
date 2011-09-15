@@ -463,7 +463,7 @@ ziorw(int fd, Zio *io, int nio, usize count, vlong offset, int iswrite)
 }
 
 void
-syszpread(Ar0 *ar0, va_list list)
+sysziopread(Ar0 *ar0, va_list list)
 {
 	int fd, nio;
 	long count;
@@ -482,7 +482,7 @@ syszpread(Ar0 *ar0, va_list list)
 }
 
 void
-syszpwrite(Ar0 *ar0, va_list list)
+sysziopwrite(Ar0 *ar0, va_list list)
 {
 	int fd, nio;
 	vlong offset;
@@ -499,7 +499,7 @@ syszpwrite(Ar0 *ar0, va_list list)
 }
 
 void
-syszfree(Ar0 *, va_list list)
+sysziofree(Ar0 *, va_list list)
 {
 	Zio *io;
 	int nio, i;

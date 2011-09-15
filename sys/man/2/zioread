@@ -1,6 +1,6 @@
-.TH ZREAD 2
+.TH ZIOREAD 2
 .SH NAME
-zread, zwrite, zpread, zpwrite, zfree \- zero-copy read and write
+zioread, ziowrite, ziopread, ziopwrite, ziofree \- zero-copy read and write
 .SH SYNOPSIS
 .B #include <u.h>
 .br
@@ -17,19 +17,19 @@ struct Zio
 .fi
 .PP
 .B
-int zpread(int fd, Zio io[], int nio, usize count, vlong offset);
+int ziopread(int fd, Zio io[], int nio, usize count, vlong offset);
 .PP
 .B
-int zpwrite(int fd, Zio io[], int nio, vlong offset);
+int ziopwrite(int fd, Zio io[], int nio, vlong offset);
 .PP
 .B
-int zread(int fd, Zio io[], int nio, usize count);
+int zioread(int fd, Zio io[], int nio, usize count);
 .PP
 .B
-int zwrite(int fd, Zio io[], int nio);
+int ziowrite(int fd, Zio io[], int nio);
 .PP
 .B
-void zfree(Zio io[], int nio);
+void ziofree(Zio io[], int nio);
 .SH DESCRIPTION
 These functions supplement the standard read and write operations of
 .IR read (2)
@@ -41,9 +41,9 @@ or data will be copied during I/O. But they can refer to any other segment as we
 .B Zio
 structures passed as an argument represent a series of zero-copy buffers
 for the call. For
-.I zwrite
+.I ziowrite
 they should refer to actual data. For
-.I zread
+.I zioread
 the system fills them to reflect where the read data stands. In both cases,
 .I nio
 is the number of entries in the
@@ -53,22 +53,22 @@ array, and
 is the file descriptor where to perform I/O. The
 .I count
 argument to
-.I zread
+.I zioread
 limits the total ammount of data that may be retrieved.
 The return value reflects the number of entries used in the
 .I io
 array.
 .PP
-.I Zpread
+.I Ziopread
 and
-.I zpwrite
+.I ziopwrite
 are similar to
-.I zread
+.I zioread
 and
-.I zwrite
+.I ziowrite
 but specify the offset where to read or write.
 .PP
-.I zfree
+.I ziofree
 is a convenience system call to notify buffer owners that they are no longer
 in use. Using it is equivalent of locating the
 .B free
@@ -76,9 +76,9 @@ files for the segments involved and then writing the
 .I io
 addresses there.
 .SH SOURCE
-.B /sys/src/libc/9sys/zread.c
+.B /sys/src/libc/9sys/zioread.c
 .br
-.B /sys/src/libc/9sys/zwrite.c
+.B /sys/src/libc/9sys/ziowrite.c
 .br
 .B /sys/src/nix/port/syszio.c
 .SH SEE ALSO

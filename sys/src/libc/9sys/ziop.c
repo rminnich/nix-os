@@ -2,7 +2,7 @@
 #include	<libc.h>
 
 int
-zp(int fd[2])
+ziop(int fd[2])
 {
 	if(bind("#∏", "/mnt/zp", MREPL|MCREATE) < 0)
 		return -1;

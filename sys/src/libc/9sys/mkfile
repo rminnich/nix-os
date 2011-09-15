@@ -55,9 +55,9 @@ OFILES=\
 	werrstr.$O\
 	write.$O\
 	writev.$O\
-	zcread.$O\
-	zcwrite.$O\
-	zp.$O\
+	zioread.$O\
+	ziowrite.$O\
+	ziop.$O\
 
 HFILES=\
 	/sys/include/libc.h\

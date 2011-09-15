@@ -183,6 +183,7 @@ port
 	taslock
 	tod
 	syszio
+	syscallfmt
 
 #
 #dir
