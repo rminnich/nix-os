@@ -1,24 +1,88 @@
-Add this to .hg/hgrc
-[extensions]
-codereview = sys/lib/codereview/codereview.py
+Contributers:
 
-[codereview]
-server = codereview.appspot.com
+If you'd like to contribute to NIX the following process has been
+created to simplify distributed development.  Our process is heavily
+influenced by the golang model which you can find at
+http://golang.org/doc/contribute.html.
 
-[ui]
-username=blah@blah
-EOF
+To be able to contribute you need to do three things.
 
-hg code-login
-hack hack
-hg change
-get a number
-hg mail use the number from hg change
+1.  Subscribe to the nix-dev mailing list
+http://groups.google.com/group/nix-dev (all development
+correspondance, including codereviews, goes here).
 
-Once it is lgtm
+2.  Ask to be added to the CONTRIBUTORS file on nix-dev.  (this will
+allow you to submit codereviews)
 
-hg submit that number
+3.  Set up mercurial to use the codereview plugin in
+<nixhome>/sys/lib/codereview/codereview.py by adding the following
+your .hg/hgrc :
 
-How to update your repo:
+[extensions] codereview = sys/lib/codereview/codereview.py
+
+[codereview] server = codereview.appspot.com
+
+[ui] username=blah@blah EOF
+
+4.  Submit patches using the following process
+
+hg code-login # login to the codereview server with your google
+account
+# Make changes
+
+# specify which changed files, who should review and why the change
+# was made
+
+# include the following in your change list:
+
+# Reviewer: the person who is most qualified to judge your changes
+
+# CC: other developers that may be interested in your changes.
+
+# Description: is a one line summary of your change, prefixed by the
+# affected file, followed by any more information needed to understand
+# your changes.
+
+# Files: A list of the files that constitute your changeset.  Note
+# that this list is finer grained than a mercurial commit and you should
+# only include files relevant to your particular change.
+
+hg change 
+
+# use the issue number from hg change to notify the other NIX
+# developers on nix-dev of your change.
+
+hg mail <number>
+
+# You should then wait for the Reviewer you specified in hg change to
+# acknowledge your changes with 'LGTM'(Looks Good To Me) or ask for
+# further changes.
+
+# If the reviewer asks for more changes, make the revelant changes and
+# then resubmit by doing hg mail <number> again. You do not need 
+# to do another hg change.
+
+# Once your changes are made the reviewer or someone with commit
+# access will submit your change to the mail repository once it has been
+# acknowledged with LGTM.
+
+Submitters:
+
+Submitters can test and submit patches from contributers using the
+following steps:
+
+# apply a patch from a submitted patch set
+hg clpatch <number>
+
+# if the patch is acknowledged with LGTM submit it
+hg submit <number> 
+
+
+Repository maintanence:
+
+Codereview uses the sync command to synchronize individual
+repositories, instead of push and pull:
+
+# synchronize your NIX repository with the main tree.
 hg sync
 
