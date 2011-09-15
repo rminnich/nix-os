@@ -1,6 +1,22 @@
 #include <u.h>
 #include <libc.h>
 #include <tube.h>
+/*
+ * Ten movies streaming across that, that Internet, and what happens to
+ * your own personal Internet?  I just the other day got… an Internet was
+ * sent by my staff at 10 o'clock in the morning on Friday.  I got it
+ * yesterday [Tuesday].  Why?  Because it got tangled up with all these
+ * things going on the Internet commercially.
+ * 
+ * […] They want to deliver vast amounts of information over the
+ * Internet.  And again, the Internet is not something that you just dump
+ * something on.  It's not a big truck.  It's a series of tubes.  And if
+ * you don't understand, those tubes can be filled and if they are
+ * filled, when you put your message in, it gets in line and it's going
+ * to be delayed by anyone that puts into that tube enormous amounts of
+ * material, enormous amounts of material.
+ *		-- Ted Stevens, Alaskan Senator
+ */
 
 enum{Block, Dontblock, Already};	/* xsend() nb argument */
 
