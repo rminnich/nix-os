@@ -1,6 +1,13 @@
 syntax: regexp
-\.a$
+^lib/font/bit/
+^usr/
+^amd64/bin/
+^386/bin/
+^acme/bin/
 syntax: glob
-/usr/npe*
-#\.[0-9]
-usr/npe/tmp/*
+*.a
+*.a[568]
+*.[568]
+y.tab.[ch]
+y.debug
+[568].*
