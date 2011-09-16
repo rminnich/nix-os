@@ -128,6 +128,11 @@ real_rollback = None
 releaseBranch = None
 
 #######################################################################
+# RE for files ignored for hg change unless -a is given.
+ignored_for_change = "^((386|amd64)/bin/|386/init$|amd64init$|acme/bin/)"
+
+
+#######################################################################
 # RE: UNICODE STRING HANDLING
 #
 # Python distinguishes between the str (string of bytes)
@@ -239,7 +244,7 @@ class CL(object):
 			s += 'URL: ' + cl.url + '	# cannot edit\n\n'
 		if cl.private:
 			s += "Private: True\n"
-		s += "Reviewer: " + JoinComma(cl.reviewer) + "\n"
+		s += "Reviewer: " + "nix-dev@googlegroups.com" +  JoinComma(cl.reviewer) + "\n"
 		s += "CC: " + JoinComma(cl.cc) + "\n"
 		s += "\n"
 		s += "Description:\n"
@@ -966,9 +971,19 @@ def RelativePath(path, cwd):
 		return path[n+1:]
 	return path
 
+#
+# return true if file should be excluded from the list of files in a
+# change list edition
+#
+def ExcludedForChange(file):
+	return  not re.match(ignored_for_change, file)
 
-
-
+#
+# filter the file name list files to contain only those files that
+# do not have to be excluded from a change list edition
+#
+def ChangedFilesNotExcluded(files):
+	return filter(ExcludedForChange, files)
 
 #######################################################################
 # Mercurial commands
@@ -1001,6 +1016,9 @@ def change(ui, repo, *pats, **opts):
 		hg revert @123456
 
 	before running hg change -d 123456.
+
+	By default, files in /386/bin, /amd64/bin, and the like are
+	ignored by this command. Use flat -a to consider them as well.
 	"""
 
 	if missing_codereview:
@@ -1024,7 +1042,8 @@ def change(ui, repo, *pats, **opts):
 		cl = CL("new")
 		dirty[cl] = True
 		files = ChangedFiles(ui, repo, pats, opts, taken=Taken(ui, repo))
-
+		if not opts["all"]:
+			files = ChangedFilesNotExcluded(files)
 	if opts["delete"] or opts["deletelocal"]:
 		if opts["delete"] and opts["deletelocal"]:
 			return "cannot use -d and -D together"
@@ -1819,13 +1838,14 @@ cmdtable = {
 	"^change": (
 		change,
 		[
+			('a', 'all', None, 'consider all files for change'),
 			('d', 'delete', None, 'delete existing change list'),
 			('D', 'deletelocal', None, 'delete locally, but do not change CL on server'),
 			('i', 'stdin', None, 'read change list from standard input'),
 			('o', 'stdout', None, 'print change list to standard output'),
 			('p', 'pending', None, 'print pending summary to standard output'),
 		],
-		"[-d | -D] [-i] [-o] change# or FILE ..."
+		"[-a] [-d | -D] [-i] [-o] change# or FILE ..."
 	),
 	"^clpatch": (
 		clpatch,
