@@ -81,15 +81,14 @@ for (PKGNAME in $names) {
 		# Go to the directory if it exists
 		cd $PKGROOT^/contrib/packages/^$PKGNAME || fail $PKGNAME: No such package in $PKGROOT^/contrib/packages
 		
-		# You need to do mk pull before running mk install
-		if (! test -e root.tgz) {
-			echo $PKGNAME^: pulling
-			pm/pull $PKGNAME || fail $PKGNAME: pull failed
-		}
 		if (grep '^'^$PKGNAME^'$' $ROOT^/contrib/packages/installed >[2=1] >/dev/null) {
 			echo $PKGNAME^: already installed, skipping.
 		}
 		if not {
+			# You need to do mk pull before running mk install
+			if(! pm/pull $PKGNAME){
+				test -e root.tgz || fail $PKGNAME: pull failed
+			}
 			# Install all the dependencies
 			for (i in `{cat dep}) {
 				if (! grep $i $ROOT^/contrib/packages/installed >[2=1] >/dev/null) {
