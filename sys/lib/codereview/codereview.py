@@ -129,7 +129,7 @@ releaseBranch = None
 
 #######################################################################
 # RE for files ignored for hg change unless -a is given.
-ignored_for_change = "^((386|amd64)/bin/|386/init$|amd64init$|acme/bin/)"
+ignored_for_change = "((^(386|amd64)/bin/)|(386/init$)|(amd64init$)|(^acme/bin/)|(\.[568]$)|(/[568]\.))"
 
 
 #######################################################################
@@ -976,7 +976,7 @@ def RelativePath(path, cwd):
 # change list edition
 #
 def ExcludedForChange(file):
-	return  not re.match(ignored_for_change, file)
+	return  not re.search(ignored_for_change, file)
 
 #
 # filter the file name list files to contain only those files that
