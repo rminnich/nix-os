@@ -479,8 +479,16 @@ Endofinput:
 		/* relocate data to start at page boundary */
 		memmove((void*)PGROUND(PADDR(entry+text)), (void*)(PADDR(entry+text)), data);
 
-		print("entry: %lux\n", entry);
-		warp9(PADDR(entry));
+		entry = GLLONG(b->hdr.entry);
+		magic = GLLONG(b->hdr.magic);
+		if(magic == I_MAGIC){
+			print("entry: 0x%lux\n", entry);
+			warp9(PADDR(entry));
+		}
+		else if(magic == S_MAGIC){
+			entry64 = beswav(b->hdr.uvl[0]);
+			warp64(entry64);
+		}
 		b->state = FAILED;
 		return FAIL;
 
