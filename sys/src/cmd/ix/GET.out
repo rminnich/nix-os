@@ -1,0 +1,40 @@
+dial tcp!localhost!9999
+session[24fd8]: new tcp!localhost!9999
+rproc[24fd8]: started
+wproc[24fd8]: started
+cmuxproc[4b738]: starting
+cmuxproc[4b738]: new ch0 0x4e720
+chwproc[4e720]: started
+-ch0-> Tversion  msize 8192 version 'ix'
+|ch0-> Tattach  afid -1 uname nemo aname main
+chwproc[4e720]: exiting
+<-ch0- Rversion  msize 8190 version 'ix'
+msize 8190
+cmuxproc[4b738]:2: del ch0
+<-ch0| Rattach  fid 0 qid (0000000000000054 692693930 d)
+cmuxproc[4b738]: new ch0 0x51710
+chwproc[51710]: started
+-ch0-> Tfid  fid 0 cflags 0
+-ch0-> Tclone  cflags 3
+-ch0-> Twalk wname acme.dump
+-ch0-> Tstat
+-ch0-> Topen mode 0
+|ch0-> Tread nmsg -1 offset 0 count 8190
+<-ch0- Rfid
+chwproc[51710]: exiting
+<-ch0- Rclone  newfid 1
+<-ch0- Rwalk wqid (0000000000efd4d2 100 )
+<-ch0- Rstat   stat 'acme.dump' 'nemo' 'nemo' 'nemo' q (0000000000efd4d2 100 ) m 0600 at 1313355326 mt 1310326405 l 33686 t 77 d 13
+<-ch0- Ropen qid (0000000000efd4d2 100 ) iounit 0 
+<-ch0- Rread count 8185 '/usr/nemo /lib/font/bit/inferno/charon/plain.normal.font /lib/fo'
+<-ch0- Rread count 8185 ' rm -f *.[5687qv] *.a[5687qv] y.tab.? lex.yy.c y.debug y.output '
+<-ch0- Rread count 8185 '57.6 tcp.6 ioapic.6 devsrv.6 ipaux.6 devenv.6 devdup.6 devpipe.6'
+<-ch0- Rread count 8185 ' $names 6c -FTVw -I. -D'_DBGC_=''p''' ../port/page.c r - printst'
+<-ch0- Rread count 946 ' ethermii.6 etherigbe.6 devproc.6 devkprof.6 netlog.6 nullmedium'
+<-ch0| Rread count 0 ''
+cmuxproc[4b738]:2: del ch0
+closemux 4b738
+abortconn[24fd8]: hanging up
+wproc[24fd8]: exiting
+cmuxproc[4b738]: done
+rproc[24fd8]: exiting
