@@ -129,7 +129,7 @@ releaseBranch = None
 
 #######################################################################
 # RE for files ignored for hg change unless -a is given.
-ignored_for_change = "((^(386|amd64)/bin/)|(386/init$)|(amd64init$)|(^acme/bin/)|(\.[568]$)|(/[568]\.))"
+ignored_for_change = "((^(386|amd64)/(lib|bin)/)|(386/init$)|(amd64/init$)|(^acme/bin/)|(\.[568]$)|(/[568]\.))"
 
 
 #######################################################################
