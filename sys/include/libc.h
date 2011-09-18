@@ -707,10 +707,17 @@ extern	int	ziop(int*);
 
 /*
  * Atomics
+ * (casul was known before as casl; we don't suppy a prototype
+ * so we could see the warnings and update the source; the function
+ * is still in libc).
  */
-extern int	casl(ulong *p, ulong ov, ulong nv);
 extern int	ainc(int *); 
 extern int	adec(int *); 
+extern int	cas(uint *p, int ov, int nv);
+extern int	casul(ulong *p, ulong ov, ulong nv);
+extern int	casp(void **p, void *ov, void *nv);
+extern int	cas32(u32int *p, u32int ov, u32int nv);
+extern int	cas64(u64int *p, u64int ov, u64int nv);
 extern void	mfence(void);
 
 /*

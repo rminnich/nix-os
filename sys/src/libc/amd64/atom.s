@@ -21,12 +21,13 @@ adeclp:
 /*
  * int cas32(u32int *p, u32int ov, u32int nv);
  * int cas(uint *p, int ov, int nv);
- * int casl(ulong *p, ulong ov, ulong nv);
+ * int casul(ulong *p, ulong ov, ulong nv);
  */
 
 TEXT cas32(SB), 1, $0
 TEXT cas(SB), 1, $0
-TEXT casl(SB), 1, $0
+TEXT casul(SB), 1, $0
+TEXT casl(SB), 1, $0			/* back compat */
 	MOVL	exp+8(FP), AX
 	MOVL	new+16(FP), BX
 	LOCK; CMPXCHGL BX, (RARG)
