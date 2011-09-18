@@ -545,11 +545,16 @@ def LoadCL(ui, repo, name, web=True):
 
 global_status = None
 
+# make set_status report the status directly, otherwise,
+# despite efforts in other functions, messages are mixed
+# with requests for passwords, and things become very
+# confussing.
 def set_status(s):
-	# print >>sys.stderr, "\t", time.asctime(), s
-	global global_status
-	global_status = s
+	print >>sys.stderr, "\t", time.asctime(), s
+#	global global_status
+#	global_status = s
 
+#unused
 class StatusThread(threading.Thread):
 	def __init__(self):
 		threading.Thread.__init__(self)
@@ -569,6 +574,7 @@ class StatusThread(threading.Thread):
 				s = "(unknown status)"
 			print >>sys.stderr, time.asctime(), s
 
+#unused
 def start_status_thread():
 	t = StatusThread()
 	t.setDaemon(True)  # allowed to exit if t is still running
@@ -1562,7 +1568,7 @@ def pending(ui, repo, *pats, **opts):
 def reposetup(ui, repo):
 	global original_match
 	if original_match is None:
-		start_status_thread()
+#		start_status_thread()
 		original_match = cmdutil.match
 		cmdutil.match = ReplacementForCmdutilMatch
 		RietveldSetup(ui, repo)
