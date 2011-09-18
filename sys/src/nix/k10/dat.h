@@ -351,9 +351,10 @@ extern KMap* kmap(Page*);
 struct
 {
 	Lock;
-	uint	machs;			/* bitmap of active CPUs (must go) */
-	int	exiting;		/* shutdown */
-	int	ispanic;		/* shutdown in response to a panic */
+	int	nonline;			/* # of active CPUs */
+	int nbooting;			/* # of CPUs waiting for the bTC to go */
+	int	exiting;			/* shutdown */
+	int	ispanic;			/* shutdown in response to a panic */
 	int	thunderbirdsarego;	/* lets the added processors continue */
 }active;
 

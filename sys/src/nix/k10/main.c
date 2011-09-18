@@ -67,8 +67,6 @@ options(int argc, char* argv[])
 	vflag = dbgflg['v'];
 }
 
-static Ref squids;
-
 void
 squidboy(int apicno)
 {
@@ -121,8 +119,9 @@ squidboy(int apicno)
 	switch(m->nixtype){
 	case NIXAC:
 		acmmuswitch();
-		decref(&squids);
 		acinit();
+		adec(&active.nbooting);
+//		ainc(&active.nonline);
 		acsched();
 		panic("squidboy");
 		break;
@@ -134,14 +133,9 @@ squidboy(int apicno)
 		 */
 		vsvminit(MACHSTKSZ, NIXTC);
 
-		decref(&squids);
-		/*
-		 * Caution: no clock sync.
-		 */
 		timersinit();
-		lock(&active);
-		active.machs |= 1<<m->machno;
-		unlock(&active);
+		adec(&active.nbooting);
+		ainc(&active.nonline);
 ndnr();
 		schedinit();
 		break;
@@ -172,18 +166,19 @@ testiccs(void)
 	print("bootcore: all cores done\n");
 }
 
+/*
+ * Rendezvous with other cores. Set roles for those that came
+ * up online, and wait until they are initialized.
+ * We assume other processors that could boot had time to
+ * set online to 1 by now.
+ */
 static void
 nixsquids(void)
 {
 	Mach *mp;
 	int i;
+	uvlong now, start;
 
-	/*
-	 * We assume other processors that could boot had time to
-	 * set online to 1 by now.
-	 * Note that this won't work for a huge number of cores, because
-	 * of the bitmap in active.machs. The bitmap must go.
-	 */
 	for(i = 1; i < MACHMAX; i++)
 		if((mp = sys->machptr[i]) != nil && mp->online != 0){
 			/*
@@ -194,11 +189,17 @@ nixsquids(void)
 			mp->icc->fn = nil;
 			if(i < 4)
 				mp->nixtype = NIXTC;
-			incref(&squids);
+			ainc(&active.nbooting);
 		}
 	active.thunderbirdsarego = 1;
-	while(squids.ref > 0)
+	start = fastticks2us(fastticks(nil));
+	do{
+		now = fastticks2us(fastticks(nil));
+	}while(active.nbooting > 0 && now - start < 1000000)
 		;
+	if(active.nbooting > 0)
+		print("cpu0: %d cores couldn't start\n", active.nbooting);
+	active.nbooting = 0;
 }
 
 void
@@ -239,7 +240,9 @@ main(u32int ax, u32int bx)
 	m->stack = PTR2UINT(sys->machstk);
 	m->vsvm = sys->vsvmpage;
 	up = nil;
-
+	active.nonline = 1;
+	active.exiting = 0;
+	active.nbooting = 0;
 	asminit();
 	multiboot(ax, bx, 0);
 	options(oargc, oargv);
@@ -259,8 +262,6 @@ main(u32int ax, u32int bx)
 	vsvminit(MACHSTKSZ, NIXTC);
 
 	conf.nmach = 1;			
-	active.machs = 1;
-	active.exiting = 0;
 
 	fmtinit();
 	print("\nNIX with 2M pages\n");
@@ -496,11 +497,11 @@ shutdown(int ispanic)
 	lock(&active);
 	if(ispanic)
 		active.ispanic = ispanic;
-	else if(m->machno == 0 && (active.machs & (1<<m->machno)) == 0)
+	else if(m->machno == 0 && m->online == 0)
 		active.ispanic = 0;
-	once = active.machs & (1<<m->machno);
+	once = m->online;
 	m->online = 0;
-	active.machs &= ~(1<<m->machno);
+	adec(&active.nonline);
 	active.exiting = 1;
 	unlock(&active);
 
@@ -509,7 +510,7 @@ shutdown(int ispanic)
 	spllo();
 	for(ms = 5*1000; ms > 0; ms -= TK2MS(2)){
 		delay(TK2MS(2));
-		if(active.machs == 0 && consactive() == 0)
+		if(active.nonline == 0 && consactive() == 0)
 			break;
 	}
 

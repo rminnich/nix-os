@@ -1,6 +1,10 @@
 CONF=k8cpu
 CONFLIST=k8aoe k8cpu k8root k8cpufs
 
+# override with the list of paths where to put extra
+# copies of the kernel. for each word $w in OTHERCOPIES,
+# the kernel is copied to $w/$objtype/...
+OTHERCOPIES=''
 
 objtype=amd64
 </$objtype/mkfile
@@ -24,9 +28,15 @@ $p$CONF:	$CONF.c $OBJ $LIB
 $p$CONF.gz:	$p$CONF
 	strip -o /fd/1 $p$CONF | gzip -9 > $p$CONF.gz
 
-install:V:	$p$CONF $p$CONF.gz
-	cp $p$CONF /$objtype/$p$CONF 
-	cp $p$CONF.gz /$objtype/$p$CONF.gz
+install:QV:	$p$CONF $p$CONF.gz
+	for(d in '' $OTHERCOPIES){
+		if(test -d $d/$objtype){
+			cp $p$CONF $d/$objtype/$p$CONF 
+			cp $p$CONF.gz $d/$objtype/$p$CONF.gz
+			ls -l $d/$objtype/$p$CONF $d/$objtype/$p$CONF.gz
+		}
+	}
+	echo done
 
 init.out:	init9.$O initcode.$O /$objtype/lib/libc.a
 	$LD -l -R1 -s -o init.out init9.$O initcode.$O -lc
