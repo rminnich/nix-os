@@ -345,7 +345,7 @@ asmmeminit(void)
 		if(asm->type != AsmMEMORY)
 			continue;
 		va = KSEG2+asm->addr;
-		print(" %#P %#P %d (%P)\n",
+		print("asm: addr %#P end %#P type %d size %P\n",
 			asm->addr, asm->addr+asm->size,
 			asm->type, asm->size);
 
@@ -363,26 +363,20 @@ asmmeminit(void)
 					continue;
 				/* This page fits entirely within the range. */
 				/* Mark it a usable */
-//				print("%#P %d\n", mem, i);
-
 				if((l = mmuwalk(pml4, va, i, &pte, asmwalkalloc)) < 0)
 					panic("asmmeminit 3");
 
 				*pte = mem|PteRW|PteP;
 				if(l > 0)
 					*pte |= PtePS;
-//print("pte %#p *pte %#16.16llux l %d\n", pte, *pte, l);
 
 				nextmem = mem + PGLSZ(i);
-/* touch it */
-*((uintptr*)va) = 0;
 				va += PGLSZ(i);
 				npg[i]++;
 
 				break;
 			}
 		}
-//		physinit(asm->addr, asm->size);
 
 #ifdef ConfCrap
 		/*
@@ -429,7 +423,6 @@ asmumeminit(void)
 	for(asm = asmlist; asm != nil; asm = asm->next){
 		if(asm->type != AsmMEMORY)
 			continue;
-		if(0)print("asmumeminit: addr %ullx size %ullx\n", asm->addr, asm->size);
 		physinit(asm->addr, asm->size);
 	}
 	physallocdump();
