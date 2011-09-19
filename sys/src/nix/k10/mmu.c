@@ -16,6 +16,8 @@
  *	calculate and map up to TMFM (conf crap);
  */
 
+#define TMFM		(64*MiB)		/* kernel memory */
+
 #define PPN(x)		((x)&~(PGSZ-1))
 
 void
@@ -118,13 +120,6 @@ dumpmmu(Proc *p)
 	dumpptepg(4, m->pml4->pa);
 }
 
-/*
- * define this to disable the 4K page allocator.
- */
-#define PTPALLOC
-
-#ifdef PTPALLOC
-
 static Page mmuptpfreelist;
 
 static Page*
@@ -172,7 +167,6 @@ mmuptpalloc(void)
 
 	return page;
 }
-#endif /* PTPALLOC */
 
 void
 mmuswitch(Proc* proc)
@@ -217,16 +211,12 @@ mmurelease(Proc* proc)
 		next = page->next;
 		if(--page->ref)
 			panic("mmurelease: page->ref %d\n", page->ref);
-#ifdef PTPALLOC
 		lock(&mmuptpfreelist);
 		page->next = mmuptpfreelist.next;
 		mmuptpfreelist.next = page;
 		mmuptpfreelist.ref++;
 		page->prev = nil;
 		unlock(&mmuptpfreelist);
-#else
-		pagechainhead(page);
-#endif /* PTPALLOC */
 	}
 	if(proc->mmuptp[0] && pga.r.p)
 		wakeup(&pga.r);
@@ -251,9 +241,9 @@ mmuput(uintptr va, Page *pg, uint attr)
 	Mpl pl;
 	uintmem pa;
 
-	DBG("up %#p mmuput %#p %#Px %#ux\n", up, va, pa, attr);
 
 	pa = pg->pa;
+	DBG("up %#p mmuput %#p %#Px %#ux\n", up, va, pa, attr);
 	assert(pg->pgszi >= 0);
 	pgsz = m->pgsz[pg->pgszi];
 	if(pa & (pgsz-1))
@@ -279,15 +269,8 @@ mmuput(uintptr va, Page *pg, uint attr)
 				break;
 		}
 		if(page == nil){
-			if(up->mmuptp[0] == 0){
-#ifdef PTPALLOC
+			if(up->mmuptp[0] == nil)
 				page = mmuptpalloc();
-#else
-				page = newpage(1, 0, 0, PTSZ);
-				page->va = VA(kmap(page));
-				assert(page->pa == PADDR(UINT2PTR(page->va)));
-#endif /* PTPALLOC */
-			}
 			else {
 				page = up->mmuptp[0];
 				up->mmuptp[0] = page->next;
@@ -361,6 +344,7 @@ pdmap(uintptr pa, int attr, uintptr va, usize size)
 	uintptr pae;
 	PTE *pd, *pde, *pt, *pte;
 	int pdx, pgsz;
+	Page *pg;
 
 	pd = (PTE*)(PDMAP+PDX(PDMAP)*4096);
 
@@ -380,25 +364,10 @@ pdmap(uintptr pa, int attr, uintptr va, usize size)
 		}
 		else{
 			if(*pde == 0){
-/*
- * XXX: Shouldn't this be mmuptpalloc()?
- */
-				/*
-				 * Need a PTSZ physical allocator here.
-				 * Because space will never be given back
-				 * (see vunmap below), just malloc it so
-				 * Ron can prove a point.
-				*pde = pmalloc(PTSZ)|PteRW|PteP;
-				 */
-				void *alloc;
-
-				alloc = mallocalign(PTSZ, PTSZ, 0, 0);
-				if(alloc != nil){
-					*pde = PADDR(alloc)|PteRW|PteP;
-//print("*pde %#llux va %#p\n", *pde, va);
-					memset((PTE*)(PDMAP+pdx*4096), 0, 4096);
-
-				}
+				pg = mmuptpalloc();
+				assert(pg != nil && pg->pa != 0);
+				*pde = pg->pa|PteRW|PteP;
+				memset((PTE*)(PDMAP+pdx*4096), 0, 4096);
 			}
 			assert(*pde != 0);
 
@@ -481,6 +450,16 @@ vmapalloc(usize size)
 	return 0;
 }
 
+/*
+ * KSEG0 maps low memory.
+ * KSEG2 maps almost all memory, but starting at an address determined
+ * by the address space map (see asm.c).
+ * Thus, almost everything in physical memory is already mapped, but
+ * there are things that fall in the gap
+ * (acpi tables, device memory-mapped registers, etc.)
+ * for those things, we also want to disable caching.
+ * vmap() is required to access them.
+ */
 void*
 vmap(uintptr pa, usize size)
 {
@@ -673,7 +652,6 @@ mmuinit(void)
 	 *
 	 * This is set up here so meminit can map appropriately.
 	 */
-#define TMFM		(64*MiB)		/* kernel memory */
 	o = sys->pmstart;
 	sz = ROUNDUP(o, 4*MiB) - o;
 	pa = asmalloc(0, sz, 1, 0);

@@ -18,7 +18,7 @@ KADDR(uintptr pa)
 	if(pa < TMFM)
 		return KSEG0+va;
 
-assert(pa < KSEG2);
+	assert(pa < KSEG2);
 	return KSEG2+va;
 }
 
@@ -40,9 +40,9 @@ PADDR(void* va)
 KMap*
 kmap(Page* page)
 {
-//	print("kmap(%#llux) @ %#p: %#p %#p\n",
-//		page->pa, getcallerpc(&page),
-//		page->pa, KADDR(page->pa));
+	DBG("kmap(%#llux) @ %#p: %#p %#p\n",
+		page->pa, getcallerpc(&page),
+		page->pa, KADDR(page->pa));
 
 	return KADDR(page->pa);
 }
