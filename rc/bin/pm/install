@@ -10,10 +10,6 @@ if (~ $#ROOT 0) {
 	ROOT=/
 }
 
-if (~ $#PKGSERVER 0) {
-	PKGSERVER=jfloren.net
-}
-
 USAGE='usage: install [-v] [-f] package'
 flagfmt='v,f'
 

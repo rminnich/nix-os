@@ -20,9 +20,10 @@ ifs='
 '		# set ifs in case it is munged in user's environment
 
 VERBOSE=0
+LISTING=0
 
-USAGE='usage:	list [-v] [-i] [category]'
-flagfmt='v,i'
+USAGE='usage:	list [-v] [-i] [-l] [category]'
+flagfmt='v,i,l'
 
 if(! ifs=() eval `{aux/getflags $*}) {
 	echo $USAGE
@@ -31,13 +32,22 @@ if(! ifs=() eval `{aux/getflags $*}) {
 
 if (! ~ $#flagv 0) VERBOSE=1
 if (! ~ $#flagi 0) INSTALLED=1
+if (! ~ $#flagl 0) LISTING=1
 
 fn doprint {
 		if (~ $VERBOSE 1) echo -n '• '
-		echo $1
+		if( ~ $LISTING 1)
+			echo $1:
+		if not
+			echo $1
 		if (~ $VERBOSE 1) {
 			cat $1^/README
 			echo '======================'
+		}
+		if (~ $LISTING 1){
+			sed -e 's,^root,,'  $ROOT/contrib/packages/$1/root.lst |
+				grep -v '/$'
+			echo
 		}
 }
 
@@ -61,7 +71,7 @@ if (~ $INSTALLED 1) {
 			}
 		}
 	}
-	exit
+	exit ''
 }
 if not {
 	if (~ $#* 0) {
@@ -81,6 +91,7 @@ if not {
 				}
 			}
 		}
-		exit
+		exit ''
 	}
 }
+exit ''
