@@ -1,6 +1,6 @@
 .TH PM 1
 .SH NAME
-install, list, pull, clean, depclean, remove \- package management scripts
+install, list, pull, remove \- package management scripts
 .SH SYNOPSIS
 .B pm/install
 [
@@ -21,13 +21,7 @@ install, list, pull, clean, depclean, remove \- package management scripts
 .B pm/pull
 .I category/name
 .br
-.B pm/clean
-.I category/name
-.br
-.B pm/depclean
-.I category/name
-.br
-.B contrib/remove
+.B pm/remove
 .I category/name
 .SH DESCRIPTION
 .I PM 
@@ -37,13 +31,7 @@ and
 .IR 9pm ,
 but with greater focus on speed and maintainability. Packages are stored as
 .B .tgz
-files on an HTTP server, rather than as discrete files on sources, for improved speed. Packages do not install sources to
-.B /sys/src;
-rather, sources are placed in 
-.B /contrib/src,
-to keep the
-.B /sys/src
-tree clean.
+files on an HTTP server, rather than as discrete files on sources, for improved speed.
 .PP
 Packages are described by a category and a name. Categories include 
 .I devel,
@@ -56,7 +44,7 @@ Package names include
 and
 .I openssh.
 A full accounting of categories may be obtained by simply listing the directories in
-.IR /contrib/packages/ .
+.B /contrib/packages/ .
 Listing of individual packages is accomplished through the
 .B pm/list
 command.
@@ -80,6 +68,24 @@ Download the specified package from the package repository. This is not necessar
 .TP
 .I pm/remove
 Deletes files installed by the specified package. Does not remove dependency packages, as they may be needed by other packages.
+.SH PACKAGE SERVERS
+Any HTTP server may act as a package server provided its HTTP root directory contains a 
+.B contrib/packages
+directory with 
+.B root.tgz
+files in the package directories. The list of package servers is maintained in 
+.B /lib/ndb/local
+in the following format:
+.br
+.EX
+	pm=srvlist
+		srv=jfloren.net
+		srv=anotherserver.com
+.EE
+.br
+Additional servers may be added; servers will be tried in order. If a package is not found on one server, the other servers will be tried one after the other until a 
+.B root.tgz
+file is found.
 .SH EXAMPLES
 .LP
 Install Mercurial.
@@ -103,6 +109,9 @@ directories representing package categories.
 .TP
 .B /contrib/packages/*/*
 directories for individual packages.
+.TP
+.B /lib/ndb/local
+HTTP servers with packages for downloading.
 .SH SOURCE
 .B /rc/bin/pm
 .SH SEE ALSO
