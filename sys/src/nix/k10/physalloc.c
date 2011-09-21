@@ -320,10 +320,11 @@ physalloc(u64int size, int *colorp)
 	}
 	if(m == 0)
 		for(i = 0; i < ndoms; i++)
-			if((m = xphysalloc(&bal[i], size)) != 0){
-				*colorp = i;
-				return m;
-			}
+			if(bal[i].kmin > 0)
+				if((m = xphysalloc(&bal[i], size)) != 0){
+					*colorp = i;
+					return m;
+				}
 	return m;
 }
 
@@ -444,8 +445,8 @@ physinit(uintmem a, u64int size)
 		 * that there is no interleaving of domains. Ok by now.
 		 */
 		DBG("physmem block dom %d addr %#ullx size %#ullx\n", dom, addr, len);
-		if(dom >= Ndoms)
-			panic("dom %d too large", dom);
+		if(dom < 0 || dom >= Ndoms)
+			panic("physinit: dom %d", dom);
 		b = &bal[dom];
 		if(dom >= ndoms)
 			ndoms = dom+1;

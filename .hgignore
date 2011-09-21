@@ -1,9 +1,17 @@
 syntax: regexp
 ^lib/font/bit/
 ^usr/
+^tmp/
 ^amd64/bin/
 ^386/bin/
 ^acme/bin/
+^mail/
+^proc/
+^n/
+^srv/
+^fd/
+^mnt/
+^dev/
 syntax: glob
 *.a
 *.a[568]
@@ -11,3 +19,7 @@ syntax: glob
 y.tab.[ch]
 y.debug
 [568].*
+tmp
+dev
+mnt
+proc
