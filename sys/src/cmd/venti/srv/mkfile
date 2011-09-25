@@ -50,6 +50,7 @@ HFILES=	dat.h\
 	/sys/include/httpd.h\
 
 TARG=\
+	mmventi\
 	venti\
 	buildindex\
 	checkarenas\
