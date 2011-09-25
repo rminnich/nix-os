@@ -1,8 +1,6 @@
 /*
- * Buddy allocator from Knuth.
- * Written by jmk.
- * being adapted by nemo so we could have one per
- * ACPI affinity domain, to color pages depending on their
+ * Buddy allocator for physical memory allocation.
+ * One per ACPI affinity domain, to color pages depending on their
  * NUMA location.
  *
  */
@@ -315,8 +313,10 @@ physalloc(u64int size, int *colorp)
 	color = *colorp;
 	if(color >= 0){
 		color %= ndoms;
-		*colorp = color;
-		m = xphysalloc(&bal[color], size);
+		if(bal[color].kmin > 0){
+			*colorp = color;
+			m = xphysalloc(&bal[color], size);
+		}
 	}
 	if(m == 0)
 		for(i = 0; i < ndoms; i++)
@@ -432,8 +432,9 @@ physinit(uintmem a, u64int size)
 	DBG("physinit %#ullx %#ullx\n", a, size);
 
 	for(addr = a; addr < a+size; addr += len){
+		dom = 0;
 		len = acpimblocksize(addr, &dom);
-		/* len can be zero if there's on acpi information about addr */
+		/* len can be zero if there's no acpi information about addr */
 		if(len == 0 || addr + len > a + size)
 			len = a + size - addr;
 		/*
@@ -445,8 +446,10 @@ physinit(uintmem a, u64int size)
 		 * that there is no interleaving of domains. Ok by now.
 		 */
 		DBG("physmem block dom %d addr %#ullx size %#ullx\n", dom, addr, len);
-		if(dom < 0 || dom >= Ndoms)
-			panic("physinit: dom %d", dom);
+		if(dom < 0 || dom >= Ndoms){
+			print("physinit: invalid dom %d\n", dom);
+			dom = 0;
+		}
 		b = &bal[dom];
 		if(dom >= ndoms)
 			ndoms = dom+1;
