@@ -17,7 +17,7 @@ enum {
 struct map
 {
 	unsigned char score[VtScoreSize];
-	void *data;
+	u8int *data;
 	int len;
 	uchar blocktype;
 };
@@ -28,11 +28,88 @@ int mainstacksize = 256*1024;
 
 static struct map *maps = nil;
 static int hashb, maxmap;
-static u8int *mmventidata;
+static u8int *mmventidata, *mmventidatabase;
+static int ventifd = -1;
 
 VtSrv *ventisrv;
 
 static void	ventiserver(void*);
+
+static void
+datasha1(u8int *p, unsigned long len, uchar digest[VtScoreSize])
+{
+	DigestState ds;
+	memset(&ds, 0, sizeof ds);
+	sha1(p, len, digest, &ds);
+}
+
+static void
+syncentry(struct map *m)
+{
+	u8int len[4];
+	uvlong offset = m->data - mmventidatabase;
+	len[0] = m->len>>24;
+	len[1] = m->len>>16;
+	len[2] = m->len>>8;
+	len[3] = m->len;
+	fprint(2,"Write len %d:%d:%d:%d at %lld\n", len[0], len[1], len[2], len[3], offset);
+	if (pwrite(ventifd, len, 4, offset) < sizeof(len))
+		sysfatal("Write entry len at %lld: %r", offset);
+	if (pwrite(ventifd, m->data, m->len, offset+4) < m->len)
+		sysfatal("Write (%p, %d) bytes of data at %lld: %r", m->data, m->len, offset);
+}
+
+int
+installentry(u8int *data, ulong len, u8int *score, uchar blocktype)
+{
+	int ix, initial;
+	datasha1(data, len, score);
+	initial = ix = hashbits(score, hashb);
+	fprint(2, "installentry: ix %d, V %V, maps[].data %p\n", ix, score, maps[ix].data);
+	while (maps[ix].data) {
+		ix++;
+		if (ix > maxmap)
+			ix = 0;
+		if (ix == initial)
+			sysfatal("OOPS -- no more map slots");
+	}
+	maps[ix].data = data;
+fprint(2, "set map[%d] to %p\n", ix, mmventidata);
+	maps[ix].len = len;
+	scorecp(maps[ix].score, score);
+	maps[ix].blocktype = blocktype;
+	return ix;
+}
+static void
+reload(void)
+{
+	u8int score[VtScoreSize];
+	u8int *len = mmventidata;
+	ulong entrylen;
+	int i;
+	int entrycount = 0;
+
+	while (1) {
+		if (read(ventifd, len, 4*sizeof(*len)) < 4*sizeof(*len))
+			sysfatal("reload read entry len: %r");
+fprint(2, "%d:%d:%d:%d\n", len[0], len[1], len[2], len[3]);
+		for(i = entrylen = 0; i < 4; i++) {
+			entrylen <<= 8;
+			entrylen |= len[i];
+		}
+		fprint(2, "Entry len %ld\n", entrylen);
+		if (entrylen == 0)
+			break;
+		mmventidata += 4;
+		if (read(ventifd, mmventidata, entrylen) < entrylen)
+			sysfatal("reload read (%p, %ld) bytes of data: %r", mmventidata, entrylen);
+		installentry(mmventidata, entrylen, score, 0);
+		mmventidata += entrylen;
+		entrycount++;
+	}
+	fprint(2, "Reloaded %d entries", entrycount);
+
+}
 
 unsigned long log2(unsigned long x)
 {
@@ -57,14 +134,17 @@ usage(void)
 }
 
 void
-mminit(char *file)
+mminit(char *file, int mode)
 {
 	Dir *d;
 	uintptr va;
 	void *p, *np;
 	int hashsize; /* make it a power of two -- see why later */
 
-	d = dirstat(file);
+	ventifd = open(file, mode);
+	if (ventifd < 0)
+		sysfatal("Can't open %s: %r\n", file);
+	d = dirfstat(ventifd);
 	if (! d)
 		sysfatal("Can't stat %s: %r", file);
 
@@ -76,14 +156,14 @@ mminit(char *file)
 	va = (uintptr)p;
 	/* no non-nix systems we just usr sbrk and only have little pages */
 	hashsize = d->length/32;
-	maxmap = log2(hashsize / sizeof(*maps));
+	maxmap = hashsize / sizeof(*maps);
 	hashb = log2(maxmap);
 	if (va == (uintptr)-1) {
 		p = sbrk(0);
 		va = (uintptr)p;
 		maps = (void *)va;
 		va += hashsize;
-		mmventidata = (void *)va;
+		mmventidatabase = mmventidata = (void *)va;
 		va += d->length;
 		va = ROUNDUP((va), 4096);
 		if (brk((void *)va) < 0)
@@ -92,7 +172,7 @@ mminit(char *file)
 		va = ROUNDUP((va), 1ULL*GiB);
 		maps = (void *)va;
 		va += hashsize;
-		mmventidata = (void *)va;
+		mmventidatabase = mmventidata = (void *)va;
 		va += d->length;
 		va = ROUNDUP((va), 1ULL*GiB);
 		segbrk(0, (void *)va);
@@ -105,7 +185,7 @@ mminit(char *file)
 	np=(void*)va;
 	segbrk(p, np);
 
-	/* read in the file here when ready */
+	reload();
 }
 
 struct map *findscore(u8int *score)
@@ -143,8 +223,9 @@ fprint(2, "set map[%d] to %p\n", ix, mmventidata);
 	scorecp(maps[ix].score, score);
 	packetconsume(p, mmventidata, packetsize(p));
 	maps[ix].blocktype = blocktype;
-	mmventidata += maps[ix].len;
-fprint(2, "mmventidata now %p\n", maps[ix].len);
+fprint(2, "mmventidata now %p\n", mmventidata);
+	syncentry(&maps[ix]);
+	mmventidata += maps[ix].len + 4; /* the len header */
 	return maps[ix].len;
 }
 
@@ -156,7 +237,7 @@ threadmain(int argc, char *argv[])
 	traceinit();
 	threadsetname("main");
 	vaddr = nil;
-	haddr = nil;
+	haddr = "tcp!*!9000";
 	webroot = nil;
 	ARGBEGIN{
 	case 'a':
@@ -211,7 +292,7 @@ threadmain(int argc, char *argv[])
 	fprint(2, "%T venti: ");
 
 	statsinit();
-	mminit(file);
+	mminit(file, readonly ? OREAD : ORDWR);
 
 	/*
 	 * default other configuration-file parameters
