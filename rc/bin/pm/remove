@@ -51,17 +51,13 @@ for (PKGNAME in $names) {
 			rms=()
 			files=''
 			if(test -e root.tgz)
-				files=`{tar ztf root.tgz}
+				files=`{tar ztf root.tgz | sed 's/^root//g'}
 			if not
-				files=`{cat root.lst}
+				files=`{cat root.lst | sed 's/^root//g'}
 			for(f in $files){
 				rms=($f $rms)
 			}
 			for(f in $rms){
-				if(~ $ROOT /)
-					echo rm -f $f
-				if not
-					echo rm -f $ROOT$f
 				rm -f $ROOT$f
 			}
 		}
