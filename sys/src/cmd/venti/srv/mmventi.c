@@ -52,7 +52,7 @@ syncentry(struct map *m)
 	len[1] = m->len>>16;
 	len[2] = m->len>>8;
 	len[3] = m->len;
-	fprint(2,"Write len %d:%d:%d:%d at %lld\n", len[0], len[1], len[2], len[3], offset);
+	//fprint(2,"Write len %d:%d:%d:%d at %lld\n", len[0], len[1], len[2], len[3], offset);
 	if (pwrite(ventifd, len, 4, offset) < sizeof(len))
 		sysfatal("Write entry len at %lld: %r", offset);
 	if (pwrite(ventifd, m->data, m->len, offset+4) < m->len)
@@ -65,7 +65,7 @@ installentry(u8int *data, ulong len, u8int *score, uchar blocktype)
 	int ix, initial;
 	datasha1(data, len, score);
 	initial = ix = hashbits(score, hashb);
-	fprint(2, "installentry: ix %d, V %V, maps[].data %p\n", ix, score, maps[ix].data);
+	//fprint(2, "installentry: ix %d, V %V, maps[].data %p\n", ix, score, maps[ix].data);
 	while (maps[ix].data) {
 		ix++;
 		if (ix > maxmap)
@@ -74,7 +74,7 @@ installentry(u8int *data, ulong len, u8int *score, uchar blocktype)
 			sysfatal("OOPS -- no more map slots");
 	}
 	maps[ix].data = data;
-fprint(2, "set map[%d] to %p\n", ix, mmventidata);
+	//fprint(2, "set map[%d] to %p\n", ix, mmventidata);
 	maps[ix].len = len;
 	scorecp(maps[ix].score, score);
 	maps[ix].blocktype = blocktype;
@@ -92,12 +92,12 @@ reload(void)
 	while (1) {
 		if (read(ventifd, len, 4*sizeof(*len)) < 4*sizeof(*len))
 			sysfatal("reload read entry len: %r");
-fprint(2, "%d:%d:%d:%d\n", len[0], len[1], len[2], len[3]);
+		//fprint(2, "%d:%d:%d:%d\n", len[0], len[1], len[2], len[3]);
 		for(i = entrylen = 0; i < 4; i++) {
 			entrylen <<= 8;
 			entrylen |= len[i];
 		}
-		fprint(2, "Entry len %ld\n", entrylen);
+		//fprint(2, "Entry len %ld\n", entrylen);
 		if (entrylen == 0)
 			break;
 		mmventidata += 4;
@@ -177,7 +177,7 @@ mminit(char *file, int mode)
 		va = ROUNDUP((va), 1ULL*GiB);
 		segbrk(0, (void *)va);
 	}
-	fprint(2, "p is %#p\n", p);
+	fprint(2, "mmventidatabase is %#p\n", mmventidatabase);
 
 	fprint(2, "File size %lld, hashsize %d, maps %#p, data %#p\n", d->length, 
 		hashsize, maps, mmventidata);
@@ -192,10 +192,10 @@ struct map *findscore(u8int *score)
 {
 	int ix;
 	ix = hashbits(score, hashb);
-fprint(2, "find for %V is %d, maps[].data %p\n", score, ix, maps[ix].data);
+	//fprint(2, "find for %V is %d, maps[].data %p\n", score, ix, maps[ix].data);
 	while (maps[ix].data) {
-		fprint(2, "Check: %d, %V\n", ix, maps[ix].score);
-fprint(2, "scorecmp(%V,%V, %d\n", maps[ix].score, score,scorecmp(maps[ix].score, score) );
+		//fprint(2, "Check: %d, %V\n", ix, maps[ix].score);
+		//fprint(2, "scorecmp(%V,%V, %d\n", maps[ix].score, score,scorecmp(maps[ix].score, score) );
 		if (scorecmp(maps[ix].score, score) == 0)
 			return &maps[ix];
  		ix++;
@@ -206,32 +206,28 @@ fprint(2, "scorecmp(%V,%V, %d\n", maps[ix].score, score,scorecmp(maps[ix].score,
 int
 putscore(Packet *p, u8int *score, uchar blocktype)
 {
-	int ix, initial;
-	packetsha1(p, score);
-	initial = ix = hashbits(score, hashb);
-	fprint(2, "putscore: ix %d, V %V, maps[].data %p\n", ix, score, maps[ix].data);
-	while (maps[ix].data) {
-		ix++;
-		if (ix > maxmap)
-			ix = 0;
-		if (ix == initial)
-			sysfatal("OOPS -- no more map slots");
-	}
-	maps[ix].data = mmventidata;
-fprint(2, "set map[%d] to %p\n", ix, mmventidata);
-	maps[ix].len = packetsize(p);
-	scorecp(maps[ix].score, score);
-	packetconsume(p, mmventidata, packetsize(p));
-	maps[ix].blocktype = blocktype;
-fprint(2, "mmventidata now %p\n", mmventidata);
+	int ix, len;
+
+	/* yes, it's a little weird. But it will do for now. */
+	/* leave room for the length. This will make sure we still work for the 
+	 * mmap'ed version.
+	 */
+	mmventidata += 4;
+	
+	len = packetsize(p);
+	packetconsume(p, mmventidata,len);
+	ix = installentry(mmventidata, len, score, blocktype);
+	mmventidata += len;
+
+	//fprint(2, "mmventidata now %p\n", mmventidata);
 	syncentry(&maps[ix]);
-	mmventidata += maps[ix].len + 4; /* the len header */
 	return maps[ix].len;
 }
 
 void
 threadmain(int argc, char *argv[])
 {
+	void vacfs(void);
 	char *haddr, *vaddr, *webroot, *file;
 
 	traceinit();
@@ -319,6 +315,7 @@ threadmain(int argc, char *argv[])
 	else
 		vtproc(ventiserver, nil);
 
+	vacfs();
 	threadexits(nil);
 }
 
@@ -357,9 +354,9 @@ ventiserver(void *v)
 		case VtTread:
 			ms = msec();
 			m = findscore(r->tx.score);
-fprint(2, "findscore says %p\n", m);
+			//fprint(2, "findscore says %p\n", m);
 			if (m) {
-fprint(2, "Found the block\n");
+				//fprint(2, "Found the block\n");
 				r->rx.data = packetalloc();
 				packetappend(r->rx.data, m->data, m->len);
 				r->rx.blocktype = m->blocktype;
