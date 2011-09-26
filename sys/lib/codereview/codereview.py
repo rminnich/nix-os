@@ -550,9 +550,9 @@ global_status = None
 # with requests for passwords, and things become very
 # confussing.
 def set_status(s):
-	print >>sys.stderr, "\t", time.asctime(), s
-#	global global_status
-#	global_status = s
+#	print >>sys.stderr, "\t", time.asctime(), s
+	global global_status
+	global_status = s
 
 #unused
 class StatusThread(threading.Thread):
@@ -1568,7 +1568,7 @@ def pending(ui, repo, *pats, **opts):
 def reposetup(ui, repo):
 	global original_match
 	if original_match is None:
-#		start_status_thread()
+		start_status_thread()
 		original_match = cmdutil.match
 		cmdutil.match = ReplacementForCmdutilMatch
 		RietveldSetup(ui, repo)
