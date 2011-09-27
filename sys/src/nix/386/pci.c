@@ -96,14 +96,15 @@ static int
 tbdffmt(Fmt* fmt)
 {
 	char *p;
-	int l, r, type, tbdf;
+	int l, r;
+	uint type, tbdf;
 
 	if((p = malloc(READSTR)) == nil)
 		return fmtstrcpy(fmt, "(tbdfconv)");
 
 	switch(fmt->r){
 	case 'T':
-		tbdf = va_arg(fmt->args, int);
+		tbdf = va_arg(fmt->args, uint);
 		type = BUSTYPE(tbdf);
 		if(type < nelem(bustypes))
 			l = snprint(p, READSTR, bustypes[type]);
