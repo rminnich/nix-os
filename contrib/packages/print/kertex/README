@@ -1,0 +1,3 @@
+TeX and LaTeX for Plan 9, from T. Laronde's kerTeX distribution. You'll need to set KERTEXINPUTS to use latex or dvips.
+
+Packaged by: John Floren
