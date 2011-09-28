@@ -38,6 +38,7 @@ LIBOFILES=\
 	xml.$O\
 	zblock.$O\
 	zeropart.$O\
+	vacfs.$O\
 
 SLIB=libvs.a$O
 
