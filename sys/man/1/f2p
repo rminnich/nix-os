@@ -1,0 +1,114 @@
+.TH F2P 1
+.SH NAME
+argsused, badexterns, badglobals, enum2sw, f2p, ifs, mkdeps, mktypedefs, p2f, psort, rep \- tiny C tools
+.SH SYNOPSIS
+.B c/argsused
+[
+.I file ...
+]
+.PP
+.B c/badexterns
+.I files ...
+.PP
+.B c/badglobals
+.I files ...
+.PP
+.B c/enum2sw
+.PP
+.B c/f2p
+[
+.I file ...
+]
+.PP
+.B c/ifs
+[
+.I file ...
+]
+.PP
+.B c/mkdeps
+[
+.I file ...
+]
+.PP
+.B c/mktypedefs
+[
+.I file ...
+]
+.PP
+.B c/p2f
+[
+.I file ...
+]
+.PP
+.B c/psort
+.PP
+.B c/rep
+.I from
+.I to...
+.SH DESCRIPTION
+These are some tools to help write C programs in Plan 9. They are all installed
+under
+.BR /bin/c .
+Many of them use standard input if no file is given as an argument, and are suitable
+for use within
+.IR acme (1).
+.TF c/mktypedefs
+.TP
+.B c/argsused
+generates a
+.I USED(x)
+sentence for each argument in the functions found in the input files or standard input.
+.TP
+.B c/badexterns
+receives a series of object files as arguments and locates external symbols
+used in just one file. Those should perhaps be declared as static symbols.
+.TP
+.B c/badglobals
+receives a series of object tiles as arguments and locates global symbols that
+appear to be unused. They could probably go.
+.TP
+.B c/enum2sw
+receives as input a declaration of values (e.g., part of declarations within a
+.IR enum )
+and generates a
+.I switch
+statement for them.
+.TP
+.B c/f2p
+generates a prototype declaration for each non-static function found in the input.
+.TP
+.B c/p2f
+does the opposite, and writes an empty function definition for each prototype found in the input.
+.TP
+.B c/ifs
+gets rid of spaces that should not be there according to the Plan 9 C style.
+.TP
+.B c/mkdeps
+generates dependencies for
+.I mk (1)
+according to
+.I include
+directives found in the input.
+.TP
+.B c/mktypedefs
+generates
+.I typedef
+declarations for each
+.I struct
+definition found in the input.
+.TP
+.B c/psort
+sorts prototypes by name.
+.TP
+.B c/rep
+repeats the text found in the input so that
+.I from
+is replaced each time by one of the values given as
+.I to .
+.SH SOURCE
+.B /rc/bin/c
+.SH BUGS
+Many. All these tools are tiny shell scripts and do not perform much error
+checking. Also, they assume code is written using the style of
+Plan 9 from Bell Labs source code.
+
