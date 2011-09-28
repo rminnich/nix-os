@@ -117,6 +117,7 @@ struct op {
 Biobuf *input;
 Biobuf *output;
 int	strict = 0;
+int plan9 = 0;
 int	join	= 0;
 int	opflag = 1;
 int	keyflag = 0;

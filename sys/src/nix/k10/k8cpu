@@ -46,7 +46,6 @@ link +dev
 	loopbackmedium
 	netdevmedium
 
-#	acpi		hpet
 #	ht
 
 misc +dev
@@ -83,7 +82,6 @@ conf
 #dbgflg
 #	chan		'c'
 #	apic		'A'
-#	acpi		'C'
 #	hpet		'H'
 #	ht		'H'
 #	ioapic		'I'
@@ -116,6 +114,7 @@ dbgflg
 	syssem		'S'
 	syszio		'z'
 	tcore		'c'
+	mmu		'v'
 
 amd64 +dev
 	l32p

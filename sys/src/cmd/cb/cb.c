@@ -28,6 +28,10 @@ main(int argc, char *argv[])
 			maxtabs = maxleng/TABLENG - 2;
 			maxleng -= (maxleng + 5)/10;
 			continue;
+		case '9':
+			strict = 1;
+			plan9 = 1;
+			continue;
 		default:
 			fprint(2, "cb: illegal option %c\n", *argv[1]);
 			exits("boom");
@@ -74,7 +78,7 @@ work(void)
 			clev->pdepth = 0;
 			clev->tabs = (clev-1)->tabs;
 			clearif(clev);
-			if(strict && clev->tabs > 0)
+			if(strict && clev->tabs > 0 && !plan9)
 				putspace(' ',NO);
 			putch(c,NO);
 			getnl();
@@ -91,7 +95,8 @@ work(void)
 					if(c == Beof)error("{");
 				putch(c,NO);
 				if(strict){
-					putch(' ',NO);
+					if(!plan9)
+						putch(' ',NO);
 					eatspace();
 				}
 				keyflag = SINIT;
@@ -115,7 +120,8 @@ work(void)
 						if(cc == Beof)error("}");
 					putch(cc,NO);
 					if(strict){
-						putch(' ',NO);
+						if(!plan9)
+							putch(' ',NO);
 						eatspace();
 					}
 					getnext(0);
@@ -127,7 +133,7 @@ work(void)
 				continue;
 			}
 			else if(keyflag == SINIT && *pt == '}'){
-				if(strict)
+				if(strict && !plan9)
 					putspace(' ',NO);
 				putch(c,NO);
 				getnl();
@@ -155,7 +161,8 @@ work(void)
 					OUTK;
 				}
 				else if(strict || (lptr != 0 && lptr->type == ELSE && ct == 0)){
-					putspace(' ',NO);
+					if(!plan9)
+						putspace(' ',NO);
 					eatspace();
 				}
 				else if(lptr != 0 && lptr->type == ELSE){
@@ -200,7 +207,8 @@ work(void)
 			if ((lptr = lookup(lastlook,p)) != 0){
 				if(!(lptr->type == TYPE || lptr->type == STRUCT))keyflag=KEYWORD;
 				if (strict){
-					putspace(lptr->punc,NO);
+					if(!plan9)
+						putspace(lptr->punc,NO);
 					opflag = 1;
 				}
 				putch(c,NO);

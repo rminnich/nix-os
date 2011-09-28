@@ -4,6 +4,9 @@
 #include "dat.h"
 #include "fns.h"
 
+THIS FILE IS NOT USED FOR NIX.
+I'm leaving it here, and making sure it does not compile. -nemo
+
 enum
 {
 	Nhole		= 128,

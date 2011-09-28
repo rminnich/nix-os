@@ -4,7 +4,7 @@ cb \- C program beautifier
 .SH SYNOPSIS
 .B cb
 [
-.B -js
+.B -9js
 ]
 [
 .B -l
@@ -35,6 +35,9 @@ Print code in the so-called K&R style used in
 .B -l length
 Split lines that are longer than
 .IR length .
+.TP
+.B -9
+prints code close to Plan 9 style.
 .PD
 .SH SOURCE
 .B /sys/src/cmd/cb

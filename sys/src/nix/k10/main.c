@@ -7,6 +7,8 @@
 #include "init.h"
 #include "io.h"
 
+
+
 Conf conf;			/* XXX - must go - gag */
 
 extern void crapoptions(void);	/* XXX - must go */
@@ -28,6 +30,8 @@ static int oargc;
 static char* oargv[20];
 static char oargb[128];
 static int oargblen;
+
+static int maxcores = 1024;	/* max # of cores given as an argument */
 
 char dbgflg[256];
 static int vflag = 0;
@@ -65,6 +69,11 @@ options(int argc, char* argv[])
 		}
 	}
 	vflag = dbgflg['v'];
+	if(argc > 0){
+		maxcores = strtol(argv[0], 0, 0);
+		//argc--;
+		//argv++;
+	}
 }
 
 void
@@ -133,11 +142,16 @@ squidboy(int apicno)
 		 */
 		vsvminit(MACHSTKSZ, NIXTC);
 
+		/*
+		 * Enable the timer interrupt.
+		 */
+		apicpri(0);
+
 		timersinit();
 		adec(&active.nbooting);
 		ainc(&active.nonline);
-ndnr();
-		schedinit();
+
+	ndnr();	schedinit();
 		break;
 	}
 	panic("squidboy returns (type %d)", m->nixtype);
@@ -312,7 +326,7 @@ main(u32int ax, u32int bx)
 	 */
 	i8259init(32);
 
-	mpsinit(32);	/* Use at most 32 cores */
+	mpsinit(maxcores);
 	apiconline();
 	sipi();
 
@@ -507,6 +521,7 @@ shutdown(int ispanic)
 
 	if(once)
 		iprint("cpu%d: exiting\n", m->machno);
+
 	spllo();
 	for(ms = 5*1000; ms > 0; ms -= TK2MS(2)){
 		delay(TK2MS(2));
