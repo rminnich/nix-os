@@ -12,6 +12,7 @@ Channel *out;
 Channel *quit;
 Channel *forkc;
 int nread = 0;
+int trace = 2; /* trace out fd */
 
 typedef struct Str Str;
 struct Str {
@@ -141,7 +142,7 @@ writer(void *)
 			break;
 		case 1:			/* out */
 			/* it's a nice null terminated thing */
-			fprint(2, "%s", s->buf);
+			fprint(trace, "%s", s->buf);
 			free(s);
 			break;
 		case 2:			/* forkc */
@@ -156,7 +157,7 @@ done:
 void
 usage(void)
 {
-	fprint(2, "Usage: ratrace [-c cmd [arg...]] | [pid]\n");
+	fprint(2, "Usage: ratrace [-o tracefile] [-c cmd [arg...]] | [pid]\n");
 	exits("usage");
 }
 
@@ -182,6 +183,7 @@ threadmain(int argc, char **argv)
 	int pid;
 	char *cmd = nil;
 	char **args = nil;
+	char *tracefile = nil;
 
 	/*
 	 * don't bother with fancy arg processing, because it picks up options
@@ -198,11 +200,26 @@ threadmain(int argc, char **argv)
 			cmd = strdup(argv[2]);
 			args = &argv[2];
 			break;
+		case 'o':
+			if (!argv[1][2]) {
+				tracefile = argv[2];
+				++argv;
+				--argc;
+			} else
+				tracefile = &argv[1][2];
+			break;
+		
 		default:
 			usage();
 		}
 		++argv;
 		--argc;
+	}
+	
+	if (tracefile) {
+		trace = create(tracefile, OWRITE, 0666);
+		if (trace < 0)
+			sysfatal("%s: %r", tracefile);
 	}
 
 	/* run a command? */

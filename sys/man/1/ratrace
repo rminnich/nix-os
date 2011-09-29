@@ -4,6 +4,9 @@ ratrace \- trace process system calls
 .SH SYNOPSIS
 .B ratrace
 [
+.I -o tracefile
+]
+[
 .I pid
 ] | [
 .I -c command
@@ -19,6 +22,9 @@ or a fresh invocation of
 Trace output is determined by the kernel, not
 .IR ratrace .
 Certain fixed rules apply.
+Trace output by default goes to file descriptor 2.
+Option \fB-o\fP can be used to switch trace output to \fItracefile\fP.
+.PP
 The first four fields of the output are
 pid, text name, system call name, and the PC of the user program.
 Data is always printed as
