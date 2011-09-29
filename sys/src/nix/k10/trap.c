@@ -296,7 +296,7 @@ _trap(Ureg *ureg)
 	 * We cannot do this in trap() because application cores
 	 * would update m->cr2 with their cr2 values upon page faults,
 	 * and then call trap().
-	 * If we do this in trap(), we would overwrite that with our own one.
+	 * If we do this in trap(), we would overwrite that with our own cr2.
 	 */
 	if(ureg->type == VectorPF)
 		m->cr2 = cr2get();
@@ -318,9 +318,6 @@ trap(Ureg* ureg)
 	Vctl *ctl, *v;
 
 	vno = ureg->type;
-
-if(m->machno != 0 && m->nixtype != NIXAC)
-print("cpu%d trap %ulld\n", m->machno, ureg->type);
 
 	m->perf.intrts = perfticks();
 	user = userureg(ureg);
@@ -607,6 +604,7 @@ faultamd64(Ureg* ureg, void*)
 		 */
 		if(!user && (!insyscall || up->nerrlab == 0)){
 			dumpregs(ureg);
+			dumpmmuwalk(m->cr2);
 			panic("fault: %#llux\n", addr);
 		}
 		sprint(buf, "sys: trap: fault %s addr=%#llux",

@@ -230,10 +230,11 @@ Page*		pgalloc(usize, int);
 void		pgfree(Page*);
 void		pgrpcpy(Pgrp*, Pgrp*);
 void		pgrpnote(ulong, char*, long, int);
-uintmem		physalloc(u64int, int*);
+uintmem		physalloc(u64int, int*, void*);
 void		physdump(void);
 void		physfree(uintmem, u64int);
 void		physinit(uintmem, u64int);
+void*		phystag(uintmem);
 void		pio(Segment*, uintptr, ulong, Page**);
 #define		poperror()		up->nerrlab--
 int		postnote(Proc*, int, char*, int);

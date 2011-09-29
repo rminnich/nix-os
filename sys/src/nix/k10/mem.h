@@ -44,8 +44,8 @@
  * 2M pages
  * these defines must go.
  */
-#define	BIGPGSZ		(2*MiB)
 #define	BIGPGSHFT	21
+#define	BIGPGSZ		(1ull<<BIGPGSHFT)
 #define	BIGPGROUND(x)	ROUNDUP((x), BIGPGSZ)
 #define	PGSPERBIG	(BIGPGSZ/PGSZ)
 
@@ -57,7 +57,7 @@
 #define TK2SEC(t)	((t)/HZ)		/* ticks to seconds */
 
 /*
- *  Address spaces
+ *  Address spaces. User:
  */
 #define UTZERO		(0+2*MiB)		/* first address in user text */
 #define UTROUND(t)	ROUNDUP((t), BIGPGSZ)
@@ -66,19 +66,26 @@
 #define TSTKTOP		(USTKTOP-USTKSIZE)	/* end of new stack in sysexec */
 #define	NIXCALL		(TSTKTOP-USTKSIZE)	/* nix syscall queues (2MiB) */
 #define BIGBSSTOP	((NIXCALL-BIGPGSZ) & ~(1ULL*GiB-1))
-#define BIGBSSSIZE	(32ULL*GiB)			/* size of big heap segment */
+#define BIGBSSSIZE	(32ull*GiB)			/* size of big heap segment */
 #define HEAPTOP		(BIGBSSTOP-BIGBSSSIZE)	/* end of shared heap segments */
 
-#define KSEG0		(0xfffffffff0000000ull)	/* 256MB - this is confused */
-#define KSEG2		(0xfffffe0000000000ull)	/* 1TB - KMAP */
 
-#define PDMAP		(0xffffffffff800000ull)
-#define PMAPADDR		(0xffffffffffe00000ull)	/* unused as of yet */
+/*
+ *  Address spaces. Kernel, sorted by address.
+ */
+#define KSEG2		(0xfffffe0000000000ull)	/* 1TB - KMAP */
+/*			 0xffffff0000000000ull	end of KSEG2 */
 #define VMAP		(0xffffffffe0000000ull)
 #define VMAPSZ		(256*MiB)
-
+#define KSEG0		(0xfffffffff0000000ull)	/* 256MB - this is confused */
 #define KZERO		(0xfffffffff0000000ull)
 #define KTZERO		(KZERO+1*MiB+64*KiB)
+#define PDMAP		(0xffffffffff800000ull)
+#define PMAPADDR		(0xffffffffffe00000ull)	/* unused as of yet */
+/*			 0xffffffffffffffffull	end of KSEG0 */
+
+
+
 
 /*
  * Hierarchical Page Tables.

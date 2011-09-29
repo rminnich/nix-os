@@ -106,11 +106,12 @@ pgalloc(usize size, int color)
 		return nil;
 	}
 	memset(pg, 0, sizeof *pg);
-	if((pg->pa = physalloc(size, &color)) == 0){
+	if((pg->pa = physalloc(size, &color, pg)) == 0){
 		DBG("pgalloc: physalloc failed for size %#ulx color %d\n", size, color);
 		free(pg);
 		return nil;
 	}
+assert(phystag(pg->pa) == pg);
 	pg->pgszi = si;	/* size index */
 	incref(&pga.pgsza[si].npages);
 	pg->color = color;
@@ -412,8 +413,22 @@ retry:
 	}
 
 	pageunchain(np);
-	/* don't pagechaintail(np) here; see below */
-
+	pagechaintail(np);
+	/*
+	 * XXX - here's a bug? - np is on the freelist but it's not really free.
+	 * when we unlock palloc someone else can come in, decide to
+	 * use np, and then try to lock it.  they succeed after we've
+	 * run copypage and cachepage and unlock(np).  then what?
+	 * they call pageunchain before locking(np), so it's removed
+	 * from the freelist, but still in the cache because of
+	 * cachepage below.  if someone else looks in the cache
+	 * before they remove it, the page will have a nonzero ref
+	 * once they finally lock(np).
+	 *
+	 * What I know is that not doing the pagechaintail, but
+	 * doing it at the end, to prevent the race, leads to a
+	 * deadlock, even following the pga, pg lock ordering. -nemo
+	 */
 	lock(np);
 	unlock(&pga);
 
@@ -426,22 +441,6 @@ retry:
 	unlock(np);
 	uncachepage(p);
 
-	/*
-	 * This is here to prevent a bug(?)
-	 * np is on the freelist but it's not really free.
-	 * when we unlock palloc someone else can come in, decide to
-	 * use np, and then try to lock it.  they succeed after we've
-	 * run copypage and cachepage and unlock(np).  then what?
-	 * they call pageunchain before locking(np), so it's removed
-	 * from the freelist, but still in the cache because of
-	 * cachepage below.  if someone else looks in the cache
-	 * before they remove it, the page will have a nonzero ref
-	 * once they finally lock(np).
-	 * Because np was not chained until now, nobody could see it.
-	 */
-	lock(&pga);
-	pagechaintail(np);
-	unlock(&pga);
 	return 0;
 }
 

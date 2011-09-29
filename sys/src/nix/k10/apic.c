@@ -303,11 +303,11 @@ apiconline(void)
 	microdelay((TK2MS(1)*1000/apmachno) * m->machno);
 	apicrput(Tic, apic->max);
 
-	if(apic->machno == 0){
+	if(apic->machno == 0)
 		intrenable(IdtTIMER, apictimer, 0, -1, "APIC timer");
-		apicrput(Tlvt, Periodic|IrqTIMER);
+	apicrput(Tlvt, Periodic|IrqTIMER);
+	if(m->machno == 0)
 		apicrput(Tp, 0);
-	}
 
 	xapicmachptr[apicno] = sys->machptr[m->machno];
 

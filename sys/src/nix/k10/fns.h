@@ -34,6 +34,7 @@ int	dbgprint(char*, ...);
 int	decref(Ref*);
 void	delay(int);
 void	dumpmmu(Proc*);
+void	dumpmmuwalk(u64int pa);
 void	dumpptepg(int lvl,uintptr pa);
 #define	evenaddr(x)				/* x86 doesn't care */
 int	fpudevprocio(Proc*, void*, long, uintptr, int);

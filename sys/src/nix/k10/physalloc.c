@@ -19,6 +19,9 @@ enum {
 	BKmax		= 30,			/* Maximum lg2 */
 
 	Ndoms = 16,				/* Max # of domains */
+
+	Used = 0,
+	Avail = 1,
 };
 
 
@@ -27,10 +30,11 @@ enum {
 
 typedef struct Buddy Buddy;
 struct Buddy {
-	int	tag;
-	int	kval;
+	short	tag;		/* Used or Avail */
+	short	kval;
 	uint	next;
 	uint	prev;
+	void	*p;
 };
 
 /*
@@ -100,6 +104,7 @@ S1:
 	 * Find buddy.
 	 */
 	l = &blocks[BLOCK(b,i)];
+	l->p = nil;
 	DBG("\tbsl: BLOCK(b,i) %d index %ulld kval %d\n",
 		BLOCK(b,i), BLOCK(b,i)/((1<<l->kval)/b->bminsz), l->kval);
 	if((BLOCK(b,i)/((1<<l->kval)/b->bminsz)) & 1)	/* simpler test? */
@@ -115,11 +120,11 @@ S1:
 	 *	buddy isn't free;
 	 *	buddy has been subsequently split again.
 	 */
-	if(l->kval == b->kmax || p->tag == 0 || (p->tag == 1 && p->kval != l->kval)){
+	if(l->kval == b->kmax || p->tag == Used || (p->tag == Avail && p->kval != l->kval)){
 		/*
 		 * Put on list.
 		 */
-		l->tag = 1;
+		l->tag = Avail;
 		l->next = avail[l->kval].next;
 		l->prev = 0;
 		if(l->next != 0)
@@ -129,8 +134,8 @@ S1:
 		b->nfree += size/b->bminsz;
 
 		unlock(&budlock);
-		DBG("bsl: free @ i %d BLOCK(b,i) %d kval %d next %d tag %d\n",
-			i, BLOCK(b,i), l->kval, l->next, l->tag);
+		DBG("bsl: free @ i %d BLOCK(b,i) %d kval %d next %d %s\n",
+			i, BLOCK(b,i), l->kval, l->next, l->tag?"avail":"used");
 		return;
 	}
 
@@ -148,7 +153,7 @@ S1:
 		blocks[BLOCK(b,p->next)].prev = p->prev;
 		p->next = 0;
 	}
-	p->tag = 0;
+	p->tag = Used;
 
 	/*
 	 * Now can try to merge this larger block.
@@ -159,8 +164,8 @@ S1:
 		l = p;
 	i = l - blocks + INDEX(b,b->memory);
 	l->kval++;
-	DBG("bsl: merge @ i %d BLOCK(b,i) %d kval %d next %d tag %d\n",
-		i, BLOCK(b,i), l->kval, l->next, l->tag);
+	DBG("bsl: merge @ i %d BLOCK(b,i) %d kval %d next %d tag %s\n",
+		i, BLOCK(b,i), l->kval, l->next, l->tag?"avail":"used");
 	goto S1;
 }
 
@@ -180,6 +185,37 @@ physfree(uintmem data, u64int size)
 	panic("physfree: no bal");
 }
 
+static void*
+xphystag(Bal *b, uintmem data)
+{
+	uint i;
+	Buddy *l, *p;
+	Buddy *blocks, *avail;
+
+	DBG("phystag\n");
+
+	blocks = b->blocks;
+	avail = b->avail;
+
+	if(data == 0 /*|| !ALIGNED(data, b->bminsz)*/)
+		return;
+	i = INDEX(b,data);
+	return blocks[BLOCK(b,i)].p;
+}
+
+void*
+phystag(uintmem data)
+{
+	Bal *b;
+	int i;
+
+	for(i = 0; i < Ndoms; i++){
+		b = &bal[i];
+		if(b->base <= data && data < b->base + b->size)
+			return xphystag(b, data);
+	}
+	return nil;
+}
 
 static uchar lg2table[256] = {
 	0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3,
@@ -226,7 +262,7 @@ lg2floor(u64int w)
 }
 
 static uintmem
-xphysalloc(Bal *b, u64int size)
+xphysalloc(Bal *b, u64int size, void *tag)
 {
 	uint i, j, k;
 	Buddy *l, *p;
@@ -268,12 +304,12 @@ xphysalloc(Bal *b, u64int size)
 	 */
 	i = avail[j].next;
 	l = &blocks[BLOCK(b,i)];
-	DBG("bsr: block @ i %d BLOCK(b,i) %d kval %d next %d tag %d\n",
-		i, BLOCK(b,i), l->kval, l->next, l->tag);
+	DBG("bsr: block @ i %d BLOCK(b,i) %d kval %d next %d %s\n",
+		i, BLOCK(b,i), l->kval, l->next, l->tag?"avail":"used");
 	avail[j].next = l->next;
 	blocks[avail[j].next].prev = 0;
 	l->prev = l->next = 0;
-	l->tag = 0;
+	l->tag = Used;
 	l->kval = k;
 
 	/*
@@ -285,26 +321,28 @@ xphysalloc(Bal *b, u64int size)
 		 */
 		j--;
 		p = &blocks[BLOCK(b,i) + (UNO<<j)/(b->bminsz)];
-		p->tag = 1;
+		p->tag = Avail;
 		p->kval = j;
 		p->next = avail[j].next;
 		p->prev = 0;
 		if(p->next != 0)
 			blocks[BLOCK(b,p->next)].prev = i + (UNO<<j)/(b->bminsz);
 		avail[j].next = i + (UNO<<j)/(b->bminsz);
-		DBG("bsr: split @ i %d BLOCK(b,i) %ld j %d next %d (%d) tag %d\n",
-			i, p - blocks, j, p->next, BLOCK(b,p->next), p->tag);
+		DBG("bsr: split @ i %d BLOCK(b,i) %ld j %d next %d (%d) %s\n",
+			i, p - blocks, j, p->next, BLOCK(b,p->next),
+			p->tag?"avail":"used");
 	}
 	b->nfree -= size/b->bminsz;
 	unlock(&budlock);
 
 	m = b->memory + b->bminsz*BLOCK(b,i);
 	assert(m >= b->base && m < b->base + b->size);
+	blocks[BLOCK(b,i)].p = tag;
 	return m;
 }
 
 uintmem
-physalloc(u64int size, int *colorp)
+physalloc(u64int size, int *colorp, void *tag)
 {
 	int i, color;
 	uintmem m;
@@ -315,13 +353,13 @@ physalloc(u64int size, int *colorp)
 		color %= ndoms;
 		if(bal[color].kmin > 0){
 			*colorp = color;
-			m = xphysalloc(&bal[color], size);
+			m = xphysalloc(&bal[color], size, tag);
 		}
 	}
 	if(m == 0)
 		for(i = 0; i < ndoms; i++)
 			if(bal[i].kmin > 0)
-				if((m = xphysalloc(&bal[i], size)) != 0){
+				if((m = xphysalloc(&bal[i], size, tag)) != 0){
 					*colorp = i;
 					return m;
 				}
@@ -336,7 +374,7 @@ dump(Bal *b)
 
 	blocks = b->blocks;
 	for(i = 0; i < (UNO<<(b->kmax-b->kmin+1)); i++){
-		if(blocks[i].tag == 0)
+		if(blocks[i].tag == Used)
 			continue;
 		print("blocks[%d]: size %d prev %d next %d\n",
 			i, 1<<b->blocks[i].kval, blocks[i].prev, blocks[i].next);
