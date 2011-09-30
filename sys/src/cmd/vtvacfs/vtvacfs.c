@@ -204,19 +204,29 @@ struct map *findscore(u8int *score)
 }
 
 int
-getdata(u8int *score, u8int *data, u8int len, u8int blocktype)
+getdata(u8int *score, u8int *data, int len, u8int blocktype)
 {
 	struct map *m = findscore(score);
-	if (! m)
+	trace(TraceRpc, "<-getdata([%V],%#p,%d, %d", score, data, len, blocktype);
+	if (! m){
+		trace(TraceRpc, "getdata->-1");
 		return -1;
+	}
 	if (len > m->len)
 		len = m->len;
 	memmove(data, m->data, len);
 	if (m->blocktype != blocktype)
 		fprint(2, "Mismatched blocktype! now what?\n");
+		trace(TraceRpc, "getdata->%d", len);
 	return len;
 }
 
+int	
+mmvtread(uchar score[VtScoreSize], uint type, uchar *buf, int n)
+{
+print("mmvtread: %d\n", n);
+	return getdata(score, buf, n, type);
+}
 
 int
 putscore(Packet *p, u8int *score, uchar blocktype)
@@ -247,6 +257,7 @@ putdata(u8int *score, u8int *data, int len, uchar blocktype)
 	/* leave room for the length. This will make sure we still work for the 
 	 * mmap'ed version.
 	 */
+	trace(TraceRpc, "<-putdata([%V],%#p,%d, %d", score, data, len, blocktype);
 	mmventidata += 4;
 	/* could also use ainc here */
 	memmove(mmventidata, data, len);
@@ -255,7 +266,14 @@ putdata(u8int *score, u8int *data, int len, uchar blocktype)
 
 	//fprint(2, "mmventidata now %p\n", mmventidata);
 	syncentry(&maps[ix]);
+	trace(TraceRpc, "putdata->%d", maps[ix].len);
 	return maps[ix].len;
+}
+
+int	
+mmvtwrite(uchar score[VtScoreSize], uint type, uchar *buf, int n)
+{
+	return putdata(score, buf, n, type);
 }
 
 

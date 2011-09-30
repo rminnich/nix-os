@@ -1,8 +1,8 @@
-#include "stdinc.h"
-#include "vac.h"
-#include "dat.h"
-#include "fns.h"
-#include "error.h"
+#include "/sys/src/cmd/vac/stdinc.h"
+#include "/sys/src/cmd/vac/vac.h"
+#include "/sys/src/cmd/vac/dat.h"
+#include "/sys/src/cmd/vac/fns.h"
+#include "/sys/src/cmd/vac/error.h"
 
 #define debug 0
 
@@ -24,6 +24,8 @@
  */
  
 static int filemetaflush(VacFile*, char*);
+int mmvtwrite(uchar score[VtScoreSize], uint type, uchar *buf, int n);
+int mmvtread(uchar score[VtScoreSize], uint type, uchar *buf, int n);
 
 struct VacFile
 {
@@ -1767,26 +1769,15 @@ readscore(int fd, uchar score[VtScoreSize])
 }
 
 VacFs*
-vacfsopen(VtConn *z, char *file, int mode, int ncache)
+vacfsopen(VtConn *z, char *scorez, int mode, int ncache)
 {
 	int fd;
 	uchar score[VtScoreSize];
 	char *prefix;
 	
-	if(vtparsescore(file, &prefix, score) >= 0){
-		if(strcmp(prefix, "vac") != 0){
-			werrstr("not a vac file");
-			return nil;
-		}
-	}else{
-		fd = open(file, OREAD);
-		if(fd < 0)
-			return nil;
-		if(readscore(fd, score) < 0){
-			close(fd);
-			return nil;
-		}
-		close(fd);
+	if(vtparsescore(scorez, &prefix, score)){
+		werrstr("not a valid vac string");
+		return nil;
 	}
 	return vacfsopenscore(z, score, mode, ncache);
 }
@@ -1801,12 +1792,12 @@ vacfsopenscore(VtConn *z, u8int *score, int mode, int ncache)
 	VacFile *root;
 	VtFile *r;
 	VtEntry e;
-
-	n = vtread(z, score, VtRootType, buf, VtRootSize);
+	print("vacfsopenscore %d", VtRootSize);
+	n = mmvtread(score, VtRootType, buf, VtRootSize);
 	if(n < 0)
 		return nil;
 	if(n != VtRootSize){
-		werrstr("vtread on root too short");
+		werrstr("mmvtread on root too short");
 		return nil;
 	}
 
@@ -2060,7 +2051,7 @@ vacfssync(VacFs *fs)
 	root.blocksize = fs->bsize;
 	memmove(root.prev, fs->score, VtScoreSize);
 	vtrootpack(&root, buf);
-	if(vtwrite(fs->z, fs->score, VtRootType, buf, VtRootSize) < 0){
+	if(mmvtwrite(fs->score, VtRootType, buf, VtRootSize) < 0){
 		werrstr("writing root: %r");
 		return -1;
 	}

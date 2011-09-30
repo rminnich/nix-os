@@ -1,19 +1,37 @@
 </$objtype/mkfile
 
 MYLIBFILES=\
-	file\
-	patch\
+	vacfile\
+#	patch\
 	vacfs\
+	vtcache
 
-LIB=${MYLIBFILES:%=%.$O} /sys/src/cmd/venti/srv/libvs.a$O /sys/src/cmd/vac/pack.$O /sys/src/cmd/vac/error.$O
+#V=/sys/src/libventi
+#VC=/sys/src/cmd/venti/srv
+#
+#VLIB=${V}/file.$O\
+#	${VC}/trace.$O\
+#	${VC}/utils.$O\
+#	${VC}/stats.$O\
+#	${VC}/icache.$O\
+#	${VC}/httpd.$O\
+#	${VC}/index.$O\
+#	${VC}/clump.$O\
+#	${VC}/zblock.$O\
+#	${VC}/graph.$O\
+#	${VC}/ifile.$O\
+
+VLIB=libvs.a$O
+
+LIB=${MYLIBFILES:%=%.$O} ${VLIB} /sys/src/cmd/vac/pack.$O /sys/src/cmd/vac/error.$O
 
 HFILES=\
 	/sys/include/venti.h\
-	stdinc.h\
-	error.h\
-	vac.h\
-	dat.h\
-	fns.h\
+	/sys/src/cmd/vac/stdinc.h\
+	/sys/src/cmd/vac/vac.h\
+	/sys/src/cmd/vac/dat.h\
+	/sys/src/cmd/vac/fns.h\
+	/sys/src/cmd/vac/error.h\
 
 TARG=vtvacfs
 BIN=/$objtype/bin

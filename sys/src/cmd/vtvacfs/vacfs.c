@@ -1,6 +1,6 @@
-#include "stdinc.h"
+#include "/sys/src/cmd/vac/stdinc.h"
 #include <fcall.h>
-#include "vac.h"
+#include "/sys/src/cmd/vac/vac.h"
 
 #define convM2Su(a, b, c, d) convM2S(a, b, c)
 #define convS2Mu(a, b, c, d) convS2M(a, b, c)
@@ -122,7 +122,6 @@ vacfs(void)
 {
 	char *defsrv, *srvname;
 	int p[2], fd;
-	char *host = nil;
 	long ncache;
 	
 	defsrv = "mmventi";
@@ -215,6 +214,13 @@ rattach(Fid *f)
 	/* since the score is in the aname :-) */
 	VacFile *file;
 	char err[80];
+	char *score = rhdr.aname;
+
+	fs = vacfsopen(nil, score, VtOREAD, 1024);
+	if (fs == nil) {
+		rerrstr(err, sizeof err);
+		return vtstrdup(err);
+	}
 
 	file = vacfsgetroot(fs);
 	if(file == nil) {
@@ -633,6 +639,8 @@ io(void)
 {
 	char *err;
 	int n;
+	dflag=2;
+	fmtinstall('G', fcallfmt);
 
 	for(;;){
 		n = read9pmsg(mfd[0], mdata, sizeof mdata);
@@ -642,7 +650,7 @@ io(void)
 			sysfatal("convM2S conversion error");
 
 		if(dflag)
-			fprint(2, "vacfs:<-%F\n", &rhdr);
+			fprint(2, "vacfs:<-%G\n", &rhdr);
 
 		thdr.data = (char*)mdata + IOHDRSZ;
 		if(!fcalls[rhdr.type])
@@ -658,7 +666,7 @@ io(void)
 		}
 		thdr.tag = rhdr.tag;
 		if(dflag)
-			fprint(2, "vacfs:->%F\n", &thdr);
+			fprint(2, "vacfs:->%G\n", &thdr);
 		n = convS2Mu(&thdr, mdata, messagesize, dotu);
 		if(n <= BIT16SZ)
 			sysfatal("convS2Mu conversion error");
