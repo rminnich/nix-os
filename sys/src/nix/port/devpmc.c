@@ -115,10 +115,11 @@ pmcinit(void)
 	ncores = 0;
 	nr = pmcnregs();
 	for(i = 0; i < MACHMAX; i++) {
-		if((mp = sys->machptr[i]) != nil && mp->online != 0)
+		if((mp = sys->machptr[i]) != nil && mp->online != 0){
 			ncores++;
-		for(j = 0; j < nr; j++)
-			pmcnull(&mp->pmc[j]);
+			for(j = 0; j < nr; j++)
+				pmcnull(&mp->pmc[j]);
+		}
 	}
 	topdirinit(ncores);
 	ctrdirinit();
