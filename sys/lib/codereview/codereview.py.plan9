@@ -46,6 +46,11 @@ import subprocess
 import threading
 from HTMLParser import HTMLParser
 
+
+if os.environ.get('EDITOR') is None:
+	os.environ['EDITOR'] = "acme"
+
+
 import simplejson as json
 
 # The standard 'json' package is new in Python 2.6.
@@ -76,6 +81,12 @@ try:
 except:
 	def findcommonincoming(repo, remote):
 		return repo.findcommonincoming(remote)
+
+# in Mercurial 1.9 the cmdutil.match and cmdutil.revpair moved to scmutil
+if hgversion >= '1.9':
+	from mercurial import scmutil
+else:
+	scmutil = cmdutil
 
 oldMessage = """
 The code review extension requires Mercurial 1.3 or newer.
@@ -131,6 +142,8 @@ releaseBranch = None
 
 #######################################################################
 # RE for files ignored for hg change unless -a is given.
+# To override, add ignored_for_change = .... in the [codereview] section of /.hg/hgrc
+#
 ignored_for_change = "((^(386|amd64)/(lib|bin)/)|(386/init$)|(amd64/init$)|(^acme/bin/)|(\.[568]$)|(/[568]\.)|(^sys/log/))"
 
 
@@ -725,14 +738,14 @@ _change_prolog = """# Change list.
 # Get effective change nodes taking into account applied MQ patches
 def effective_revpair(repo):
     try:
-	return cmdutil.revpair(repo, ['qparent'])
+	return scmutil.revpair(repo, ['qparent'])
     except:
-	return cmdutil.revpair(repo, None)
+	return scmutil.revpair(repo, None)
 
 # Return list of changed files in repository that match pats.
 # Warn about patterns that did not match.
 def matchpats(ui, repo, pats, opts):
-	matcher = cmdutil.match(repo, pats, opts)
+	matcher = scmutil.match(repo, pats, opts)
 	node1, node2 = effective_revpair(repo)
 	modified, added, removed, deleted, unknown, ignored, clean = repo.status(node1, node2, matcher, ignored=True, clean=True, unknown=True)
 	return (modified, added, removed, deleted, unknown, ignored, clean)
@@ -839,7 +852,6 @@ Examples:
 
 '''
 
-	
 
 def promptremove(ui, repo, f):
 	if promptyesno(ui, "hg remove %s (y/n)?" % (f,)):
@@ -971,6 +983,11 @@ def ReplacementForCmdutilMatch(repo, pats=None, opts=None, globbed=False, defaul
 				raise util.Abort("no files in CL " + clname)
 			files = Add(files, cl.files)
 	pats = Sub(pats, taken) + ['path:'+f for f in files]
+
+	# work-around for http://selenic.com/hg/rev/785bbc8634f8
+	if hgversion >= '1.9' and not hasattr(repo, 'match'):
+		repo = repo[None]
+
 	return original_match(repo, pats=pats, opts=opts, globbed=globbed, default=default)
 
 def RelativePath(path, cwd):
@@ -1258,7 +1275,7 @@ def clpatch_or_undo(ui, repo, clname, opts, mode):
 		# sequence numbers get to be 7 digits long.
 		if re.match('^[0-9]{7,}$', clname):
 			found = False
-			matchfn = cmdutil.match(repo, [], {'rev': None})
+			matchfn = scmutil.match(repo, [], {'rev': None})
 			def prep(ctx, fns):
 				pass
 			for ctx in cmdutil.walkchangerevs(repo, matchfn, {'rev': None}, prep):
@@ -1570,9 +1587,9 @@ def pending(ui, repo, *pats, **opts):
 def reposetup(ui, repo):
 	global original_match
 	if original_match is None:
-#		start_status_thread()
-		original_match = cmdutil.match
-		cmdutil.match = ReplacementForCmdutilMatch
+		#start_status_thread()
+		original_match = scmutil.match
+		scmutil.match = ReplacementForCmdutilMatch
 		RietveldSetup(ui, repo)
 
 def CheckContributor(ui, repo, user=None):
@@ -1791,7 +1808,7 @@ def sync_changes(ui, repo):
 				break
 			Rev(rev)
 	else:
-		matchfn = cmdutil.match(repo, [], {'rev': None})
+		matchfn = scmutil.match(repo, [], {'rev': None})
 		def prep(ctx, fns):
 			pass
 		for ctx in cmdutil.walkchangerevs(repo, matchfn, {'rev': None}, prep):
@@ -2293,6 +2310,10 @@ def RietveldSetup(ui, repo):
 	if x is not None:
 		server = x
 
+	x = ui.config("codereview", "ignored_for_change")
+	if x is not None:
+		ignored_for_change = x
+
 	# TODO(rsc): Take from ui.username?
 	email = None
 	x = ui.config("codereview", "email")
@@ -2428,7 +2449,7 @@ def GetEmail(prompt):
 	for next time we prompt.
 
 	"""
-	last_email_file_name = os.path.expanduser("~/.last_codereview_email_address")
+	last_email_file_name = os.path.expanduser("~/lib/codereview/email")
 	last_email = ""
 	if os.path.exists(last_email_file_name):
 		try:
@@ -2713,7 +2734,7 @@ class HttpRpcServer(AbstractRpcServer):
 		opener.add_handler(urllib2.HTTPSHandler())
 		opener.add_handler(urllib2.HTTPErrorProcessor())
 		if self.save_cookies:
-			self.cookie_file = os.path.expanduser("~/.codereview_upload_cookies_" + server)
+			self.cookie_file = os.path.expanduser("~/lib/codereview/upload_cookies_" + server)
 			self.cookie_jar = cookielib.MozillaCookieJar(self.cookie_file)
 			if os.path.exists(self.cookie_file):
 				try:
