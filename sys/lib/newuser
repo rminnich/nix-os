@@ -25,8 +25,6 @@ bind -a $x^home/bin/rc /bin
 bind -a $x^home/bin/$x^cputype /bin
 bind -c $x^home/tmp /tmp
 font = /lib/font/bit/anonpro/anon.14.font
-# Make acme happy
-fn acme { /bin/acme -f $font $* }
 switch($x^service){
 case terminal
 	plumber
