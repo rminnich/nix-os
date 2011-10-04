@@ -6,6 +6,7 @@
 typedef struct Alt	Alt;
 typedef struct Channel	Channel;
 typedef struct Ref	Ref;
+#pragma incomplete	Channel
 
 /*
  * Channel structure.  S is the size of the buffer.  For unbuffered channels
@@ -18,18 +19,6 @@ enum {
 	Nqshift = 5,		/* log₂ # of bits in long */
 	Nqmask =  -1,
 	Nqbits = (1 << Nqshift) * 2,
-};
-
-struct Channel {
-	int	s;		/* Size of the channel (may be zero) */
-	uint	f;		/* Extraction point (insertion pt: (f+n) % s) */
-	uint	n;		/* Number of values in the channel */
-	int	e;		/* Element size */
-	int	freed;		/* Set when channel is being deleted */
-	volatile Alt **qentry;	/* Receivers/senders waiting (malloc) */
-	volatile int nentry;	/* # of entries malloc-ed */
-	volatile int closed;	/* channel is closed */
-	uchar	v[1];		/* Array of s values in the channel */
 };
 
 
