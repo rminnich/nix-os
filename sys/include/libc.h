@@ -100,6 +100,7 @@ extern	void	setrealloctag(void*, ulong);
 extern	ulong	getmalloctag(void*);
 extern	ulong	getrealloctag(void*);
 extern	void*	malloctopoolblock(void*);
+extern	void	outofmemoryexits(int);
 
 /*
  * print routines

@@ -43,6 +43,9 @@ ulong	getrealloctag(void *ptr)
 .B
 void*	malloctopoolblock(void*)
 .PP
+.B
+void	outofmemoryexits(int)
+.PP
 .SH DESCRIPTION
 .I Malloc
 and
@@ -214,6 +217,14 @@ library for
 .I acid
 can be used to obtain traces of malloc execution; see
 .IR acid (1).
+.PP
+If
+.I outofmemoryexits
+is called with a non-zero argument, any memory allocation
+failed due to out of memory conditions is handled by calling
+.IR sysfatal (2)
+instead of returning an error indication to the user. Calling
+it with zero restores normal behavior.
 .SH BUGS
 The different specification of
 .I calloc
