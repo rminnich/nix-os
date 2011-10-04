@@ -26,18 +26,6 @@ typedef struct Thread	Thread;
 typedef struct Execargs	Execargs;
 typedef struct Proc		Proc;
 
-struct Channel {
-	int	s;		/* Size of the channel (may be zero) */
-	uint	f;		/* Extraction point (insertion pt: (f+n) % s) */
-	uint	n;		/* Number of values in the channel */
-	int	e;		/* Element size */
-	int	freed;		/* Set when channel is being deleted */
-	volatile Alt **qentry;	/* Receivers/senders waiting (malloc) */
-	volatile int nentry;	/* # of entries malloc-ed */
-	volatile int closed;	/* channel is closed */
-	uchar	v[1];		/* Array of s values in the channel */
-};
-
 /* must match list in sched.c */
 typedef enum
 {
