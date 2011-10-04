@@ -227,7 +227,6 @@ putscore(Packet *p, u8int *score, uchar blocktype)
 void
 threadmain(int argc, char *argv[])
 {
-	void vacfs(void);
 	char *haddr, *vaddr, *webroot, *file;
 
 	traceinit();
@@ -315,7 +314,6 @@ threadmain(int argc, char *argv[])
 	else
 		vtproc(ventiserver, nil);
 
-	vacfs();
 	threadexits(nil);
 }
 
