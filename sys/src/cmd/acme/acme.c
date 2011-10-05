@@ -41,6 +41,12 @@ char		*fontnames[2] =
 	"/lib/font/bit/lucm/unicode.9.font"
 };
 
+char		*altfontnames[2] =
+{
+	"/lib/font/bit/anonpro/anon.14.font",
+	"/lib/font/bit/fixed/unicode.9x15.font"
+};
+
 Command *command;
 
 void	acmeerrorinit(void);
@@ -67,6 +73,10 @@ threadmain(int argc, char *argv[])
 	rfork(RFENVG|RFNAMEG);
 
 	ncol = -1;
+
+	for(i=0; i<nelem(fontnames); i++)
+		if(access(fontnames[i], AEXIST) != 0)
+			fontnames[i] = altfontnames[i];
 
 	loadfile = nil;
 	ARGBEGIN{
