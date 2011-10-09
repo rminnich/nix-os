@@ -1,4 +1,4 @@
-.TH QIO 10
+.TH QIO 9
 .SH NAME
 qio: qget, qdiscard, qconsume, qpass, qproduce, qcopy, qopen, qbread, qread, qbwrite, qwrite, qiwrite, qfree, qclose, qhangup, qreopen, qlen, qwindow, qcanread, qsetlimit, qnoblock, qflush, qfull \- queued I/O for devices
 .SH SYNOPSIS
@@ -81,7 +81,7 @@ Data is stored in a
 structure as a sequence of variable-sized
 .BR Blocks ;
 see
-.IR allocb (10).
+.IR allocb (9).
 .PP
 .I Qopen
 initialises and returns a pointer to a new
@@ -118,7 +118,7 @@ for the given
 .RB ( Ehungup
 by default).
 Subsequent attempts to write to the queue raise an
-.IR error (10).
+.IR error (9).
 .I Qhangup
 does not flush the queue: subsequent read requests are
 handled normally until the queue empties.
@@ -126,7 +126,7 @@ handled normally until the queue empties.
 and the other functions then return their conventional values
 for a hungup stream: 0, -1 or a null pointer, depending on the function.
 After a few such attempts by any process, an
-.IR error (10)
+.IR error (9)
 is raised (typically
 .BR Ehungup )
 on each subsequent read.
@@ -198,7 +198,7 @@ is called from the reading (or writing) process, or an interrupt handler, it
 must not block.
 .PP
 Interrupt handlers must not
-.IR sleep (10),
+.IR sleep (9),
 and are therefore restricted to using only the non-blocking functions described below.
 .SS "Stream mode and message mode"
 In stream mode,
@@ -264,7 +264,7 @@ the data is discarded without notice.
 normally returns
 .IR len ,
 but raises an
-.IR error (10)
+.IR error (9)
 if the queue is closed (see
 .I qhangup
 and
@@ -476,5 +476,5 @@ by calls that would otherwise block.
 .SH SOURCE
 .B /sys/src/9/port/qio.c
 .SH SEE ALSO
-.IR allocb (10),
-.IR ref (10)
+.IR allocb (9),
+.IR ref (9)

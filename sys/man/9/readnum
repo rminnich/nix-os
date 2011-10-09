@@ -1,4 +1,4 @@
-.TH READNUM 10
+.TH READNUM 9
 .SH NAME
 readnum, readstr \- return values from read from device
 .SH SYNOPSIS

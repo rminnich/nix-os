@@ -1,4 +1,4 @@
-.TH LOCK 10
+.TH LOCK 9
 .SH NAME
 lock, canlock, ilock, iunlock, unlock \- spin locks
 .SH SYNOPSIS
@@ -22,10 +22,10 @@ These primitives control access to shared
 resources using spin locks.
 They in turn are used to build higher-level synchronisation mechanisms
 such as those described in
-.IR sleep (10),
-.IR qlock (10)
+.IR sleep (9),
+.IR qlock (9)
 and
-.IR qio (10).
+.IR qio (9).
 They should be used only to protect short critical sections
 that update shared data structures.
 .PP
@@ -36,7 +36,7 @@ until it succeeds.
 .I Lock
 should not be used to lock a structure shared with an interrupt handler
 unless interrupts are disabled by
-.IR splhi (10)
+.IR splhi (9)
 before attempting the lock;
 it is better to use
 .IR ilock ,
@@ -74,7 +74,7 @@ and on a multiprocessor the spin lock excludes an interrupt handler running on a
 .I Ilock
 never reschedules the caller, nor must a caller allow itself to be rescheduled
 (eg, by calling
-.IR sleep (10))
+.IR sleep (9))
 before releasing the lock.
 .PP
 .I Iunlock
@@ -103,4 +103,4 @@ to interlock with an interrupt routine, and similar blunders.
 .br
 .B /sys/src/9/*/l.s
 .SH SEE ALSO
-.IR qlock (10)
+.IR qlock (9)

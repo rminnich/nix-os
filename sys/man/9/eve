@@ -1,4 +1,4 @@
-.TH EVE 10
+.TH EVE 9
 .SH NAME
 eve, iseve \- privileged user
 .SH SYNOPSIS
@@ -35,7 +35,7 @@ to write a new identity into the
 .B /dev/user
 file.
 The privileges are strictly local and do not extend into the network
-(in particular, to file servers).
+(in particular, to file servers—even ones running on the local machine).
 .SH SOURCE
 .B /sys/src/9/port/auth.c
 .SH SEE ALSO

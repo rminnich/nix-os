@@ -1,4 +1,4 @@
-.TH SLEEP 10
+.TH SLEEP 9
 .SH NAME
 sleep, wakeup, tsleep, return0 \- process synchronisation
 .SH SYNOPSIS
@@ -21,7 +21,7 @@ synchronise with an interrupt handler or another kernel process.
 In particular, they are used by device drivers to wait for an event to be signalled on
 receipt of an interrupt.
 (In practice, they are most often used indirectly, through
-.IR qio (10)
+.IR qio (9)
 for instance.)
 .PP
 The caller of
@@ -98,25 +98,25 @@ and
 can be interrupted by
 .IR swiproc
 (see
-.IR kproc (10)),
+.IR kproc (9)),
 causing a non-local goto through a call to
-.IR error (10).
+.IR error (9).
 .SH DIAGNOSTICS
 There can be at most one process waiting on a
 .BR Rendez ,
 and if two processes collide, the system will
-.IR panic (10)
+.IR panic (9)
 .RB (`` "double sleep" '').
 Access to a
 .B Rendez
 must therefore be serialised by some other mechanism, usually
-.IR qlock (10).
+.IR qlock (9).
 .SH SOURCE
 .B /sys/src/9/port/proc.c
 .SH SEE ALSO
-.IR lock (10),
-.IR qlock (10),
-.IR delay (10)
+.IR lock (9),
+.IR qlock (9),
+.IR delay (9)
 .br
 ``Process Sleep and Wakeup on a Shared-memory Multiprocessor'',
 in

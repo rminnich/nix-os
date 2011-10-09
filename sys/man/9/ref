@@ -1,4 +1,4 @@
-.TH REF 10
+.TH REF 9
 .SH NAME
 Ref, incref, decref \- reference counts
 .SH SYNOPSIS
@@ -29,7 +29,7 @@ the
 .B Lock
 prevents concurrent updates
 (see
-.IR lock (10)).
+.IR lock (9)).
 .PP
 .I Incref
 atomically increments the reference count
@@ -52,7 +52,7 @@ if(decref(s) == 0)
 .SH DIAGNOSTICS
 .I Decref
 will
-.IR panic (10)
+.IR panic (9)
 if the count goes negative,
 revealing a reference counting bug.
 .SH SOURCE

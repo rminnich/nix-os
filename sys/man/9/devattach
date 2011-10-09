@@ -1,4 +1,4 @@
-.TH DEVATTACH 10
+.TH DEVATTACH 9
 .SH NAME
 devattach, devclone, devdir, devgen, devwalk, devdirread, devstat, devopen, devbread, devbwrite, devcreate, devremove, devwstat, devreset, devinit, devshutdown, openmode \- common device driver support
 .SH SYNOPSIS
@@ -117,7 +117,7 @@ with device specifier
 It is normally called by a driver's
 .I attach
 function (see
-.IR dev (10)).
+.IR dev (9)).
 The
 .B qid
 for the new channel is
@@ -132,7 +132,7 @@ bit remains in the
 returns a new channel that is a copy of
 .IR c .
 An attempt to clone an open channel causes a
-.IR panic (10).
+.IR panic (9).
 .PP
 The
 .L Dir
@@ -182,7 +182,7 @@ last modification time (set to kernel creation date)
 .TP
 .B gid
 group name (set to
-.IR eve (10))
+.IR eve (9))
 .TP
 .B length
 length in bytes (set to zero, which
@@ -489,7 +489,7 @@ varies; if more than
 bytes are needed,
 .I devstat
 raises the
-.IR error (10)
+.IR error (9)
 .BR Ebadarg .
 Otherwise, it returns the number of bytes in
 .I db
@@ -528,7 +528,7 @@ structures representing entries in the open directory
 These are converted to standard format (see
 .I convD2M
 in
-.IR styx (10))
+.IR fcall (2))
 and placed in the buffer
 .IR b .
 It returns the number of bytes in the result.
@@ -591,14 +591,14 @@ On the otherhand,
 if the open request was unsuccessful,
 .I devopen
 raises an appropriate
-.IR error (10)
+.IR error (9)
 and does not return.
 .PP
 .I Devbread
 returns a
 .B Block
 (see
-.IR allocb (10))
+.IR allocb (9))
 containing up to
 .I n
 bytes read,
@@ -639,7 +639,7 @@ on their files.
 and
 .I devwstat
 are stubs that raise an
-.IR error (10),
+.IR error (9),
 .BR Eperm .
 They can be named directly in a device driver's device
 switch (the
@@ -647,7 +647,7 @@ switch (the
 structure in
 .BR /sys/src/9/port/portdat.h :
 see
-.IR dev (10)).
+.IR dev (9)).
 .PP
 .IR Devreset ,
 .I devinit
@@ -686,7 +686,7 @@ becomes
 within the kernel.
 .I Openmode
 raises an
-.IR error (10)
+.IR error (9)
 .B Ebadarg
 instead of returning, if
 .I o
@@ -694,6 +694,6 @@ is an invalid mode (eg, reserved bits set).
 .SH SOURCE
 .B /sys/src/9/port/dev.c
 .SH SEE ALSO
-.IR allocb (10),
-.IR eve (10),
-.IR qio (10)
+.IR allocb (9),
+.IR eve (9),
+.IR qio (9)

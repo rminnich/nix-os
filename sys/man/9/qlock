@@ -1,4 +1,4 @@
-.TH QLOCK 10
+.TH QLOCK 9
 .SH NAME
 qlock, qunlock, canqlock, rlock, runlock, wlock, wunlock \- serial synchronisation
 .SH SYNOPSIS
@@ -28,10 +28,10 @@ void	wlock(RWlock *l)
 void	wunlock(RWlock *l)
 .SH DESCRIPTION
 The primitive locking functions described in
-.IR lock (10)
+.IR lock (9)
 guarantee mutual exclusion, but they implement spin locks,
 and should not be used if the process might
-.IR sleep (10)
+.IR sleep (9)
 within a critical section.
 The following functions serialise access to a resource by forming an orderly
 queue of processes.
@@ -101,5 +101,5 @@ The next pending process, whether reader or writer, is scheduled.
 .B /sys/src/9/port/qlock.c
 .br
 .SH SEE ALSO
-.IR lock (10),
-.IR splhi (10)
+.IR lock (9),
+.IR splhi (9)

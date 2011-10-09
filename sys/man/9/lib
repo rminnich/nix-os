@@ -1,4 +1,4 @@
-.TH LIB 10
+.TH LIB 9
 .SH NAME
 lib \- C library functions used by the kernel
 .SH SYNOPSIS
@@ -57,7 +57,7 @@ and
 and
 .I tokenize
 (see also
-.IR parsecmd (10))
+.IR parsecmd (9))
 .TP
 .IR quote (2)
 .br

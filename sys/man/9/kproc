@@ -1,4 +1,4 @@
-.TH KPROC 10
+.TH KPROC 9
 .SH NAME
 kproc, pexit, postnote \- kernel process creation, termination and interrupt
 .SH SYNOPSIS
@@ -24,13 +24,14 @@ is copied into the
 .B text
 field of the
 .B Proc
-structure of the new process; although the value is not visible to Limbo
-applications, it can appear in system messages written to the console.
+structure of the new process; this value is the name of the kproc in
+the output of
+.IR ps (1).
 The process is made runnable; it
 will run when selected by the scheduler
-.IR sched (10).
+.IR sched (9).
 The process is created with base and current priorities set to
-.B PriKproc .
+.BR PriKproc .
 It shares the kernel process group and thus name space.
 .PP
 A kernel process terminates only when it calls
@@ -61,20 +62,20 @@ to terminate a kernel process normally.
 sends a software interrupt to process
 .IR p ,
 causing it, if necessary, to wake from
-.IR sleep (10)
+.IR sleep (9)
 or break out of a
 .IR rendezvous (2),
 with an
-.IR error (10)
+.IR error (9)
 `interrupted'.
 Up to
 .B NNOTE
 notes can be pending at once (currently 5);
 if more than that arrive, the process is forced
 out of
-.B sleep
+.I sleep
 and
-.BR rendezvous ,
+.IR rendezvous ,
 but the message itself is discarded.
 .I Postnote
 returns non-zero iff the note has been
@@ -113,7 +114,7 @@ previously started by the driver using
 .I kproc ,
 that it should stop;
 the note will cause that process to raise an
-.IR error (10).
+.IR error (9).
 For example, a process started to read packets from a network device could
 be stopped as follows when the interface is unbound:
 .IP

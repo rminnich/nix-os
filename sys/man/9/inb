@@ -80,4 +80,4 @@ is in elements, not bytes.
 .SH SOURCE
 .B /sys/src/9/pc/l.s
 .SH SEE ALSO
-.IR dma (10)
+.IR dma (9)

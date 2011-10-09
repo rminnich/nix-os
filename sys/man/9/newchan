@@ -1,4 +1,4 @@
-.TH NEWCHAN 10
+.TH NEWCHAN 9
 .SH NAME
 newchan, chanfree, cclose, eqqid, eqchan, isdir, fdtochan, namec \- channel operations
 .SH SYNOPSIS
@@ -54,7 +54,7 @@ or
 .IR devclone ,
 when an existing channel is cloned;
 see
-.IR devattach (10).
+.IR devattach (9).
 .PP
 .I Chanfree
 frees the channel structure
@@ -106,7 +106,7 @@ checks that a given channel
 is a directory.
 If so, it returns;
 otherwise, it generates an
-.IR error (10),
+.IR error (9),
 .BR Enotdir .
 .PP
 The
@@ -156,7 +156,7 @@ On successful return, if
 is non-zero, the channel's reference count has been incremented.
 .I Fdtochan
 calls
-.IR error (10)
+.IR error (9)
 if it detects invalid uses, in particular an invalid file descriptor
 .IR fd .
 .PP
@@ -217,9 +217,9 @@ to close the channel, and frees
 .IR c .
 .SH DIAGNOSTICS
 Most functions call
-.IR error (10)
+.IR error (9)
 on any sort of error.
 .SH SOURCE
 .B /sys/src/9/port/chan.c
 .SH SEE ALSO
-.IR ref (10)
+.IR ref (9)

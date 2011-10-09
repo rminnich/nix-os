@@ -1,4 +1,4 @@
-.TH MALLOC 10
+.TH MALLOC 9
 .SH NAME
 malloc, mallocz, smalloc, realloc, calloc, free, msize, setmalloctag, setrealloctag, getmalloctag, getrealloctag, malloctopoolblock \- kernel memory allocator
 .SH SYNOPSIS
@@ -52,11 +52,11 @@ which is managed by
 the allocator
 .IR pool (2),
 which in turn replenishes the pool as required by calling
-.IR xalloc (10).
+.IR xalloc (9).
 All but
 .I smalloc
 (which calls
-.IR sleep (10))
+.IR sleep (9))
 may safely be called by interrupt handlers.
 .PP
 .I Malloc
@@ -190,4 +190,4 @@ return
 .B /sys/src/9/port/alloc.c
 .SH SEE ALSO
 .IR pool (2),
-.IR xalloc (10)
+.IR xalloc (9)

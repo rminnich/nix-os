@@ -1,4 +1,4 @@
-.TH ALLOCB 10
+.TH ALLOCB 9
 .SH NAME
 allocb, iallocb, freeb, freeblist, BLEN, blocklen, concatblock, copyblock, trimblock, packblock, padblock, pullblock, pullupblock, adjustblock, checkb \- data block management
 .SH SYNOPSIS
@@ -97,13 +97,13 @@ pointers, with a null pointer ending the list.
 are usually intended for a
 .B Queue
 (see
-.IR qio (10)),
+.IR qio (9)),
 but can be used independently.
 .PP
 A
 .B Block
 and its buffer are normally allocated by one call to
-.IR malloc (10)
+.IR malloc (9)
 and aligned on an 8 byte (\fLBY2V\fP) boundary.
 Some devices with particular allocation constraints
 (eg, requiring certain addresses for DMA) might allocate their own
@@ -117,9 +117,9 @@ Many
 .B Block
 operations cannot be used in interrupt handlers
 because they either
-.IR sleep (10)
+.IR sleep (9)
 or raise an
-.IR error (10).
+.IR error (9).
 Of operations that allocate blocks, only
 .IR iallocb
 is usable.
@@ -139,7 +139,7 @@ point to the start of the data.
 If it cannot allocate memory,
 .I allocb
 raises an
-.IR error (10);
+.IR error (9);
 it cannot be used by an interrupt handler.
 .PP
 .IR Iallocb
@@ -279,10 +279,10 @@ does some consistency checking of
 the state of
 .IR b ;
 a
-.IR panic (10)
+.IR panic (9)
 results if things look grim.
 It is intended for internal use by the queue I/O routines (see
-.IR qio (10))
+.IR qio (9))
 but could be used elsewhere.
 .PP
 The only functions that can be called at interrupt level are
@@ -297,7 +297,7 @@ and
 The others allocate memory and can potentially block.
 .SH DIAGNOSTICS
 Many functions directly or indirectly can raise an
-.IR error (10),
+.IR error (9),
 and callers must therefore provide for proper error recovery
 as described therein to prevent memory leaks and other bugs.
 Except for
@@ -309,4 +309,4 @@ returns a null pointer when it runs out of memory.
 .SH SOURCE
 .B /sys/src/9/port/allocb.c
 .SH SEE ALSO
-.IR qio (10)
+.IR qio (9)

@@ -1,4 +1,4 @@
-.TH XALLOC 10
+.TH XALLOC 9
 .SH NAME
 xalloc, xspanalloc, xfree \- basic memory management
 .SH SYNOPSIS
@@ -17,7 +17,7 @@ and
 .I xfree
 are primitives used by higher-level memory allocators in the kernel,
 such as
-.IR malloc (10).
+.IR malloc (9).
 They are not intended for use directly by most kernel routines.
 The main exceptions are routines that permanently allocate large structures,
 or need the special alignment properties guaranteed by
@@ -46,7 +46,7 @@ that must satisfy specific alignment restrictions.
 If
 .I xspanalloc
 cannot allocate memory to satisfy the given constraints, it will
-.IR panic (10).
+.IR panic (9).
 The technique it uses can sometimes cause memory to be wasted.
 Consequently,
 .I xspanalloc
@@ -69,4 +69,4 @@ Each line shows `address top size'.
 .SH SOURCE
 .B /sys/src/9/port/xalloc.c
 .SH SEE ALSO
-.IR malloc (10)
+.IR malloc (9)

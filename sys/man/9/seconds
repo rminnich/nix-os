@@ -1,4 +1,4 @@
-.TH SECONDS 10
+.TH SECONDS 9
 .SH NAME
 seconds, ticks, fastticks, HZ, MS2HZ, MS2TK, TK2MS, TK2SEC \- kernel times and time conversions
 .SH SYNOPSIS

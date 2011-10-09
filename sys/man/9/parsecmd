@@ -1,10 +1,16 @@
-.TH PARSECMD 10
+.TH PARSECMD 9
 .SH NAME
-parsecmd \- parse device commands
+parsecmd, cmderror, lookupcmd \- parse device commands
 .SH SYNOPSIS
 .ta \w'\fLCmdbuf* 'u
 .B
 Cmdbuf*	parsecmd(char *a, int n)
+.PP
+.B
+void		cmderror(Cmdbuf *cb, char *s)
+.PP
+.B
+Cmdtab*		lookupcmd(Cmdbuf *cb, Cmdtab *ctab, int nctab)
 .SH DESCRIPTION
 .I Parsecmd
 is an interface to
@@ -59,9 +65,44 @@ gives the number of fields.
 is allocated by
 .I smalloc
 (see
-.IR malloc (10)),
+.IR malloc (9)),
 and the caller is responsible for freeing it using
 .IR free .
+.I Cmderror
+prepends the given format with the original command,
+then calls
+.IR error (9).
+.PP
+Command strings may be turned into a (typically enumerated)
+integer with 
+.IR lookupcmd .
+The catchall
+.L *
+matches any text.  Unrecognized commands, or commands
+given an unacceptable number of arguments generate a
+call to
+.IR error .
+The definition is as follows
+.IP
+.EX
+.ta 6n +\w'char* 'u
+struct Cmdtab
+{
+	int	index;
+	char	*cmd;
+	int	narg;
+};
+.EE
+.PP
+The integer
+.B index
+is the number returned on command match.
+The string
+.B cmd
+is the command name, and
+.B narg
+is 0 (indicating a varadic function) or the
+number of arguments.
 .SH SOURCE
 .B /sys/src/9/port/parse.c
 .br

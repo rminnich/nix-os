@@ -1,4 +1,4 @@
-.TH ERROR 10
+.TH ERROR 9
 .SH NAME
 error, nexterror, poperror, waserror \- error handling functions
 .SH SYNOPSIS
@@ -26,7 +26,8 @@ at the cost of requiring kernel routines to adhere to a strict discipline.
 Each process has in its defining kernel
 .B Proc
 structure a stack of labels,
-currently 32 elements deep.
+.B NERR
+(currently 64)  elements deep.
 A kernel function that must perform a clean up or recovery action on an error
 makes a stylised call to
 .IR waserror ,
@@ -69,7 +70,7 @@ which must not call
 (there being nothing further on the stack), but calls
 .I pexit
 (see
-.IR kproc (10))
+.IR kproc (9))
 instead,
 to terminate the process.
 .PP
@@ -164,4 +165,4 @@ The description above has many instances of
 and
 .IR "must not" .
 .SH SEE ALSO
-.IR panic (10)
+.IR panic (9)

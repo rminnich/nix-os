@@ -1,4 +1,4 @@
-.TH DELAY 10
+.TH DELAY 9
 .SH NAME
 delay, microdelay, addclock0link \- small delays, clock interrupts
 .SH SYNOPSIS
@@ -25,16 +25,17 @@ microseconds.
 For delays on the order of clock ticks,
 .I tsleep
 (see
-.IR sleep (10))
+.IR sleep (9))
 provides a better alternative to the busy waiting of these routines.
 .PP
 .I Addclock0link
 adds
 .I clockf
-to a list of functions to be executed at each clock interrupt.
+to a list of functions to be executed at each clock interrupt on
+the first processor.
 .SH SOURCE
 .B /sys/src/9/port/portclock.c
 .br
 .B /sys/src/9/*/clock.c
 .SH SEE ALSO
-.IR sleep (10)
+.IR sleep (9)
