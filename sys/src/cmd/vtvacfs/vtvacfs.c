@@ -283,12 +283,15 @@ threadmain(int argc, char *argv[])
 {
 	void vacfs(void);
 	char *haddr, *vaddr, *webroot, *file;
-
+	extern int chattyventi;
+	chattyventi = 16;
 	traceinit();
 	threadsetname("main");
 	vaddr = nil;
 	haddr = "tcp!*!9000";
 	webroot = nil;
+	extern int vttracelevel;
+	vttracelevel = 1;
 	ARGBEGIN{
 	case 'a':
 		vaddr = EARGF(usage());

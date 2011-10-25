@@ -1286,6 +1286,7 @@ vacfilecreate(VacFile *fp, char *elem, ulong mode)
 	 * Okay, time to actually create something.  Lock the two
 	 * halves of the directory and create a file.
 	 */
+	fprint(2, "try to create someting\n");
 	if(vtfilelock2(fp->source, fp->msource, -1) < 0)
 		goto Err1;
 	ff = filealloc(fp->fs);
@@ -1294,6 +1295,7 @@ vacfilecreate(VacFile *fp, char *elem, ulong mode)
 	if(mode & ModeDir)
 		type = VtDirType;
 	mr = nil;
+fprint(2, "vtfilecreate...\n");
 	if((r = vtfilecreate(pr, pr->psize, pr->dsize, type)) == nil)
 		goto Err;
 	if(mode & ModeDir)
@@ -1406,25 +1408,37 @@ Err:
 int
 vacfilewrite(VacFile *f, void *buf, int cnt, vlong offset)
 {
+	int i = 0;
 	if(vacfileisdir(f)){
 		werrstr(ENotFile);
 		return -1;
 	}
+		fprint(2, "vacfilewrite%d.", i++);
 	if(filelock(f) < 0)
 		return -1;
+	if (1)
+		fprint(2, "vacfilewrite%d.", i++);
 	if(f->source->mode != VtORDWR){
 		werrstr(EReadOnly);
 		goto Err;
 	}
+	if (1)
+		fprint(2, "vacfilewrite%d.", i++);
 	if(offset < 0){
 		werrstr(EBadOffset);
 		goto Err;
 	}
 
+	if (1)
+		fprint(2, "vacfilewrite%d.", i++);
 	if(vtfilelock(f->source, -1) < 0)
 		goto Err;
+	if (1)
+		fprint(2, "vacfilewrite%d.", i++);
 	if(f->dir.mode & ModeAppend)
 		offset = vtfilegetsize(f->source);
+	if (1)
+		fprint(2, "vacfilewrite%d.", i++);
 	if(vtfilewrite(f->source, buf, cnt, offset) != cnt
 	|| vtfileflushbefore(f->source, offset) < 0){
 		vtfileunlock(f->source);
@@ -1432,6 +1446,8 @@ vacfilewrite(VacFile *f, void *buf, int cnt, vlong offset)
 	}
 	vtfileunlock(f->source);
 	fileunlock(f);
+	if (1)
+		fprint(2, "vacfilewriteret%d.", cnt);
 	return cnt;
 
 Err:

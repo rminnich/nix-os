@@ -1284,6 +1284,8 @@ vacfilecreate(VacFile *fp, char *elem, ulong mode)
 	 * Okay, time to actually create something.  Lock the two
 	 * halves of the directory and create a file.
 	 */
+	if (chattyventi)
+		fprint(2, "vacfilecreate: about to lock two halves, create file\n");
 	if(vtfilelock2(fp->source, fp->msource, -1) < 0)
 		goto Err1;
 	ff = filealloc(fp->fs);

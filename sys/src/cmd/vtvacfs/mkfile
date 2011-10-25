@@ -4,6 +4,7 @@ MYLIBFILES=\
 	vacfile\
 #	patch\
 	vacfs\
+	vtfile\
 	vtcache
 
 #V=/sys/src/libventi
@@ -21,7 +22,7 @@ MYLIBFILES=\
 #	${VC}/graph.$O\
 #	${VC}/ifile.$O\
 
-VLIB=libvs.a$O
+VLIB=/sys/src/cmd/venti/srv/libvs.a$O
 
 LIB=${MYLIBFILES:%=%.$O} ${VLIB} /sys/src/cmd/vac/pack.$O /sys/src/cmd/vac/error.$O
 
@@ -47,3 +48,4 @@ UPDATE=\
 default:V: all
 
 </sys/src/cmd/mkmany
+

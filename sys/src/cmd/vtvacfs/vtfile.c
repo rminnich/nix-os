@@ -520,7 +520,9 @@ blockwalk(VtBlock *p, int index, VtCache *c, int mode, VtEntry *e)
 /*print("walk from %V/%d ty %d to %V ty %d\n", p->score, index, p->type, score, type); */
 
 	if(mode == VtOWRITE && vtglobaltolocal(score) == NilBlock){
+	print("VtOWRITE && NilBlock\n");
 		b = vtcacheallocblock(c, type);
+		print("vtcachealloblcok returns %p\n", b);
 		if(b)
 			goto HaveCopy;
 	}else
@@ -716,8 +718,10 @@ assert(b->type == VtDirType);
 
 	/* mode for intermediate block */
 	m = mode;
+	/* why is this here? *
 	if(m == VtOWRITE)
 		m = VtORDWR;
+	* well we disable it */
 
 	for(i=DEPTH(e.type); i>=0; i--){
 		bb = blockwalk(b, index[i], r->c, i==0 ? mode : m, &e);
@@ -834,6 +838,28 @@ fileloadblock(VtFile *r, int mode)
 	switch(r->mode){
 	default:
 		assert(0);
+	case VtOWRITE:
+		assert(r->mode == VtORDWR);
+		if(r->local == 1){
+			b = vtcacheglobal(r->c, r->score, VtDirType);
+			if(b == nil)
+				return nil;
+			b->pc = getcallerpc(&r);
+			return b;
+		}
+		assert(r->parent != nil);
+		if(vtfilelock(r->parent, VtORDWR) < 0)
+			return nil;
+		b = vtfileblock(r->parent, r->offset/r->epb, VtORDWR);
+		if(b == nil)
+			b = vtfileblock(r->parent, r->offset/r->epb, VtOWRITE);
+		vtfileunlock(r->parent);
+		if(b == nil)
+			return nil;
+		memmove(r->score, b->score, VtScoreSize);
+		r->local = 1;
+		return b;
+
 	case VtORDWR:
 		assert(r->mode == VtORDWR);
 		if(r->local == 1){
