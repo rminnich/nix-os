@@ -215,8 +215,7 @@ rattach(Fid *f)
 	VacFile *file;
 	char err[80];
 	char *score = rhdr.aname;
-
-	fs = vacfsopen(nil, score, VtOREAD, 1024);
+	fs = vacfsopen(nil, score, VtORDWR, 1024);
 	if (fs == nil) {
 		rerrstr(err, sizeof err);
 		return vtstrdup(err);
@@ -380,8 +379,9 @@ rcreate(Fid* fid)
 	vf = fid->file;
 	if(!vacfileisdir(vf))
 		return vtstrdup(Enotdir);
-	if(!permf(vf, fid->user, Pwrite))
-		return vtstrdup(Eperm);
+	if(!permf(vf, fid->user, Pwrite)){
+		return smprint("%s:'%s' not allowed", Eperm, fid->user);
+	}
 
 	mode = rhdr.perm & 0777;
 
@@ -461,8 +461,29 @@ rread(Fid *f)
 static char*
 rwrite(Fid *f)
 {
-	USED(f);
-	return vtstrdup(Erdonly);
+	char *buf;
+	vlong off;
+	int cnt;
+	VacFile *vf;
+	char err[80];
+	int n;
+	extern int debug;
+
+		fprint(2, "rwrite busy %d\n", f->busy);
+	if(!f->busy)
+		return vtstrdup(Enotexist);
+	vf = f->file;
+	thdr.count = 0;
+	off = rhdr.offset;
+	buf = thdr.data;
+	cnt = rhdr.count;
+	n = vacfilewrite(vf, buf, cnt, off);
+	if(n < 0) {
+		rerrstr(err, sizeof err);
+		return vtstrdup(err);
+	}
+	thdr.count = n;
+	return 0;
 }
 
 static char *
