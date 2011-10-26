@@ -16,6 +16,9 @@ $O.%:	%.$O $OFILES $LIB
 %.$O:	%.c
 	$CC $CFLAGS $stem.c
 
+%.$O:	%.g
+	$GC $GFLAGS $stem.g
+
 %.$O:	%.s
 	$AS $AFLAGS $stem.s
 
