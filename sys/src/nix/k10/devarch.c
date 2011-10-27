@@ -523,6 +523,20 @@ cputyperead(Chan*, void *a, long n, vlong off)
 }
 
 static long
+cpuidread(Chan*, void *a, long n, vlong off)
+{
+	char str[64];
+	int nstr = sizeof(str), ns = 0;
+	int i;
+
+	for(i = 0; i < 4; i++)
+		ns += snprint(str+ns, nstr-ns, "%08x ", m->cpuinfo[1][i]);
+
+	ns += snprint(str+ns, nstr-ns, "%08x ", m->monitorsize);
+	return readstr(off, a, n, str);
+}
+
+static long
 linuxread(Chan*, void* a, long n, vlong offset)
 {
 	char str[32];
@@ -558,6 +572,7 @@ void
 archinit(void)
 {
 	addarchfile("cputype", 0444, cputyperead, nil);
+	addarchfile("cpuidread", 0444, cpuidread, nil);
 	addarchfile("linux", 0644, linuxread, linuxwrite);
 }
 

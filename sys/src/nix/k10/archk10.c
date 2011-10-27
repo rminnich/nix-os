@@ -28,6 +28,12 @@ cpuidinit(void)
 	if((eax = cpuid(0x80000000, 0, info)) >= 0x80000000)
 		m->ncpuinfoe = (eax & ~0x80000000) + 1;
 
+	/* is mnonitor supported? */
+	if (m->cpuinfo[1][2] & 8) {
+		cpuid(5, 0, &m->monitorsize);
+		iprint("Monitor supported; size %d", m->monitorsize);
+	}
+
 	return 1;
 }
 

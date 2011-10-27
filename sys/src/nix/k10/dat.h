@@ -135,6 +135,7 @@ struct MCPU
 	int	ncpuinfos;			/* number of standard entries */
 	int	ncpuinfoe;			/* number of extended entries */
 	int	isintelcpu;			/*  */
+	u32int monitorsize;		/* size of monitor area. If non-zero, monitor is supported */
 };
 
 /*
