@@ -191,6 +191,7 @@ uvlong		ms2fastticks(ulong);
 ulong		ms2tk(ulong);
 void		mul64fract(uvlong*, uvlong, uvlong);
 void		muxclose(Mnt*);
+void		(*mwait)(void *);
 Chan*		namec(char*, int, int, int);
 void		nameerror(char*, char*);
 Chan*		newchan(void);
@@ -237,6 +238,7 @@ void		physinit(uintmem, u64int);
 void*		phystag(uintmem);
 void		pio(Segment*, uintptr, ulong, Page**);
 #define		poperror()		up->nerrlab--
+void		portmwait(void *);
 int		postnote(Proc*, int, char*, int);
 int		pprint(char*, ...);
 int		preempted(void);

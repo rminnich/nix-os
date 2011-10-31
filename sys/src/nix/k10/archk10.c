@@ -31,7 +31,7 @@ cpuidinit(void)
 	/* is mnonitor supported? */
 	if (m->cpuinfo[1][2] & 8) {
 		cpuid(5, 0, &m->monitorsize);
-		iprint("Monitor supported; size %d", m->monitorsize);
+		mwait = k10mwait;
 	}
 
 	return 1;

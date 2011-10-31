@@ -95,9 +95,7 @@ uintptr	mmukmap(uintptr, uintptr, usize);
 int	mmukmapsync(uvlong);
 uintmem	mmuphysaddr(uintptr);
 int	mmuwalk(PTE*, uintptr, int, PTE**, PTE (*)(usize));
-void	monitor(void*);
 int	multiboot(u32int, u32int, int);
-void	mwait(u32int);
 void	ndnr(void);
 uchar	nvramread(int);
 void	nvramwrite(int, uchar);
@@ -225,6 +223,7 @@ extern void ioapiconline(void);
  * archk10.c
  */
 extern void millidelay(int);
+void k10mwait(void *);
 
 /*
  * i8259.c

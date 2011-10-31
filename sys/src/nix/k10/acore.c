@@ -66,8 +66,7 @@ testicc(int i)
 		snprint((char*)mp->icc->data, ICCLNSZ, "<%d>", i);
 		mfence();
 		mp->icc->fn = testiccfn;
-		while(mp->icc->fn != nil)
-			;
+		mwait(&mp->icc->fn);
 	}
 }
 
@@ -103,8 +102,7 @@ acsched(void)
 	for(;;){
 		acstackok();
 		m->load = 0;
-		while(*m->icc->fn == nil)
-			;
+		mwait(&m->icc->fn);
 		if(m->icc->flushtlb)
 			acmmuswitch();
 		DBG("acsched: cpu%d: fn %#p\n", m->machno, m->icc->fn);
@@ -217,8 +215,8 @@ Post:
 	ready(m->proc);
 
 	m->load = 0;
-	while(*m->icc->fn == nil)
-		;
+	mwait(&m->icc->fn);
+
 
 	m->load = 100;
 	if(m->icc->flushtlb)

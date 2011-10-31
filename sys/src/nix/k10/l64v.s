@@ -369,17 +369,37 @@ TEXT hardhalt(SB), 1, $-4
 	HLT
 	RET
 
-TEXT monitor(SB), 1, $-4			/* void monitor(void*); */
+TEXT _monitor(SB), 1, $-4			/* void monitor(void*); */
 	MOVQ	RARG, AX			/* linear address to monitor */
 	XORQ	CX, CX				/* no optional extensions yet */
 	XORQ	DX, DX				/* no optional hints yet */
 	BYTE $0x0f; BYTE $0x01; BYTE $0xc8	/* MONITOR */
 	RET
 
-TEXT mwait(SB), 1, $-4				/* void mwait(u32int); */
+TEXT _mwait(SB), 1, $-4				/* void mwait(u32int); */
 	MOVLQZX	RARG, CX			/* optional extensions */
 	BYTE $0x0f; BYTE $0x01; BYTE $0xc9	/* MWAIT */
 	RET
+
+TEXT	k10mwait+0(SB),0,$16
+k10mwloop:
+	MOVQ	RARG,CX
+	MOVQ	(CX),AX
+	CMPQ	AX,$0
+	JNE		k10mwdone
+	MOVQ	RARG, AX			/* linear address to monitor */
+	XORQ	CX, CX				/* no optional extensions yet */
+	XORQ	DX, DX				/* no optional hints yet */
+	BYTE $0x0f; BYTE $0x01; BYTE $0xc8	/* MONITOR */
+	MOVQ	RARG,CX
+	MOVQ	(CX),AX
+	CMPQ	AX,$0
+	JNE		k10mwdone
+	XORQ CX, CX			/* optional extensions */
+	BYTE $0x0f; BYTE $0x01; BYTE $0xc9	/* MWAIT */
+	JMP		k10mwloop
+k10mwdone:
+	RET	,
 
 TEXT mul64fract(SB), 1, $-4
 	MOVQ	a+8(FP), AX

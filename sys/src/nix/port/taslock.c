@@ -237,3 +237,12 @@ iunlock(Lock *l)
 		up->lastilock = nil;
 	splx(pl);
 }
+
+void
+portmwait(void *value)
+{
+	while (*(void**)value == nil)
+		;
+}
+
+void (*mwait)(void *) = portmwait;
