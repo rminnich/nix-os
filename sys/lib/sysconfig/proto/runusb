@@ -1,0 +1,86 @@
+# fossil file system for installing from usb
+
+# files like NOTICE
+*	- sys sys
+
+# adm owns adm
+adm	- adm adm
+	+	- adm adm
+
+# upas owns mail
+mail	- upas upas
+	box	- upas upas
+		glenda	- glenda glenda
+			+	- glenda glenda
+	fs	- upas upas
+	lib	- upas upas
+		+	- upas upas
+	queue	- upas upas
+	tmp	- upas upas
+
+# glenda owns her home directory
+usr	- sys sys
+	glenda	- glenda glenda
+		+	- glenda glenda
+
+# architectures are owned by sys
+386	- sys sys
+	+	- sys sys
+68000	- sys sys
+	+	- sys sys
+68020	- sys sys
+	+	- sys sys
+alpha	- sys sys
+	+	- sys sys
+amd64	- sys sys
+	+	- sys sys
+arm	- sys sys
+	+	- sys sys
+mips	- sys sys
+	+	- sys sys
+power	- sys sys
+	+	- sys sys
+power64	- sys sys
+	+	- sys sys
+sparc	- sys sys
+	+	- sys sys
+sparc64	- sys sys
+	+	- sys sys
+
+# everything else is owned by sys
+acme	- sys sys
+	+	- sys sys
+cfg	- sys sys
+	+	- sys sys
+contrib	- sys sys
+	+	- sys sys
+cron	- sys sys
+	upas	- upas sys
+		+	- upas sys
+# these are in #/
+#fd	- sys sys
+#	+	- sys sys
+#env	- sys sys
+#	+	- sys sys
+lib	- sys sys
+	+	- sys sys
+lp	- sys sys
+	+	- sys sys
+mnt	- sys sys
+	+	- sys sys
+n	- sys sys
+	+	- sys sys
+rc	- sys sys
+	+	- sys sys
+sys	- sys sys
+	+	- sys sys
+tmp	- sys sys
+	+	- sys sys
+
+# distribution metadata
+dist	- sys sys
+	replica	- sys sys
+		kfs	- sys sys
+		cd	- sys sys
+		network	- sys sys
+		plan9.proto	- sys sys
