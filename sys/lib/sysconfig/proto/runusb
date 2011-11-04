@@ -3,6 +3,10 @@
 # files like NOTICE
 *	- sys sys
 
+# Mercurial directory -- we want this
+.hg	- sys sys
+	+	- sys sys
+
 # adm owns adm
 adm	- adm adm
 	+	- adm adm
