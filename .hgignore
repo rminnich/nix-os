@@ -12,6 +12,7 @@ syntax: regexp
 ^fd/
 ^mnt/
 ^dev/
+^sys/log/
 syntax: glob
 *.a
 *.a[568]

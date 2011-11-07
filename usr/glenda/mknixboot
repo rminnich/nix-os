@@ -15,7 +15,7 @@ quantum=1000000
 size=1900
 
 # by default we shall use /$objtype/9load, but you don't have to
-loader=/$objtype/9load
+loader=/$objtype/9loadusb
 
 fn usage {
 	echo usage: $argv0 '[-p proto] [-r root] [-s 10⁶-bytes]' >[1=2]
@@ -83,7 +83,7 @@ disk/prep -bw -a^(9fat nvram fossil) plan9 >/dev/null
 echo -n 9fat... >[1=2]
 cp $loader /tmp/9load	# force format to use the name `9load'
 disk/format -b /$objtype/pbslba -d -r 2 9fat /tmp/9load $k \
-	$syscfg/usb/plan9.ini >[2=1] |
+	$srcroot^$syscfg/usb/plan9.ini >[2=1] |
 	grep -v '^(add .* at clust |Init|type |Adding file|used )'
 cp /dev/zero nvram >[2]/dev/null
 #cp /dev/zero fscfg >[2]/dev/null
