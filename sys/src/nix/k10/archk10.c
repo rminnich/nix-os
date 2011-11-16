@@ -30,7 +30,7 @@ cpuidinit(void)
 
 	/* is mnonitor supported? */
 	if (m->cpuinfo[1][2] & 8) {
-		cpuid(5, 0, &m->monitorsize);
+		cpuid(5, 0, m->cpuinfo[2]);	
 		mwait = k10mwait;
 	}
 

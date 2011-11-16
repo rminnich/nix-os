@@ -131,11 +131,10 @@ enum
  */
 struct MCPU
 {
-	u32int	cpuinfo[2][4];			/* CPUID Functions 0 & 1 */
+	u32int	cpuinfo[3][4];			/*  CPUID Functions 0, 1, and 5 (n.b.: 2-4 are invalid) */
 	int	ncpuinfos;			/* number of standard entries */
 	int	ncpuinfoe;			/* number of extended entries */
 	int	isintelcpu;			/*  */
-	u32int monitorsize;		/* size of monitor area. If non-zero, monitor is supported */
 };
 
 /*

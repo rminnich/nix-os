@@ -526,13 +526,13 @@ static long
 cpuidread(Chan*, void *a, long n, vlong off)
 {
 	char str[64];
-	int nstr = sizeof(str), ns = 0;
+	int nstr, ns;
 	int i;
 
-	for(i = 0; i < 4; i++)
+	nstr = sizeof(str);
+	for(i = ns = 0; i < 4; i++)
 		ns += snprint(str+ns, nstr-ns, "%08x ", m->cpuinfo[1][i]);
 
-	ns += snprint(str+ns, nstr-ns, "%08x ", m->monitorsize);
 	return readstr(off, a, n, str);
 }
 
