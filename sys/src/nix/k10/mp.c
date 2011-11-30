@@ -88,22 +88,27 @@ mpmkintr(u8int* p)
 			mpintrprint("APIC ID out of range", p);
 			return 0;
 		}
-		apic = &xapic[p[6]];
-		if(!apic->useable){
-			mpintrprint("unuseable APIC", p);
-			return 0;
-		}
 		switch(p[0]){
 		default:
 			mpintrprint("INTIN botch", p);
 			return 0;
 		case 3:				/* IOINTR */
+			apic = &xioapic[p[6]];
+			if(!apic->useable){
+				mpintrprint("unuseable ioapic", p);
+				return 0;
+			}
 			if(p[7] >= apic->nrdt){
 				mpintrprint("IO INTIN out of range", p);
 				return 0;
 			}
 			break;
 		case 4:				/* LINTR */
+			apic = &xlapic[p[6]];
+			if(!apic->useable){
+				mpintrprint("unuseable lapic", p);
+				return 0;
+			}
 			if(p[7] >= nelem(apic->lvt)){
 				mpintrprint("LOCAL INTIN out of range", p);
 				return 0;
@@ -295,13 +300,13 @@ mpparse(PCMP* pcmp, int maxcores)
 		 */
 		if(p[6] == 0xff){
 			for(i = 0; i < Napic; i++){
-				if(!xapic[i].useable || xapic[i].addr != nil)
+				if(!xlapic[i].useable || xlapic[i].addr != nil)
 					continue;
-				xapic[i].lvt[p[7]] = lo;
+				xlapic[i].lvt[p[7]] = lo;
 			}
 		}
 		else
-			xapic[p[6]].lvt[p[7]] = lo;
+			xlapic[p[6]].lvt[p[7]] = lo;
 		p += 8;
 		break;
 	}

@@ -73,6 +73,9 @@ enum {						/* Tdc */
 static u8int* apicbase;
 static int apmachno = 1;
 
+Apic	xlapic[Napic];
+Mach	*xlapicmachptr[Napic];		/* maintained, but unused */
+
 static u32int
 apicrget(int r)
 {
@@ -121,7 +124,7 @@ apicinit(int apicno, uintmem pa, int isbp)
 		print("apicinit%d: out of range\n", apicno);
 		return;
 	}
-	if((apic = &xapic[apicno])->useable){
+	if((apic = &xlapic[apicno])->useable){
 		print("apicinit%d: already initialised\n", apicno);
 		return;
 	}
@@ -147,28 +150,33 @@ apicinit(int apicno, uintmem pa, int isbp)
 		apic->machno = apmachno++;
 }
 
+static void
+apicdump0(Apic *apic, int i)
+{
+	if(!apic->useable || apic->addr != 0)
+		return;
+	DBG("apic%d: machno %d lint0 %#8.8ux lint1 %#8.8ux\n",
+		i, apic->machno, apic->lvt[0], apic->lvt[1]);
+	DBG(" tslvt %#8.8ux pclvt %#8.8ux elvt %#8.8ux\n",
+		apicrget(Tslvt), apicrget(Pclvt), apicrget(Elvt));
+	DBG(" tlvt %#8.8ux lint0 %#8.8ux lint1 %#8.8ux siv %#8.8ux\n",
+		apicrget(Tlvt), apicrget(Lint0),
+		apicrget(Lint1), apicrget(Siv));
+}
+
 void
 apicdump(void)
 {
 	int i;
-	Apic *apic;
 
 	if(!DBGFLG)
 		return;
 
 	DBG("apicbase %#p apmachno %d\n", apicbase, apmachno);
-	for(i = 0; i < Napic; i++){
-		apic = &xapic[i];
-		if(!apic->useable || apic->addr != 0)
-			continue;
-		DBG("apic%d: machno %d lint0 %#8.8ux lint1 %#8.8ux\n",
-			i, apic->machno, apic->lvt[0], apic->lvt[1]);
-		DBG(" tslvt %#8.8ux pclvt %#8.8ux elvt %#8.8ux\n",
-			apicrget(Tslvt), apicrget(Pclvt), apicrget(Elvt));
-		DBG(" tlvt %#8.8ux lint0 %#8.8ux lint1 %#8.8ux siv %#8.8ux\n",
-			apicrget(Tlvt), apicrget(Lint0),
-			apicrget(Lint1), apicrget(Siv));
-	}
+	for(i = 0; i < Napic; i++)
+		apicdump0(xlapic + i, i);
+	for(i = 0; i < Napic; i++)
+		apicdump0(xioapic + i, i);
 }
 
 static void
@@ -189,7 +197,7 @@ apiconline(void)
 		return 0;
 	if((apicno = ((apicrget(Id)>>24) & 0xff)) >= Napic)
 		return 0;
-	apic = &xapic[apicno];
+	apic = &xlapic[apicno];
 	if(!apic->useable || apic->addr != nil)
 		return 0;
 
@@ -200,7 +208,7 @@ apiconline(void)
 	 */
 	ver = apicrget(Ver);
 	nlvt = ((ver>>16) & 0xff) + 1;
-	if(nlvt > nelem(apic->lvt)){
+	if(nlvt-1 > nelem(apic->lvt)){
 		print("apicinit%d: nlvt %d > max (%d)\n",
 			apicno, nlvt-1, nelem(apic->lvt));
 		nlvt = nelem(apic->lvt);
@@ -309,7 +317,7 @@ apiconline(void)
 	if(m->machno == 0)
 		apicrput(Tp, 0);
 
-	xapicmachptr[apicno] = sys->machptr[m->machno];
+	xlapicmachptr[apicno] = sys->machptr[m->machno];
 
 	return 1;
 }
@@ -321,7 +329,7 @@ apictimerset(uvlong next)
 	Apic *apic;
 	vlong period;
 
-	apic = &xapic[(apicrget(Id)>>24) & 0xff];
+	apic = &xlapic[(apicrget(Id)>>24) & 0xff];
 
 	pl = splhi();
 	lock(&m->apictimerlock);

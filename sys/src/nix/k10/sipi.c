@@ -40,7 +40,7 @@ sipi(void)
 	 * with any unused space elided.
 	 */
 	for(apicno = 0; apicno < Napic; apicno++){
-		apic = &xapic[apicno];
+		apic = &xlapic[apicno];
 		if(!apic->useable || apic->addr || apic->machno == 0)
 			continue;
 

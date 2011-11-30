@@ -40,6 +40,8 @@ static Rdt* rdtvecno[IdtMAX+1];
 static Lock idtnolock;
 static int idtno = IdtIOAPIC;
 
+Apic	xioapic[Napic];
+
 static void
 rtblget(Apic* apic, int sel, u32int* hi, u32int* lo)
 {
@@ -76,7 +78,7 @@ ioapicintrinit(int busno, int apicno, int intin, int devno, u32int lo)
 
 	if(busno >= Nbus || apicno >= Napic || nrdtarray >= Nrdt)
 		return;
-	apic = &xapic[apicno];
+	apic = &xioapic[apicno];
 	if(!apic->useable || intin >= apic->nrdt)
 		return;
 
@@ -101,7 +103,7 @@ ioapicinit(int id, uintptr pa)
 	if(id >= Napic)
 		return;
 
-	apic = &xapic[id];
+	apic = &xioapic[id];
 	if(apic->useable || (apic->addr = vmap(pa, 1024)) == nil)
 		return;
 	apic->useable = 1;
@@ -134,7 +136,7 @@ ioapicdump(void)
 		return;
 
 	for(i = 0; i < Napic; i++){
-		apic = &xapic[i];
+		apic = &xioapic[i];
 		if(!apic->useable || apic->addr == 0)
 			continue;
 		DBG("ioapic %d addr %#p nrdt %d gsib %d\n",
@@ -152,7 +154,7 @@ ioapicdump(void)
 		DBG("iointr bus %d:\n", i);
 		while(rdt != nil){
 			DBG(" apic %ld devno %#ux (%d %d) intin %d lo %#ux\n",
-				rdt->apic-xapic, rdt->devno, rdt->devno>>2,
+				rdt->apic-xioapic, rdt->devno, rdt->devno>>2,
 				rdt->devno & 0x03, rdt->intin, rdt->lo);
 			rdt = rdt->next;
 		}
@@ -165,7 +167,7 @@ ioapiconline(void)
 	int i;
 	Apic *apic;
 
-	for(apic = xapic; apic < &xapic[Napic]; apic++){
+	for(apic = xioapic; apic < &xioapic[Napic]; apic++){
 		if(!apic->useable || apic->addr == nil)
 			continue;
 		for(i = 0; i < apic->nrdt; i++){
@@ -181,7 +183,7 @@ ioapiconline(void)
 static void
 ioapicintrdd(u32int* hi, u32int* lo)
 {
-	int i;
+	static int i;
 
 	/*
 	 * Set delivery mode (lo) and destination field (hi),
@@ -204,16 +206,14 @@ ioapicintrdd(u32int* hi, u32int* lo)
 	 * to more than one thread in a core, or to use a "noise" core.
 	 * But, as usual, Intel make that an onerous task. 
 	 */
-	/* we are routing all to zero. Sorry Jim [It was Ron's idea]*/
-	for(i = 0;;i++){
-		if(!xapic[i].useable || xapic[i].addr != 0)
+	for(;; i = (i+1) % nelem(xlapic)){
+		if(!xlapic[i].useable)
 			continue;
-		if(sys->machptr[xapic[i].machno] == nil)
+		if(sys->machptr[xlapic[i].machno] == nil)
 			continue;
-		if(sys->machptr[xapic[i].machno]->online != 0)
+		if(sys->machptr[xlapic[i].machno]->online != 0)
 			break;
 	}
-
 	*hi = i<<24;
 	*lo |= Pm|MTf;
 }

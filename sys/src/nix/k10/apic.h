@@ -1,18 +1,24 @@
 /*
  * There are 2 flavours of APIC, Local APIC and IOAPIC,
- * which share one APIC ID space. Each I/O APIC has a unique address,
- * Local APICs are all at the same address as they can only be
- * accessed by the local CPU.
+ * Each I/O APIC has a unique physical address,
+ * Local APICs are all at the same physical address as they can only be
+ * accessed by the local CPU.  APIC ids are unique to the
+ * APIC type, so an IOAPIC and APIC both with id 0 is ok.
  */
-typedef struct {
-	int	useable;			/* en */
+typedef	struct	Ioapic	Ioapic;
+typedef	struct	Lapic	Lapic;
+typedef	struct	Apic	Apic;
 
+struct Ioapic {
 	Lock;					/* IOAPIC: register access */
 	u32int*	addr;				/* IOAPIC: register base */
 	int	nrdt;				/* IOAPIC: size of RDT */
 	int	gsib;				/* IOAPIC: global RDT index */
+};
 
+struct Lapic {
 	int	machno;				/* APIC */
+
 	u32int	lvt[6];
 	int	nlvt;
 	int	ver;
@@ -21,7 +27,13 @@ typedef struct {
 	vlong	max;
 	vlong	min;
 	vlong	div;
-} Apic;
+};
+
+struct Apic {
+	int	useable;			/* en */
+	Ioapic;
+	Lapic;
+};
 
 enum {
 	Nbus		= 32,
@@ -64,8 +76,9 @@ enum {
 	Im		= 0x00010000,		/* Interrupt Mask */
 };
 
-Apic xapic[Napic];
-Mach* xapicmachptr[Napic];			/* maintained, but unused */
+extern	Apic	xlapic[Napic];
+extern	Apic	xioapic[Napic];
+extern	Mach	*xlapicmachptr[Napic];		/* maintained, but unused */
 
 #define l16get(p)	(((p)[1]<<8)|(p)[0])
 #define	l32get(p)	(((u32int)l16get(p+2)<<16)|l16get(p))
