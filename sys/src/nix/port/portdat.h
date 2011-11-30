@@ -403,7 +403,7 @@ enum
 #define pagedout(s)	(PTR2UINT(s) == 0 || onswap(s))
 #define swapaddr(s)	(PTR2UINT(s) & ~PG_ONSWAP)
 
-#define SEGMAXSIZE	(SEGMAPSIZE*PTEMAPMEM)
+#define SEGMAXPG	(SEGMAPSIZE)
 
 struct Physseg
 {

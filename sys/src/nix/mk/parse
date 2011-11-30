@@ -363,10 +363,10 @@ function mkdevc(		a, d, i, m, n, s, t, u, name, cname){
 	s = s "Physseg physseg[" n+8 "] = {\n";
 	s = s "\t{\t.attr\t= SG_SHARED,\n";
 	s = s "\t\t.name\t= \"shared\",\n";
-	s = s "\t\t.size\t= SEGMAXSIZE,\n\t},\n";
+	s = s "\t\t.size\t= SEGMAXPG,\n\t},\n";
 	s = s "\t{\t.attr\t= SG_BSS,\n";
 	s = s "\t\t.name\t= \"memory\",\n";
-	s = s "\t\t.size\t= SEGMAXSIZE,\n\t},\n";
+	s = s "\t\t.size\t= SEGMAXPG,\n\t},\n";
 	s = s t "};\nint nphysseg = " n+8 ";\n\n";
 
 	s = s "char dbgflg[256]";
