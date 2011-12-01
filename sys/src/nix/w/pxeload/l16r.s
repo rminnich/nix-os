@@ -146,7 +146,7 @@ _e820loop:
 	POPR(rAX)
 	INC(rAX)
 	PUSHR(rAX)			/* doesn't affect FLAGS */
-	CMPI(16, rAX)
+	CMPI(32, rAX)
 	JGT	_e820pop
 
 	LLI(20, rCX)			/* buffer size */
