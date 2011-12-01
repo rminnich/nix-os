@@ -6,7 +6,6 @@
  * Messages must be received from returned channels by clients.
  * (NB: where channel has type Ch*)
  *
- *
  * Termination:
  *	chwproc is a client for a tses (writer)
  *	cmuxproc is a client for a tses (reader)
@@ -37,24 +36,29 @@
  *		drainch
  *	eof:
  *		send last (null msg ok)
+ *
+ * The client is not required to read from the channel at all times,
+ * the mux queues messages and sends them only when the client is
+ * ready to receive them.
  */
 #include <u.h>
 #include <libc.h>
 #include <thread.h>
-#include <error.h>
 #include <fcall.h>	/* *BIG* macros */
 #include "conf.h"
 #include "msg.h"
 #include "ch.h"
 #include "dbg.h"
 
-typedef struct Chmsg Chmsg;
-
-struct Chmsg
+enum
 {
-	Msg *m;
-	int last;
+	/* cmuxproc() alts */
+	Amkc = 0,
+	Aendc,
+	Asrc,
+	Afixedents,	/* first Ch rc in alts */
 };
+
 
 static void
 cmdump(Cmux *cm)
@@ -136,7 +140,6 @@ Resurrection:
 	chanfree(ch->dc);
 }
 
-
 /*
  * A channel might have been terminated for writing, yet the
  * peer may be still busy processing outgoing requests.
@@ -149,7 +152,7 @@ wendch(Ch *ch)
 	Msg *m;
 	uchar *buf;
 
-	m = emalloc(sizeof *m);
+	m = mallocz(sizeof *m, 1);
 	buf = msgpushhdr(m, BIT16SZ);
 	PBIT16(buf, CFend|ch->id);
 	sendp(ch->cm->swc, m);
@@ -167,9 +170,10 @@ mkch(Cmux *cm, int i, int notnew)
 		ch->rclosed = ch->wclosed = ch->flushing = 0;
 		sendul(ch->dc, 1);	/* resurrect chwproc */
 		ch->dead = 0;
+		assert(cm->alts[Afixedents+i].c == ch->rc && cm->alts[Afixedents+i].op == CHANNOP);
 		return ch;
 	}
-	ch = emalloc(sizeof *ch);
+	ch = mallocz(sizeof *ch, 1);
 	cm->chs[i] = ch;
 	ch->id = i;
 	ch->rc = echancreate(sizeof(Chmsg), 0);
@@ -177,6 +181,8 @@ mkch(Cmux *cm, int i, int notnew)
 	ch->dc = echancreate(sizeof(ulong), 0);
 	ch->cm = cm;
 	ch->notnew = notnew;
+	cm->alts[Afixedents+i].c = ch->rc;
+	cm->alts[Afixedents+i].op = CHANNOP;
 	threadcreate(chwproc, ch, Stack);
 	return ch;
 }
@@ -184,13 +190,18 @@ mkch(Cmux *cm, int i, int notnew)
 static void
 grow(Cmux *cm, int n)
 {
-	int elsz;
+	int i, elsz;
 
 	if(n > CFidmask)
 		sysfatal("growto: no more channel ids");
 	if(cm->nachs < n){
+		cm->alts = realloc(cm->alts, (Afixedents+n+1) * sizeof(Alt));
+		for(i = cm->nachs; i < n+1; i++)
+			cm->alts[Afixedents+i].op = CHANNOP;
+		cm->alts[Afixedents+n].op = CHANEND;
+
 		elsz = sizeof cm->chs[0];
-		cm->chs = erealloc(cm->chs, n * elsz);
+		cm->chs = realloc(cm->chs, n * elsz);
 		memset(&cm->chs[cm->nachs], 0, (n - cm->nachs) * elsz);
 		cm->nachs = n;
 	}
@@ -225,24 +236,27 @@ delch(Cmux *cm, Ch *ch, int keep)
 	dsprint("cmux[%p]: delch: ch%d keep=%d (%d chs)\n", cm, ch->id, keep, cm->nuse);
 	if(ch->dead == 0 || keep != 0)
 		cm->nuse--;
-	if(keep)
+	if(keep){
+		cm->alts[Afixedents+ch->id].op = CHANNOP;
 		ch->dead = 1;
-	else{
+	}else{
 		chanfree(ch->rc);
 		chanfree(ch->wc);
 		sendul(ch->dc, 0);
 		ch->rc = ch->wc = nil;
 		assert(cm->chs[ch->id] == ch);
 		cm->chs[ch->id] = nil;
+		cm->alts[Afixedents+ch->id] = (Alt){nil, nil, CHANNOP, 0, 0, 0};
+		free(ch->chms);
 		free(ch);
 	}
 }
 
 /*
  * Demux message already received in cm->rc and return
- * the Ch for it, perhaps a new Ch.
+ * the Ch id for it, perhaps it's a new Ch.
  */
-static Ch*
+static int
 cdemux(Cmux *cm, Msg *m, int *lastp)
 {
 	uint id, flags;
@@ -252,7 +266,7 @@ cdemux(Cmux *cm, Msg *m, int *lastp)
 
 	if(msglen(m) < BIT16SZ){
 		werrstr("short message header");
-		return nil;
+		return -1;
 	}
 	hdr = msgpophdr(m, BIT16SZ);
 	assert(hdr != nil);
@@ -263,15 +277,15 @@ cdemux(Cmux *cm, Msg *m, int *lastp)
 	if(flags&CFnew){
 		ch = addch(cm, id, 1);
 		if(ch == nil)
-			return nil;
+			return -1;
 		sendp(cm->newc, ch);
 	}else
 		if(id >= cm->nchs || cm->chs[id] == nil || cm->chs[id]->dead){
 			werrstr("no channel %d", id);
-			return nil;
+			return -1;
 		}
 	*lastp = flags&CFend;
-	return cm->chs[id];
+	return id;
 }
 
 static void
@@ -290,6 +304,35 @@ allclosed(Cmux *cm)
 }
 
 static void
+queuechm(Cmux *cm, int id, Chmsg chm)
+{
+	Ch *ch;
+
+	ch = cm->chs[id];
+	if(ch->nchms == ch->nachms){
+		ch->nachms += Incr;
+		ch->chms = realloc(ch->chms, ch->nachms*sizeof(Chmsg));
+		cm->alts[Afixedents+id].v = &ch->chms[0];
+	}
+	ch->chms[ch->nchms++] = chm;
+	cm->alts[Afixedents+id].op = CHANSND;
+}
+
+static void
+dequeuechm(Cmux *cm, int id)
+{
+	Ch *ch;
+
+	ch = cm->chs[id];
+	assert(ch->nchms > 0);
+	ch->nchms--;
+	if(ch->nchms > 0)
+		memmove(&ch->chms[0], &ch->chms[1], ch->nchms*sizeof(Chmsg));
+	else
+		cm->alts[Afixedents+id].op = CHANNOP;
+}
+
+static void
 allabort(Cmux *cm)
 {
 	int i;
@@ -301,10 +344,8 @@ allabort(Cmux *cm)
 				if(!cm->chs[i]->rclosed){
 					chm.m = nil;
 					chm.last = 1;
-					send(cm->chs[i]->rc, &chm);
-					cm->chs[i]->rclosed = 1;
-				}
-				if(cm->chs[i]->wclosed)
+					queuechm(cm, i, chm);
+				}else if(cm->chs[i]->wclosed)
 					delch(cm, cm->chs[i], Free);
 			}else
 				delch(cm, cm->chs[i], Free);
@@ -320,21 +361,17 @@ cmuxproc(void *a)
 	Chmsg chm;
 	Msg *m;
 	Ch *ch;
-	Alt alts[] = {
-		{nil, &dummy, CHANRCV},
-		{nil, &ch, CHANRCV},
-		{nil, &m, CHANRCV},
-		{nil, nil, CHANEND},
-	};
+	int id;
 
 	cm = a;
 	threadsetname("cmuxproc %p", a);
 	dpprint("cmuxproc[%p]: starting\n", a);
-	alts[0].c = cm->mkc;
-	alts[1].c = cm->endc;
-	alts[2].c = cm->src;
-	for(;;)
-		switch(alt(alts)){
+	cm->alts[Amkc] = (Alt){cm->mkc, &dummy, CHANRCV, 0, 0, 0};
+	cm->alts[Aendc] = (Alt){cm->endc, &ch, CHANRCV, 0, 0, 0};
+	cm->alts[Asrc] = (Alt){cm->src, &m, CHANRCV, 0, 0, 0};
+	cm->alts[Afixedents] = (Alt){nil, nil, CHANEND, 0, 0, 0};
+	for(;;){
+		switch(id = alt(cm->alts)){
 		case Mkc:
 			ch = addch(cm, -1, 0);
 			sendp(cm->mkrc, ch);
@@ -375,18 +412,28 @@ cmuxproc(void *a)
 				goto Done;
 			}
 			chm.m = m;
-			ch = cdemux(cm, m, &chm.last);
-			if(ch == nil){
+			id = cdemux(cm, m, &chm.last);
+			if(id < 0){
 				dsprint("cdemux: drop msg: %r\n");
 				cmdump(cm);
 				freemsg(m);
 				break;
 			}
+			ch = cm->chs[id];
 			if(!ch->rclosed && !ch->flushing)
-				send(ch->rc, &chm);
+				queuechm(cm, id, chm);
 			else
 				freemsg(m);
-			if(chm.last){
+			break;
+		case -1:
+			sysfatal("cmuxproc[%p]: alt", a);
+		default:
+			id -= Afixedents;
+			if(id < 0 || id >= cm->nachs)
+				sysfatal("cmuxproc[%p]: alt id %d", a, id);
+			ch = cm->chs[id];
+			assert(ch != nil && ch->nchms > 0);
+			if(ch->chms[0].last){
 				if(ch->rclosed){
 					dsprint("cmuxproc[%p]: ch%d flush\n", a, ch->id);
 					ch->flushing = 1;
@@ -395,10 +442,9 @@ cmuxproc(void *a)
 				if(ch->wclosed)
 					delch(cm, ch, Keep);
 			}
-			break;
-		default:
-			sysfatal("cmuxproc[%p]: alt", a);
+			dequeuechm(cm, id);
 		}
+	}
 Done:
 	allclosed(cm);
 	dsprint("cmuxproc[%p]: done\n", a);
@@ -407,6 +453,7 @@ Done:
 	chanfree(cm->mkrc);
 	chanfree(cm->endc);
 	free(cm->chs);
+	free(cm->alts);
 	free(cm);
 	threadexits(nil);
 }
@@ -416,7 +463,7 @@ muxses(Channel *src, Channel *swc, Channel *sec)
 {
 	Cmux *cm;
 
-	cm = emalloc(sizeof *cm);
+	cm = mallocz(sizeof *cm, 1);
 	cm->src = src;
 	cm->swc = swc;
 	cm->sec = sec;
@@ -424,6 +471,8 @@ muxses(Channel *src, Channel *swc, Channel *sec)
 	cm->mkc = echancreate(sizeof(ulong), 0);
 	cm->mkrc = echancreate(sizeof(Ch*), 0);
 	cm->endc = echancreate(sizeof(ulong), 0);
+	cm->alts = mallocz(sizeof(Alt)*(Afixedents+1), 1);
+
 	/*
 	 * Could be a thread, but then the caller
 	 * would have to be aware and don't block the process.

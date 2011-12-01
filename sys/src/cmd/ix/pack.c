@@ -2,18 +2,27 @@
 #include	<libc.h>
 #include	<fcall.h>
 
-#include "fs.h"
+#include "ix.h"
 
-/*
- * This is convS2M, convM2S from libc, but:
- * - without copying bytes in the case of packing a Rread or Twrite request.
- * - Tattach as no fid, Rattach has a fid.
- * - Twalk has an uchar (bool) to ask for a newfid, and has only wname
- * - Rwalk has newfid and only a wqid.
- */
+uchar*
+pdata(uchar *p, uchar *s, int ns)
+{
+	if(s == nil){
+		PBIT16(p, 0);
+		p += BIT16SZ;
+		return p;
+	}
 
+	/*
+	 * We are moving the string before the length,
+	 * so you can S2M a struct into an existing message
+	 */
+	memmove(p + BIT16SZ, s, ns);
+	PBIT16(p, ns);
+	p += ns + BIT16SZ;
+	return p;
+}
 
-static
 uchar*
 pstring(uchar *p, char *s)
 {
@@ -36,20 +45,6 @@ pstring(uchar *p, char *s)
 	return p;
 }
 
-static
-uchar*
-pqid(uchar *p, Qid *q)
-{
-	PBIT8(p, q->type);
-	p += BIT8SZ;
-	PBIT32(p, q->vers);
-	p += BIT32SZ;
-	PBIT64(p, q->path);
-	p += BIT64SZ;
-	return p;
-}
-
-static
 uint
 stringsz(char *s)
 {
@@ -59,156 +54,173 @@ stringsz(char *s)
 	return BIT16SZ+strlen(s);
 }
 
+/*
+ * Does NOT include the data bytes added past the packed
+ * message for IXRread, IXTwrite, IXTwattr, IXRattr
+ * This is so to save copying.
+ */
 uint
-packedsize(Fscall *f)
+ixpackedsize(IXcall *f)
 {
 	uint n;
+	int i;
 
-	n = 0;
-	n += BIT8SZ;	/* type */
+	n = BIT8SZ;	/* type */
 
-	switch(f->type)
-	{
-	case Tcond:
-		n += BIT8SZ;
-		n += BIT16SZ;
-		n += f->nstat;
-		break;
-
-	case Tfid:
-		n += BIT32SZ;
-		n += BIT8SZ;
-		break;
-
-	case Tclone:
-		n += BIT8SZ;
-		break;
-
-	case Tversion:
+	switch(f->type){
+	case IXTversion:
+	case IXRversion:
 		n += BIT32SZ;
 		n += stringsz(f->version);
 		break;
 
-	case Tauth:
-		n += BIT32SZ;
+	case IXTsession:
+		n += BIT16SZ;
 		n += stringsz(f->uname);
-		n += stringsz(f->aname);
-		break;
-
-	case Tattach:
-		n += BIT32SZ;
-		n += stringsz(f->uname);
-		n += stringsz(f->aname);
-		break;
-
-	case Twalk:
-		n += stringsz(f->wname);
-		break;
-
-	case Topen:
 		n += BIT8SZ;
 		break;
+	case IXRsession:
+		n += BIT16SZ;
+		n += BIT32SZ;
+		n += stringsz(f->uname);
+		break;
 
-	case Tcreate:
+	case IXTsid:
+		n += BIT16SZ;
+		break;
+	case IXRsid:
+		break;
+
+	case IXTendsession:
+	case IXRendsession:
+		break;
+
+	case IXTfid:
+		n += BIT32SZ;
+		break;
+	case IXRfid:
+		break;
+
+	case IXTattach:
+		n += stringsz(f->aname);
+		break;
+	case IXRattach:
+		n += BIT32SZ;
+		break;
+
+	case IXRerror:
+		n += stringsz(f->ename);
+		break;
+
+	case IXTclone:
+		n += BIT8SZ;
+		break;
+	case IXRclone:
+		n += BIT32SZ;
+		break;
+
+	case IXTwalk:
+		n += BIT16SZ;
+		for(i=0; i<f->nwname; i++)
+			n += stringsz(f->wname[i]);
+		break;
+	case IXRwalk:
+		break;
+
+	case IXTopen:
+		n += BIT8SZ;
+		break;
+	case IXRopen:
+		break;
+
+	case IXTcreate:
 		n += stringsz(f->name);
 		n += BIT32SZ;
 		n += BIT8SZ;
 		break;
+	case IXRcreate:
+		break;
 
-	case Tread:
+	case IXTread:
+		n += BIT16SZ;
+		n += BIT64SZ;
 		n += BIT32SZ;
+		break;
+	case IXRread:
+		/* data follows */
+		break;
+
+	case IXTwrite:
+		n += BIT64SZ;
+		n += BIT64SZ;
+		/* data follows */
+		break;
+	case IXRwrite:
 		n += BIT64SZ;
 		n += BIT32SZ;
 		break;
 
-	case Twrite:
-		n += BIT64SZ;
+	case IXTclunk:
+	case IXRclunk:
+	case IXTclose:
+	case IXRclose:
+	case IXTremove:
+	case IXRremove:
+		break;
+
+	case IXTattr:
+		n += stringsz(f->attr);
+		break;
+	case IXRattr:
+		/* data follows */
+		break;
+
+	case IXTwattr:
+		n += stringsz(f->attr);
+		/* value data follows */
+		break;
+	case IXRwattr:
+		break;
+
+	case IXTcond:
+		n += BIT8SZ;
+		n += stringsz(f->attr);
+		/* value data follows */
+		break;
+	case IXRcond:
+		break;
+
+	case IXTmove:
 		n += BIT32SZ;
-		/* n += f->count; */
+		n += stringsz(f->newname);
+		break;
+	case IXRmove:
 		break;
 
-	case Tclunk:
-	case Tremove:
-	case Tstat:
-		break;
-
-	case Twstat:
-		n += BIT16SZ;
-		n += f->nstat;
-		break;
-/*
- */
-	case Rcond:
-	case Rfid:
-		break;
-
-	case Rclone:
-		n += BIT32SZ;
-		break;
-
-	case Rversion:
-		n += BIT32SZ;
-		n += stringsz(f->version);
-		break;
-
-	case Rerror:
-		n += stringsz(f->ename);
-		break;
-
-	case Rauth:
-		n += QIDSZ;
-		break;
-
-	case Rattach:
-		n += BIT32SZ;
-		n += QIDSZ;
-		break;
-
-	case Rwalk:
-		n += QIDSZ;
-		break;
-
-	case Ropen:
-	case Rcreate:
-		n += QIDSZ;
+	case IXTcopy:
 		n += BIT32SZ;
 		break;
-
-	case Rread:
-		n += BIT32SZ;
-		/* n += f->count; */
+	case IXRcopy:
 		break;
 
-	case Rwrite:
-		n += BIT32SZ;
+	case IXTflush:
+	case IXRflush:
 		break;
-
-	case Rclunk:
-	case Rremove:
-		break;
-
-	case Rstat:
-		n += BIT16SZ;
-		n += f->nstat;
-		break;
-
-	case Rwstat:
-		break;
-
 	default:
-		sysfatal("packedsize: type %d", f->type);
+		sysfatal("packedsize: unknown type %d", f->type);
 
 	}
 	return n;
 }
 
 uint
-pack(Fscall *f, uchar *ap, uint nap)
+ixpack(IXcall *f, uchar *ap, uint nap)
 {
 	uchar *p;
 	uint size;
+	int i;
 
-	size = packedsize(f);
+	size = ixpackedsize(f);
 	if(size == 0)
 		return 0;
 	if(size > nap)
@@ -219,169 +231,178 @@ pack(Fscall *f, uchar *ap, uint nap)
 	PBIT8(p, f->type);
 	p += BIT8SZ;
 
-	switch(f->type)
-	{
-	case Tcond:
-		PBIT8(p, f->cond);
-		p += BIT8SZ;
-		PBIT16(p, f->nstat);
-		p += BIT16SZ;
-		memmove(p, f->stat, f->nstat);
-		p += f->nstat;
-		break;
-
-	case Tfid:
-		PBIT32(p, f->fid);
-		p += BIT32SZ;
-		PBIT8(p, f->cflags);
-		p += BIT8SZ;
-		break;
-
-	case Tclone:
-		PBIT8(p, f->cflags);
-		p += BIT8SZ;
-		break;
-
-	case Tversion:
+	switch(f->type){
+	case IXTversion:
+	case IXRversion:
 		PBIT32(p, f->msize);
 		p += BIT32SZ;
-		p = pstring(p, f->version);
+		p  = pstring(p, f->version);
 		break;
 
-	case Tauth:
+	case IXTsession:
+		PBIT16(p, f->ssid);
+		p += BIT16SZ;
+		p  = pstring(p, f->uname);
+		PBIT8(p, f->keep);
+		p += BIT8SZ;
+		break;
+	case IXRsession:
+		PBIT16(p, f->ssid);
+		p += BIT16SZ;
 		PBIT32(p, f->afid);
 		p += BIT32SZ;
 		p  = pstring(p, f->uname);
-		p  = pstring(p, f->aname);
 		break;
 
-	case Tattach:
-		PBIT32(p, f->afid);
+	case IXTsid:
+		PBIT16(p, f->ssid);
+		p += BIT16SZ;
+		break;
+	case IXRsid:
+		break;
+
+	case IXTendsession:
+	case IXRendsession:
+		break;
+
+	case IXTfid:
+		PBIT32(p, f->fid);
 		p += BIT32SZ;
-		p  = pstring(p, f->uname);
+		break;
+	case IXRfid:
+		break;
+
+	case IXTattach:
 		p  = pstring(p, f->aname);
 		break;
-
-	case Twalk:
-		p = pstring(p, f->wname);
+	case IXRattach:
+		PBIT32(p, f->fid);
+		p += BIT32SZ;
 		break;
 
-	case Topen:
+	case IXRerror:
+		p  = pstring(p, f->ename);
+		break;
+
+	case IXTclone:
+		PBIT8(p, f->cflags);
+		p += BIT8SZ;
+		break;
+	case IXRclone:
+		PBIT32(p, f->fid);
+		p += BIT32SZ;
+		break;
+
+	case IXTwalk:
+		PBIT16(p, f->nwname);
+		p += BIT16SZ;
+		for(i=0; i<f->nwname; i++)
+			p  = pstring(p, f->wname[i]);
+		break;
+	case IXRwalk:
+		break;
+
+	case IXTopen:
 		PBIT8(p, f->mode);
 		p += BIT8SZ;
 		break;
+	case IXRopen:
+		break;
 
-	case Tcreate:
-		p = pstring(p, f->name);
+	case IXTcreate:
+		p  = pstring(p, f->name);
 		PBIT32(p, f->perm);
 		p += BIT32SZ;
 		PBIT8(p, f->mode);
 		p += BIT8SZ;
 		break;
+	case IXRcreate:
+		break;
 
-	case Tread:
-		PBIT32(p, f->nmsg);
+	case IXTread:
+		PBIT16(p, f->nmsg);
+		p += BIT16SZ;
+		PBIT64(p, f->offset);
+		p += BIT64SZ;
+		PBIT32(p, f->count);
 		p += BIT32SZ;
+		break;
+	case IXRread:
+		/* data follows */
+		break;
+
+	case IXTwrite:
+		PBIT64(p, f->offset);
+		p += BIT64SZ;
+		PBIT64(p, f->endoffset);
+		p += BIT64SZ;
+		/* data follows */
+		break;
+	case IXRwrite:
 		PBIT64(p, f->offset);
 		p += BIT64SZ;
 		PBIT32(p, f->count);
 		p += BIT32SZ;
 		break;
 
-	case Twrite:
+	case IXTclunk:
+	case IXRclunk:
+	case IXTclose:
+	case IXRclose:
+	case IXTremove:
+	case IXRremove:
+		break;
+
+	case IXTattr:
+		p  = pstring(p, f->attr);
+		break;
+	case IXRattr:
+		/* value data follows */
+		break;
+
+	case IXTwattr:
+		p  = pstring(p, f->attr);
+		/* value data follows */
+		break;
+	case IXRwattr:
+		break;
+
+	case IXTcond:
+		PBIT8(p, f->op);
+		p += BIT8SZ;
+		p  = pstring(p, f->attr);
+		/* value data follows */
+		break;
+	case IXRcond:
+		break;
+
+	case IXTmove:
+		PBIT32(p, f->dirfid);
+		p += BIT32SZ;
+		p  = pstring(p, f->newname);
+		break;
+	case IXRmove:
+		break;
+
+	case IXTcopy:
+		PBIT16(p, f->nmsg);
+		p += BIT16SZ;
 		PBIT64(p, f->offset);
 		p += BIT64SZ;
 		PBIT32(p, f->count);
 		p += BIT32SZ;
-		/*
-		 * Data added by the caller.
-		 * memmove(p, f->data, f->count);
-		 * p += f->count;
-		 */
-		break;
-
-	case Tclunk:
-	case Tremove:
-	case Tstat:
-		break;
-
-	case Twstat:
-		PBIT16(p, f->nstat);
-		p += BIT16SZ;
-		memmove(p, f->stat, f->nstat);
-		p += f->nstat;
-		break;
-/*
- * replies
- */
-
-	case Rcond:
-	case Rfid:
-		break;
-
-	case Rclone:
-		PBIT32(p, f->newfid);
+		PBIT32(p, f->dstfid);
 		p += BIT32SZ;
+		PBIT64(p, f->dstoffset);
+		p += BIT64SZ;
 		break;
-
-	case Rversion:
-		PBIT32(p, f->msize);
-		p += BIT32SZ;
-		p = pstring(p, f->version);
-		break;
-
-	case Rerror:
-		p = pstring(p, f->ename);
-		break;
-
-	case Rauth:
-		p = pqid(p, &f->aqid);
-		break;
-
-	case Rattach:
-		PBIT32(p, f->fid);
-		p += BIT32SZ;
-		p = pqid(p, &f->qid);
-		break;
-
-	case Rwalk:
-		p = pqid(p, &f->wqid);
-		break;
-
-	case Ropen:
-	case Rcreate:
-		p = pqid(p, &f->qid);
-		PBIT32(p, f->iounit);
-		p += BIT32SZ;
-		break;
-
-	case Rread:
-		PBIT32(p, f->count);
-		p += BIT32SZ;
-		/*
-		 * data is added by the caller.
-		 * memmove(p, f->data, f->count);
-		 * p += f->count;
-		 */
-		break;
-
-	case Rwrite:
+	case IXRcopy:
 		PBIT32(p, f->count);
 		p += BIT32SZ;
 		break;
 
-	case Rclunk:
-	case Rremove:
-		break;
-
-	case Rstat:
-		PBIT16(p, f->nstat);
-		p += BIT16SZ;
-		memmove(p, f->stat, f->nstat);
-		p += f->nstat;
-		break;
-
-	case Rwstat:
+	case IXTflush:
+	case IXRflush:
 		break;
 
 	default:
@@ -393,7 +414,6 @@ pack(Fscall *f, uchar *ap, uint nap)
 	return size;
 }
 
-static
 uchar*
 gstring(uchar *p, uchar *ep, char **s)
 {
@@ -413,35 +433,28 @@ gstring(uchar *p, uchar *ep, char **s)
 	return p;
 }
 
-static
 uchar*
-gqid(uchar *p, uchar *ep, Qid *q)
+gdata(uchar *p, uchar *ep, uchar **s, int *ns)
 {
-	if(p+QIDSZ > ep)
+	uint n;
+
+	if(p+BIT16SZ > ep)
 		return nil;
-	q->type = GBIT8(p);
-	p += BIT8SZ;
-	q->vers = GBIT32(p);
-	p += BIT32SZ;
-	q->path = GBIT64(p);
-	p += BIT64SZ;
+	n = GBIT16(p);
+	*ns = n;
+	p += BIT16SZ;
+	if(p+n > ep)
+		return nil;
+	*s = p;
+	p += n;
 	return p;
 }
 
-/*
- * no syntactic checks.
- * three causes for error:
- *  1. message size field is incorrect
- *  2. input buffer too short for its own data (counts too long, etc.)
- *  3. too many names or qids
- * gqid() and gstring() return nil if they would reach beyond buffer.
- * main switch statement checks range and also can fall through
- * to test at end of routine.
- */
 uint
-unpack(uchar *ap, uint nap, Fscall *f)
+ixunpack(uchar *ap, uint nap, IXcall *f)
 {
 	uchar *p, *ep;
+	int i;
 
 	p = ap;
 	ep = p + nap;
@@ -454,42 +467,9 @@ unpack(uchar *ap, uint nap, Fscall *f)
 	f->type = GBIT8(p);
 	p += BIT8SZ;
 
-	switch(f->type)
-	{
-	default:
-		werrstr("unknown type %d", f->type);
-		return 0;
-
-	case Tcond:
-		if(p+BIT8SZ+BIT16SZ > ep)
-			return 0;
-		f->cond = GBIT8(p);
-		p += BIT8SZ;
-		f->nstat = GBIT16(p);
-		p += BIT16SZ;
-		if(p+f->nstat > ep)
-			return 0;
-		f->stat = p;
-		p += f->nstat;
-		break;
-
-	case Tfid:
-		if(p+BIT32SZ+BIT8SZ > ep)
-			return 0;
-		f->fid = GBIT32(p);
-		p += BIT32SZ;
-		f->cflags = GBIT8(p);
-		p += BIT8SZ;
-		break;
-
-	case Tclone:
-		if(p+BIT8SZ > ep)
-			return 0;
-		f->cflags = GBIT8(p);
-		p += BIT8SZ;
-		break;
-
-	case Tversion:
+	switch(f->type){
+	case IXTversion:
+	case IXRversion:
 		if(p+BIT32SZ > ep)
 			return 0;
 		f->msize = GBIT32(p);
@@ -497,46 +477,101 @@ unpack(uchar *ap, uint nap, Fscall *f)
 		p = gstring(p, ep, &f->version);
 		break;
 
-	case Tauth:
-		if(p+BIT32SZ > ep)
+	case IXTsession:
+		if(p+BIT16SZ > ep)
 			return 0;
+		f->ssid = GBIT16(p);
+		p += BIT16SZ;
+		p = gstring(p, ep, &f->uname);
+		if(p == nil)
+			return 0;
+		if(p+BIT8SZ > ep)
+			return 0;
+		f->keep = GBIT8(p);
+		p += BIT8SZ;
+		break;
+	case IXRsession:
+		if(p+BIT16SZ+BIT32SZ > ep)
+			return 0;
+		f->ssid = GBIT16(p);
+		p += BIT16SZ;
 		f->afid = GBIT32(p);
 		p += BIT32SZ;
 		p = gstring(p, ep, &f->uname);
-		if(p == nil)
-			break;
-		p = gstring(p, ep, &f->aname);
-		if(p == nil)
-			break;
 		break;
 
-	case Tattach:
+	case IXTsid:
+		if(p+BIT16SZ > ep)
+			return 0;
+		f->ssid = GBIT16(p);
+		p += BIT16SZ;
+		break;
+	case IXRsid:
+		break;
+
+	case IXTendsession:
+	case IXRendsession:
+		break;
+
+	case IXTfid:
 		if(p+BIT32SZ > ep)
 			return 0;
-		f->afid = GBIT32(p);
+		f->fid = GBIT32(p);
 		p += BIT32SZ;
-		p = gstring(p, ep, &f->uname);
-		if(p == nil)
-			break;
+		break;
+	case IXRfid:
+		break;
+
+	case IXTattach:
 		p = gstring(p, ep, &f->aname);
-		if(p == nil)
-			break;
+		break;
+	case IXRattach:
+		if(p+BIT32SZ > ep)
+			return 0;
+		f->fid = GBIT32(p);
+		p += BIT32SZ;
 		break;
 
-	case Twalk:
-		p = gstring(p, ep, &f->wname);
-		if(p == nil)
-			break;
+	case IXRerror:
+		p = gstring(p, ep, &f->ename);
 		break;
 
-	case Topen:
+	case IXTclone:
+		if(p+BIT8SZ > ep)
+			return 0;
+		f->cflags = GBIT8(p);
+		p += BIT8SZ;
+		break;
+	case IXRclone:
+		if(p+BIT32SZ > ep)
+			return 0;
+		f->fid = GBIT32(p);
+		p += BIT32SZ;
+		break;
+
+	case IXTwalk:
+		if(p+BIT16SZ > ep)
+			return 0;
+		f->nwname = GBIT16(p);
+		p += BIT16SZ;
+		if(f->nwname > Nwalks)
+			sysfatal("unpack: bug: too many walk elems");
+		for(i=0; i<f->nwname && p != nil; i++)
+			p  = gstring(p, ep, &f->wname[i]);
+		break;
+	case IXRwalk:
+		break;
+
+	case IXTopen:
 		if(p+BIT8SZ > ep)
 			return 0;
 		f->mode = GBIT8(p);
 		p += BIT8SZ;
 		break;
+	case IXRopen:
+		break;
 
-	case Tcreate:
+	case IXTcreate:
 		p = gstring(p, ep, &f->name);
 		if(p == nil)
 			break;
@@ -547,140 +582,116 @@ unpack(uchar *ap, uint nap, Fscall *f)
 		f->mode = GBIT8(p);
 		p += BIT8SZ;
 		break;
+	case IXRcreate:
+		break;
 
-	case Tread:
-		if(p+BIT32SZ+BIT64SZ+BIT32SZ > ep)
+	case IXTread:
+		if(p+BIT16SZ+BIT64SZ+BIT32SZ > ep)
 			return 0;
-		f->nmsg = GBIT32(p);
+		f->nmsg = GBIT16(p);
+		p += BIT16SZ;
+		f->offset = GBIT64(p);
+		p += BIT64SZ;
+		f->count = GBIT32(p);
 		p += BIT32SZ;
+		break;
+	case IXRread:
+		f->data = p;
+		break;
+
+	case IXTwrite:
+		if(p+BIT64SZ > ep)
+			return 0;
+		f->offset = GBIT64(p);
+		p += BIT64SZ;
+		f->endoffset = GBIT64(p);
+		p += BIT64SZ;
+		f->data = p;
+		break;
+	case IXRwrite:
+		if(p+BIT32SZ+BIT64SZ > ep)
+			return 0;
 		f->offset = GBIT64(p);
 		p += BIT64SZ;
 		f->count = GBIT32(p);
 		p += BIT32SZ;
 		break;
 
-	case Twrite:
-		if(p+BIT64SZ+BIT32SZ > ep)
+	case IXTclunk:
+	case IXRclunk:
+	case IXTclose:
+	case IXRclose:
+	case IXTremove:
+	case IXRremove:
+		break;
+
+	case IXTattr:
+		p = gstring(p, ep, &f->attr);
+		break;
+	case IXRattr:
+		f->value = p;
+		break;
+
+	case IXTwattr:
+		p = gstring(p, ep, &f->attr);
+		if(p == nil)
 			return 0;
+		f->value = p;
+		break;
+	case IXRwattr:
+		break;
+
+	case IXTcond:
+		if(p+BIT8SZ > ep)
+			return 0;
+		f->op = GBIT8(p);
+		p += BIT8SZ;
+		p = gstring(p, ep, &f->attr);
+		if(p == nil)
+			return 0;
+		f->value = p;
+		break;
+	case IXRcond:
+		break;
+
+	case IXTmove:
+		if(p+BIT32SZ > ep)
+			return 0;
+		f->dirfid = GBIT32(p);
+		p += BIT32SZ;
+		p = gstring(p, ep, &f->newname);
+		break;
+	case IXRmove:
+		break;
+
+	case IXTcopy:
+		if(p+BIT16SZ+BIT64SZ+BIT32SZ + BIT32SZ+BIT64SZ > ep)
+			return 0;
+		f->nmsg = GBIT16(p);
+		p += BIT16SZ;
 		f->offset = GBIT64(p);
 		p += BIT64SZ;
 		f->count = GBIT32(p);
 		p += BIT32SZ;
-		if(p+f->count > ep)
-			return 0;
-		f->data = (char*)p;
-		p += f->count;
-		break;
-
-	case Tclunk:
-	case Tremove:
-	case Tstat:
-		break;
-
-	case Twstat:
-		if(p+BIT16SZ > ep)
-			return 0;
-		f->nstat = GBIT16(p);
-		p += BIT16SZ;
-		if(p+f->nstat > ep)
-			return 0;
-		f->stat = p;
-		p += f->nstat;
-		break;
-
-/*
- */
-	case Rfid:
-	case Rcond:
-		break;
-
-	case Rclone:
-		if(p+BIT32SZ > ep)
-			return 0;
-		f->newfid = GBIT32(p);
+		f->dstfid = GBIT32(p);
 		p += BIT32SZ;
+		f->dstoffset = GBIT64(p);
+		p += BIT64SZ;
 		break;
-
-	case Rversion:
-		if(p+BIT32SZ > ep)
-			return 0;
-		f->msize = GBIT32(p);
-		p += BIT32SZ;
-		p = gstring(p, ep, &f->version);
-		break;
-
-	case Rerror:
-		p = gstring(p, ep, &f->ename);
-		break;
-
-	case Rauth:
-		p = gqid(p, ep, &f->aqid);
-		if(p == nil)
-			break;
-		break;
-
-	case Rattach:
-		if(p+BIT32SZ > ep)
-			return 0;
-		f->fid = GBIT32(p);
-		p += BIT32SZ;
-		p = gqid(p, ep, &f->qid);
-		if(p == nil)
-			break;
-		break;
-
-	case Rwalk:
-		p = gqid(p, ep, &f->wqid);
-		if(p == nil)
-			break;
-		break;
-
-	case Ropen:
-	case Rcreate:
-		p = gqid(p, ep, &f->qid);
-		if(p == nil)
-			break;
-		if(p+BIT32SZ > ep)
-			return 0;
-		f->iounit = GBIT32(p);
-		p += BIT32SZ;
-		break;
-
-	case Rread:
-		if(p+BIT32SZ > ep)
-			return 0;
-		f->count = GBIT32(p);
-		p += BIT32SZ;
-		if(p+f->count > ep)
-			return 0;
-		f->data = (char*)p;
-		p += f->count;
-		break;
-
-	case Rwrite:
+	case IXRcopy:
 		if(p+BIT32SZ > ep)
 			return 0;
 		f->count = GBIT32(p);
 		p += BIT32SZ;
 		break;
 
-	case Rclunk:
-	case Rremove:
+	case IXTflush:
+	case IXRflush:
 		break;
 
-	case Rstat:
-		if(p+BIT16SZ > ep)
-			return 0;
-		f->nstat = GBIT16(p);
-		p += BIT16SZ;
-		if(p+f->nstat > ep)
-			return 0;
-		f->stat = p;
-		p += f->nstat;
-		break;
-
-	case Rwstat:
-		break;
+	default:
+		werrstr("unpack: unknown type %d", f->type);
+		return 0;
 	}
 
 	if(p==nil || p>ep || p == ap){

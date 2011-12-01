@@ -8,7 +8,9 @@
  * 't': test client
  * 'n': nsfile
  * 'c': cache
+ * 'D': disk
  */
+#define dDprint	if(!dbg['D']){}else print
 #define dPprint	if(!dbg['P']){}else print
 #define dcprint	if(!dbg['c']){}else print
 #define dfprint if(!dbg['f']){}else print

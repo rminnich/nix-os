@@ -27,6 +27,7 @@ struct Msg
 #define IOCAP(io)	((io)->ep - (io)->wp)
 
 /*	|c/f2p msg.c	*/
+extern void	dumpmsg(Msg *m);
 extern Channel*	echancreate(int elsz, int n);
 extern void	freemsg(Msg *m);
 extern void	ioreset(Io *io);

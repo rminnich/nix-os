@@ -1,6 +1,5 @@
 #include <u.h>
 #include <libc.h>
-#include <error.h>
 #include <thread.h>
 #include <fcall.h>
 
@@ -10,10 +9,11 @@
 #include "tses.h"
 #include "ch.h"
 #include "dbg.h"
-#include "fs.h"
-#include "file.h"
+#include "ix.h"
+#include "ixfile.h"
 
 #define SRVADDR	"tcp!*!9999"
+#define TESTDIR "/sys/src/cmd/ix/Testfs"
 
 int mainstacksize = Stack;
 
@@ -53,13 +53,13 @@ threadmain(int argc, char *argv[])
 	else if(argc > 1)
 		usage();
 
-	fmtinstall('G', fscallfmt);
-	fmtinstall('D', dirfmt);
+	outofmemoryexits(1);
+	fmtinstall('G', ixcallfmt);
 	fmtinstall('M', dirmodefmt);
 	fmtinstall('T', filefmt);
-	fileinit("/usr/nemo/bin", 0);
-	fsinit(addr, srv);
-	fssrv();
+	fileinit(TESTDIR);
+	ixinit(addr, srv);
+	ixsrv();
 	dtprint("testsrv: exiting\n");
 	threadexits(nil);
 }

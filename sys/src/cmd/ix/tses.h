@@ -1,7 +1,7 @@
-typedef struct Ses Ses;
+typedef struct Con Con;
 typedef struct Ssrv Ssrv;
 
-struct Ses
+struct Con
 {
 	Channel*rc;	/* read channel (of Msg*) */
 	Channel*wc;	/* write channel (of Msg*) */
@@ -13,28 +13,28 @@ struct Ses
 	Mpool*spool;	/* small message pool */
 	char* err;
 	Ref;		/* used by reader, writer, client */
-	Ses *next;	/* in list of sessions */
+	Con *next;	/* in list of sessions */
 	char* addr;	/* debug */
-	int cfd;	/* control fd */
-	int dfd;	/* data fd */
+	int cfd;		/* control fd */
+	int dfd;		/* data fd */
 	int rtid;	/* reader thread id */
 };
 
 struct Ssrv
 {
-	Channel*newc;	/* of Ses* */
+	Channel*newc;	/* of Con* */
 
 	/* implementation*/
 	char*	addr;
 	char	adir[40];
 	int	afd;
 	int	lfd;
-	Channel*endc;	/* of Ses* */
+	Channel*endc;	/* of Con* */
 	Channel*listenc;	/* of ses* */
 };
 
 /*	|c/f2p tses.c	*/
-extern int	closeses(Ses *s);
-extern Ses*	dialsrv(char *addr);
+extern int	closeses(Con *s);
+extern Con*	dialsrv(char *addr);
 extern Ssrv*	newsrv(char *addr);
-extern void	startses(Ses *s, Mpool *p, Mpool *sp);
+extern void	startses(Con *s, Mpool *p, Mpool *sp);

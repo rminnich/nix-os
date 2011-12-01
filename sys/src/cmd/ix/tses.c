@@ -1,5 +1,5 @@
 /*
- * Tcp-like transports, wrapped in a Ses structure
+ * Tcp-like transports, wrapped in a Con structure
  * to send and receive messages.
  *
  * Termination:
@@ -19,7 +19,6 @@
  */
 #include <u.h>
 #include <libc.h>
-#include <error.h>
 #include <thread.h>
 
 #include "conf.h"
@@ -29,7 +28,7 @@
 #include "dbg.h"
 
 static void
-abortconn(Ses *s)
+abortconn(Con *s)
 {
 	if(s->cfd < 0)
 		return;
@@ -41,7 +40,7 @@ abortconn(Ses *s)
 }
 
 static void
-freeses(Ses *s)
+freeses(Con *s)
 {
 	dsprint("free session %p\n", s);
 	free(s->addr);
@@ -59,14 +58,14 @@ freeses(Ses *s)
 }
 
 static void
-putses(Ses *s)
+putses(Con *s)
 {
 	if(decref(s) == 0)
 		freeses(s);
 }
 
 static void
-syserr(Ses *s)
+syserr(Con *s)
 {
 	/*
 	 * BUG: could leak if concurrent errors.
@@ -78,7 +77,7 @@ syserr(Ses *s)
 static void
 rproc(void *a)
 {
-	Ses *s;
+	Con *s;
 	Msg *m, *sm;
 	long nr;
 
@@ -125,7 +124,7 @@ rproc(void *a)
 static void
 wproc(void *a)
 {
-	Ses *s;
+	Con *s;
 	Msg *m;
 
 	s = a;
@@ -156,7 +155,7 @@ wproc(void *a)
 }
 
 void
-startses(Ses *s, Mpool *mp, Mpool *smp)
+startses(Con *s, Mpool *mp, Mpool *smp)
 {
 	s->pool = mp;
 	s->spool = smp;
@@ -175,7 +174,7 @@ ssrvproc(void *a)
 	enum{New, End};
 
 	Ssrv *ss;
-	Ses *sl, **nl, *s;
+	Con *sl, **nl, *s;
 	Alt alts[] = {
 		[New] {nil, &s, CHANRCV},
 		[End] {nil, &s, CHANRCV},
@@ -219,15 +218,15 @@ static void
 listenproc(void *a)
 {
 	Ssrv *ss;
-	Ses *s;
+	Con *s;
 	char ldir[40];
 
 	ss = a;
 	threadsetname("listenproc %p", a);
 	dpprint("listenproc[%p]: started\n", a);
 	for(;;){
-		s = emalloc(sizeof *s);
-		s->addr = estrdup(ss->addr);	/* not needed in srv */
+		s = mallocz(sizeof *s, 1);
+		s->addr = strdup(ss->addr);	/* not needed in srv */
 		s->cfd = s->dfd = -1;
 		s->ref = 1;
 		s->cfd = listen(ss->adir, ldir);
@@ -259,28 +258,28 @@ newsrv(char *addr)
 {
 	Ssrv *ss;
 
-	ss = emalloc(sizeof *ss);
+	ss = mallocz(sizeof *ss, 1);
 	dprint("announce %s\n", addr);
 	ss->afd = announce(addr, ss->adir);
 	if(ss->afd < 0){
 		free(ss);
 		return nil;
 	}
-	ss->addr = estrdup(addr);
-	ss->listenc = echancreate(sizeof(Ses*), 0);
-	ss->newc = echancreate(sizeof(Ses*), 0);
-	ss->endc = echancreate(sizeof(Ses*), 0);
+	ss->addr = strdup(addr);
+	ss->listenc = echancreate(sizeof(Con*), 0);
+	ss->newc = echancreate(sizeof(Con*), 0);
+	ss->endc = echancreate(sizeof(Con*), 0);
 	proccreate(listenproc, ss, Stack);
 	threadcreate(ssrvproc, ss, Stack);
 	return ss;
 }
 
-Ses*
+Con*
 dialsrv(char *addr)
 {
-	Ses *s;
+	Con *s;
 
-	s = emalloc(sizeof *s);
+	s = mallocz(sizeof *s, 1);
 	dprint("dial %s\n", addr);
 	s->dfd = dial(addr, nil, nil, &s->cfd);
 	if(s->dfd < 0){
@@ -288,13 +287,13 @@ dialsrv(char *addr)
 		return nil;
 	}
 	s->ref = 1;
-	s->addr = estrdup(addr);
+	s->addr = strdup(addr);
 	dsprint("session[%p]: new %s\n", s, s->addr);
 	return s;
 }
 
 int
-closeses(Ses *s)
+closeses(Con *s)
 {
 	Msg *m;
 	char *e;

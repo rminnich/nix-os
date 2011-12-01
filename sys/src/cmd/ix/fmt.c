@@ -2,13 +2,9 @@
 #include <libc.h>
 #include <fcall.h>
 
-#include "fs.h"
+#include "ix.h"
 
-static uint dumpsome(char*, char*, char*, long);
-static void fdirconv(char*, char*, Dir*);
-static char *qidtype(char*, uchar);
 
-#define	QIDFMT	"(%.16llux %lud %s)"
 
 static char* cname[CMAX] = 
 {
@@ -21,190 +17,187 @@ static char* cname[CMAX] =
 };
 
 int
-fscallfmt(Fmt *fmt)
+ixcallfmt(Fmt *fmt)
 {
-	Fscall *f;
-	int type;
-	char buf[512], tmp[200];
+	IXcall *f;
+	int type, i;
+	char buf[512];
 	char *p, *e, *s;
-	Dir *d;
-	Qid *q;
 
 	e = buf+sizeof(buf);
-	f = va_arg(fmt->args, Fscall*);
+	f = va_arg(fmt->args, IXcall*);
 	type = f->type;
 	switch(type){
-	case Tcond:
-		if(f->cond >= CMAX)
-			s = "??";
-		else
-			s = cname[f->cond];
-		p = seprint(buf, e, "Tcond %s", s);
-		if(f->nstat > sizeof tmp)
-			seprint(p, e, " stat(%d bytes)", f->nstat);
-		else{
-			d = (Dir*)tmp;
-			convM2D(f->stat, f->nstat, d, (char*)(d+1));
-			seprint(p, e, " stat ");
-			fdirconv(p+6, e, d);
-		}
-		break;
-
-	case Rcond:
-		seprint(buf, e, "Rcond");
-		break;
-	case Tfid:
-		seprint(buf, e, "Tfid  fid %ud cflags %d", f->fid, f->cflags);
-		break;
-	case Rfid:
-		seprint(buf, e, "Rfid");
-		break;
-	case Tclone:
-		seprint(buf, e, "Tclone  cflags %d", f->cflags);
-		break;
-	case Rclone:
-		seprint(buf, e, "Rclone  newfid %d", f->newfid);
-		break;
-	case Tversion:	/* 100 */
+	case IXTversion:
 		seprint(buf, e, "Tversion  msize %ud version '%s'", f->msize, f->version);
 		break;
-	case Rversion:
+	case IXRversion:
 		seprint(buf, e, "Rversion  msize %ud version '%s'", f->msize, f->version);
 		break;
-	case Tauth:	/* 102 */
-		seprint(buf, e, "Tauth  afid %d uname %s aname %s",
-			f->afid, f->uname, f->aname);
+
+	case IXTsession:
+		seprint(buf, e, "Tsession  ssid %ud uname '%s' keep %d", f->ssid, f->uname, f->keep);
 		break;
-	case Rauth:
-		seprint(buf, e, "Rauth  qid " QIDFMT,
-			f->aqid.path, f->aqid.vers, qidtype(tmp, f->aqid.type));
+	case IXRsession:
+		seprint(buf, e, "Rsession  ssid %ud afid %ud uname '%s'",
+			f->ssid, f->afid, f->uname);
 		break;
-	case Tattach:	/* 104 */
-		seprint(buf, e, "Tattach  afid %d uname %s aname %s",
-			f->afid, f->uname, f->aname);
+
+	case IXTsid:
+		seprint(buf, e, "Tsid  ssid %ud", f->ssid);
 		break;
-	case Rattach:
-		seprint(buf, e, "Rattach  fid %d qid " QIDFMT,
-			f->fid, f->qid.path, f->qid.vers, qidtype(tmp, f->qid.type));
+	case IXRsid:
+		seprint(buf, e, "Rsid");
 		break;
-	case Rerror:	/* 107; 106 (Terror) illegal */
-		seprint(buf, e, "Rerror  ename %s", f->ename);
+
+	case IXTendsession:
+		seprint(buf, e, "Tendsession");
 		break;
-	case Twalk:	/* 110 */
-		seprint(buf, e, "Twalk wname %s", f->wname);
+	case IXRendsession:
+		seprint(buf, e, "Rendsession");
 		break;
-	case Rwalk:
-		q = &f->wqid;
-		seprint(buf, e, "Rwalk wqid " QIDFMT,
-					q->path, q->vers, qidtype(tmp, q->type));
+
+	case IXTfid:
+		seprint(buf, e, "Tfid  fid %ud", f->fid);
 		break;
-	case Topen:	/* 112 */
+	case IXRfid:
+		seprint(buf, e, "Rfid");
+		break;
+
+	case IXTattach:
+		seprint(buf, e, "Tattach aname '%s'", f->aname);
+		break;
+	case IXRattach:
+		seprint(buf, e, "Rattach  fid %d", f->fid);
+		break;
+
+	case IXRerror:
+		seprint(buf, e, "Rerror ename '%s'", f->ename);
+		break;
+
+	case IXTclone:
+		seprint(buf, e, "Tclone  cflags %#x", f->cflags);
+		break;
+	case IXRclone:
+		seprint(buf, e, "Rclone  fid %d", f->fid);
+		break;
+
+
+	case IXTwalk:
+		s = seprint(buf, e, "Twalk");
+		for(i = 0; i < f->nwname; i++)
+			s = seprint(s, e, " '%s'", f->wname[i]);
+		break;
+	case IXRwalk:
+		seprint(buf, e, "Rwalk");
+		break;
+
+	case IXTopen:
 		seprint(buf, e, "Topen mode %d", f->mode);
 		break;
-	case Ropen:
-		seprint(buf, e, "Ropen qid " QIDFMT " iounit %ud ",
-			f->qid.path, f->qid.vers, qidtype(tmp, f->qid.type), f->iounit);
+	case IXRopen:
+		seprint(buf, e, "Ropen");
 		break;
-	case Tcreate:	/* 114 */
+
+	case IXTcreate:
 		seprint(buf, e, "Tcreate name %s perm %M mode %d", f->name, (ulong)f->perm, f->mode);
 		break;
-	case Rcreate:
-		seprint(buf, e, "Rcreate qid " QIDFMT " iounit %ud ",
-			f->qid.path, f->qid.vers, qidtype(tmp, f->qid.type), f->iounit);
+	case IXRcreate:
+		seprint(buf, e, "Rcreate");
 		break;
-	case Tread:	/* 116 */
+
+	case IXTread:
 		seprint(buf, e, "Tread nmsg %d offset %lld count %ud",
 			f->nmsg, f->offset, f->count);
 		break;
-	case Rread:
-		p = seprint(buf, e, "Rread count %ud ", f->count);
-			dumpsome(p, e, f->data, f->count);
+	case IXRread:
+		s = seprint(buf, e, "Rread count %ud ", f->count);
+		dumpsome(s, e, f->data, f->count);
 		break;
-	case Twrite:	/* 118 */
-		p = seprint(buf, e, "Twrite offset %lld count %ud ",
-			f->offset, f->count);
+
+	case IXTwrite:
+		p = seprint(buf, e, "Twrite offset %lld endoffset %lld count %ud ",
+			f->offset, f->endoffset, f->count);
 		dumpsome(p, e, f->data, f->count);
 		break;
-	case Rwrite:
-		seprint(buf, e, "Rwrite count %ud", f->count);
+	case IXRwrite:
+		seprint(buf, e, "Rwrite offset %lld count %ud", f->offset, f->count);
 		break;
-	case Tclunk:	/* 120 */
+
+	case IXTclunk:
 		seprint(buf, e, "Tclunk");
 		break;
-	case Rclunk:
+	case IXRclunk:
 		seprint(buf, e, "Rclunk");
 		break;
-	case Tremove:	/* 122 */
+	case IXTclose:
+		seprint(buf, e, "Tclose");
+		break;
+	case IXRclose:
+		seprint(buf, e, "Rclose");
+		break;
+	case IXTremove:
 		seprint(buf, e, "Tremove");
 		break;
-	case Rremove:
+	case IXRremove:
 		seprint(buf, e, "Rremove");
 		break;
-	case Tstat:	/* 124 */
-		seprint(buf, e, "Tstat");
+
+	case IXTattr:
+		seprint(buf, e, "Tattr attr '%s'", f->attr);
 		break;
-	case Rstat:
-		p = seprint(buf, e, "Rstat  ");
-		if(f->nstat > sizeof tmp)
-			seprint(p, e, " stat(%d bytes)", f->nstat);
-		else{
-			d = (Dir*)tmp;
-			convM2D(f->stat, f->nstat, d, (char*)(d+1));
-			seprint(p, e, " stat ");
-			fdirconv(p+6, e, d);
-		}
+	case IXRattr:
+		p = seprint(buf, e, "Rattr value ");
+		dumpsome(p, e, f->value, f->nvalue);
 		break;
-	case Twstat:	/* 126 */
-		p = seprint(buf, e, "Twstat");
-		if(f->nstat > sizeof tmp)
-			seprint(p, e, " stat(%d bytes)", f->nstat);
-		else{
-			d = (Dir*)tmp;
-			convM2D(f->stat, f->nstat, d, (char*)(d+1));
-			seprint(p, e, " stat ");
-			fdirconv(p+6, e, d);
-		}
+
+	case IXTwattr:
+		p = seprint(buf, e, "Twattr attr '%s' value ", f->attr);
+		dumpsome(p, e, f->value, f->nvalue);
 		break;
-	case Rwstat:
-		seprint(buf, e, "Rwstat");
+	case IXRwattr:
+		seprint(buf, e, "Rwattr");
 		break;
+
+	case IXTcond:
+		if(f->op >= CMAX)
+			s = "??";
+		else
+			s = cname[f->op];
+		p = seprint(buf, e, "Tcond op %s", s);
+		p = seprint(p, e, "attr '%s' value ", f->attr);
+		dumpsome(p, e, f->value, f->nvalue);
+		break;
+	case IXRcond:
+		seprint(buf, e, "Rcond");
+		break;
+
+	case IXTmove:
+		seprint(buf, e, "Tmove dirfid %d newname '%s'", f->dirfid, f->newname);
+		break;
+	case IXRmove:
+		seprint(buf, e, "Rmove");
+		break;
+
+	case IXTcopy:
+		seprint(buf, e, "Tcopy nmsg %d offset %lld count %ud dstfid %ud dstoffset %lld",
+			f->nmsg, f->offset, f->count, f->dstfid, f->dstoffset);
+		break;
+	case IXRcopy:
+		seprint(buf, e, "Rcopy count %ud", f->count);
+		break;
+
+	case IXTflush:
+		seprint(buf, e, "Tflush");
+		break;
+	case IXRflush:
+		seprint(buf, e, "Rflush");
+		break;
+
 	default:
 		seprint(buf, e,  "unknown type %d", type);
 	}
 	return fmtstrcpy(fmt, buf);
-}
-
-static char*
-qidtype(char *s, uchar t)
-{
-	char *p;
-
-	p = s;
-	if(t & QTDIR)
-		*p++ = 'd';
-	if(t & QTAPPEND)
-		*p++ = 'a';
-	if(t & QTEXCL)
-		*p++ = 'l';
-	if(t & QTAUTH)
-		*p++ = 'A';
-	*p = '\0';
-	return s;
-}
-
-static void
-fdirconv(char *buf, char *e, Dir *d)
-{
-	char tmp[16];
-
-	seprint(buf, e, "'%s' '%s' '%s' '%s' "
-		"q " QIDFMT " m %#luo "
-		"at %ld mt %ld l %lld "
-		"t %d d %d",
-			d->name, d->uid, d->gid, d->muid,
-			d->qid.path, d->qid.vers, qidtype(tmp, d->qid.type), d->mode,
-			d->atime, d->mtime, d->length,
-			d->type, d->dev);
 }
 
 /*
@@ -214,12 +207,14 @@ fdirconv(char *buf, char *e, Dir *d)
  */
 #define DUMPL 64
 
-static uint
-dumpsome(char *ans, char *e, char *buf, long count)
+uint
+dumpsome(char *ans, char *e, void *b, long count)
 {
 	int i, printable;
 	char *p;
+	char *buf;
 
+	buf = b;
 	if(buf == nil){
 		seprint(ans, e, "<no data>");
 		return strlen(ans);

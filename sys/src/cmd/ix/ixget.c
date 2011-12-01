@@ -1,42 +1,24 @@
 /*
  * Test program for ix.
- * Get files or directories.
  *
- 	X/\[/D
  ! mk all
- ! slay 8.ix 8.ixget|rc
+ ! slay 8.ix 8.ixget 8.ixp |rc
+ 	X/\[/D
+ ! rm -r /usr/nemo/src/9/ixp/Testfs/*
+ ! 8.ixp -DDfn
  ! slay 8.ixget|rc
- ! 8.ix -Dfn
- ! 8.ix -Dfsn >/tmp/LOG >[2=1] &
- tail -F /tmp/LOG &
- >/tmp/SRV.out >[2=1]
- ! ls -lq /usr/nemo/acme.dump /tmp/acme.dump
- ! cd /tmp ; /usr/nemo/src/tram/8.ixget -fDsf acme.dump >[2=1]
- ! cd /tmp ; /usr/nemo/src/tram/8.ixget -cDsf acme.dump>[2=1]
- >/tmp/GET.out>[2=1]
- ! cd /tmp ; /usr/nemo/src/tram/8.ixget -Df acme.dump
- ! touch $home/acme.dump
- >/tmp/PUT.out>[2=1]
+ ! cd /tmp ; /usr/nemo/src/9/ixp/8.ixget -Dstf acme.dump >[2=1]
+ ! cmp /tmp/acme.dump /sys/src/cmd/ix/test/acme.dump
+ ! cd /tmp ; /usr/nemo/src/9/ixp/8.ixget -pDstf adump>[2=1]
+ ! cmp /tmp/adump /sys/src/cmd/ix/test/adump
  ! tstack 8.ix
  ! tstack 8.ixget
- ! leak -s 8.ix|rc|acid 8.ix
- ! leak -s 8.ixget|rc|acid 8.ixget
- ! unmount /tmp/acme.dump /usr/nemo/acme.dump
- ! cmp /tmp/ohist /usr/nemo/ohist
- ! cmp /tmp/adump /usr/nemo/adump
- ! rm -f /tmp/^(acme.dump PULL ohist) /usr/nemo/adump
- *
- * Issues:
- * - test unexpected server errors
- * - test unexpected client errors
- * - adapt to test cond
- *	e.g.: get if newer, get if vers newer
- *   and clunk
+ ! 8.ix -Dfn
+
  */
 
 #include <u.h>
 #include <libc.h>
-#include <error.h>
 #include <thread.h>
 #include <fcall.h>
 
@@ -46,7 +28,7 @@
 #include "tses.h"
 #include "ch.h"
 #include "dbg.h"
-#include "fs.h"
+#include "ix.h"
 #include "ixreqs.h"
 
 #define CLIADDR	"tcp!localhost!9999"
@@ -54,13 +36,15 @@
 int mainstacksize = Stack;
 
 static Cmux *cm;
-static Ses *ses;
+static Con *ses;
 Mpool *pool, *spool;
 static Channel *wc;
 static int rootfid = -1;
 static ulong msz;
 static int doflush;
 static int twritehdrsz;
+static int tcondhdrsz;
+static int ssid;
 
 static long
 wdata(int fd, void *a, long cnt, uvlong off)
@@ -69,25 +53,148 @@ wdata(int fd, void *a, long cnt, uvlong off)
 	return pwrite(fd, a, cnt, off);
 }
 
-static long
-wdent(int fd, void *a, long cnt, uvlong)
+static void
+printfile(char *s, char *e)
 {
-	Dir d;
-	int n;
-	char buf[512];
-	uchar *data;
-	long tot;
+	char *str, *val;
 
-	data = a;
-	for(tot = 0; tot < cnt; tot += n){
-		n = convM2D(data+tot, cnt-tot, &d, buf);
-		if(n <= BIT32SZ)
-			break;
-		fprint(fd, "%D\n", &d);
+	print("dir:\n");
+	while(s < e){
+		s = (char*)gstring((uchar*)s, (uchar*)e, &str);
+		if(s == nil)
+			return;
+		s = (char*)gstring((uchar*)s, (uchar*)e, &val);
+		if(s == nil)
+			return;
+		if(strcmp(str, "name") == 0 || strcmp(str, "uid") == 0 ||
+		   strcmp(str, "gid") == 0 || strcmp(str, "muid") == 0)
+			print("\t[%s] = '%s'\n", str, val);
+		else if(strcmp(str, "mode") == 0)
+			print("\t[%s] = %M\n", str, GBIT32(val));
+		else
+			print("\t[%s] = %#ullx\n", str, GBIT64(val));
 	}
-	return cnt;
 }
 
+static void
+printdir(char *buf, int count)
+{
+	int tot, n;
+
+	for(tot = 0; tot < count; tot += n){
+		if(count-tot < BIT32SZ)
+			break;
+		n = GBIT32(buf+tot);
+		tot += BIT32SZ;
+		if(tot+n > count){
+			print("wrong count in dir entry\n");
+			break;
+		}
+		printfile(buf+tot, buf+tot+n);
+	}
+}
+
+static void
+getstat(Ch *ch, int last)
+{
+	ixtattr(ch, "name", last);
+	ixtattr(ch, "path", last);
+	ixtattr(ch, "vers", last);
+	ixtattr(ch, "atime", last);
+	ixtattr(ch, "prev", last);
+	ixtattr(ch, "length", last);
+	ixtattr(ch, "mode", last);
+	ixtattr(ch, "uid", last);
+	ixtattr(ch, "gid", last);
+	ixtattr(ch, "muid", last);
+}
+
+static int
+gotu64(Ch *ch, uvlong *ip)
+{
+	Msg *m;
+
+	m = ixrattr(ch);
+	if(m == nil)
+		return -1;
+	if(IOLEN(m->io) < BIT64SZ){
+		freemsg(m);
+		return -1;
+	}
+	*ip = GBIT64(m->io->rp);
+	freemsg(m);
+	return 0;
+}
+
+static int
+gotu32(Ch *ch, ulong *ip)
+{
+	Msg *m;
+
+	m = ixrattr(ch);
+	if(m == nil)
+		return -1;
+	if(IOLEN(m->io) < BIT32SZ){
+		freemsg(m);
+		return -1;
+	}
+	*ip = GBIT32(m->io->rp);
+	freemsg(m);
+	return 0;
+}
+
+static int
+gotstr(Ch *ch, char **cp)
+{
+	Msg *m;
+
+	m = ixrattr(ch);
+	if(m == nil)
+		return -1;
+	if(IOLEN(m->io) == 0){
+		freemsg(m);
+		return -1;
+	}
+	*m->io->wp = 0;	/* BUG, but ok for this */
+	*cp = strdup((char*)m->io->rp);
+	freemsg(m);
+	return 0;
+}
+
+static int
+gotstat(Ch *ch, Dir *d)
+{
+	uvlong x;
+
+	nulldir(d);
+	if(gotstr(ch, &d->name) < 0)
+		return -1;
+	if(gotu64(ch, &d->qid.path) < 0)
+		return -1;
+	if(gotu64(ch, &x) < 0)
+		return -1;
+	d->qid.vers = x;
+	if(gotu64(ch, &x) < 0)
+		return -1;
+	d->atime = x;
+	if(gotu64(ch, &x) < 0)
+		return -1;
+	/* prev */
+	if(gotu64(ch, (uvlong*)&d->length) < 0)
+		return -1;
+	if(gotu32(ch, &d->mode) < 0)
+		return -1;
+	if(gotstr(ch, &d->uid) < 0)
+		return -1;
+	if(gotstr(ch, &d->gid) < 0)
+		return -1;
+	if(gotstr(ch, &d->muid) < 0)
+		return -1;
+
+	d->qid.type = ((d->mode >>24) & 0xFF);
+	return 0;
+}
+ 
 /*
  * If doflush, this will test a flush (abortch) before
  * retrieving all data.
@@ -100,11 +207,10 @@ wdent(int fd, void *a, long cnt, uvlong)
 static void
 getproc(void *a)
 {
-	char *path, *els[64], *fn;
-	int nels, fd, i;
+	char *path, *els[64], *fn, *dirbuf;
+	int nels, fd;
 	Ch *ch;
 	Dir d;
-	char buf[512];
 	long nr;
 	uvlong offset;
 	Msg *m;
@@ -113,36 +219,40 @@ getproc(void *a)
 	threadsetname("getproc %s", path);
 	if(*path == '/')
 		path++;
-	path = estrdup(path);
+	path = strdup(path);
 	nels = getfields(path, els, nelem(els), 1, "/");
 	if(nels < 1)
 		sysfatal("short path");
 	fn = els[nels-1];
 	ch = newch(cm);
-	xtfid(ch, rootfid, 0);
-	xtclone(ch, OCEND|OCERR, 0);
-	for(i = 0; i < nels; i++)
-		xtwalk(ch, els[i], 0);
-	xtstat(ch, 0);
-	xtopen(ch, OREAD, 0);
-	xtread(ch, -1, 0ULL, msz, 1);
+	ixtsid(ch, ssid, 0);
+	ixtfid(ch, rootfid, 0);
+	ixtclone(ch, OCEND|OCERR, 0);
+	ixtwalk(ch, nels, els, 0);
+	getstat(ch, 0);
+	ixtopen(ch, OREAD, 0);
+	ixtread(ch, -1, msz, 0ULL, 1);
 	/* fid automatically clunked on errors and eof */
+	dirbuf = nil;
 
 	fd = -1;
-	if(xrfid(ch) < 0){
+	if(ixrsid(ch) < 0){
+		fprint(2, "%s: sid: %r\n", a);
+		goto Done;
+	}
+	if(ixrfid(ch) < 0){
 		fprint(2, "%s: fid: %r\n", a);
 		goto Done;
 	}
-	if(xrclone(ch) < 0){
+	if(ixrclone(ch, nil) < 0){
 		fprint(2, "%s: clone: %r\n", a);
 		goto Done;
 	}
-	for(i = 0; i < nels; i++)
-		if(xrwalk(ch, nil) < 0){
-			fprint(2, "%s: walk[%s]: %r\n", a, els[i]);
-			goto Done;
-		}
-	if(xrstat(ch, &d, buf) < 0){
+	if(ixrwalk(ch) < 0){
+		fprint(2, "%s: walk: %r\n", a);
+		goto Done;
+	}
+	if(gotstat(ch, &d) < 0){
 		fprint(2, "%s: stat: %r\n", a);
 		goto Done;
 	}
@@ -153,7 +263,7 @@ getproc(void *a)
 		fprint(2, "create %s: %r\n", fn);
 		goto Done;
 	}
-	if(xropen(ch) < 0){
+	if(ixropen(ch) < 0){
 		fprint(2, "%s: open: %r\n", a);
 		goto Done;
 	}
@@ -164,28 +274,34 @@ getproc(void *a)
 			abortch(ch);
 			goto Done;
 		}
-		m = xrread(ch);
+		m = ixrread(ch);
 		if(m == nil){
 			fprint(2, "%s: read: %r\n", a);
 			goto Done;
 		}
 		nr = IOLEN(m->io);
 		if(nr > 0)
-			if(d.qid.type&QTDIR)
-				nr = wdent(fd, m->io->rp, nr, offset);
-		else
+			if(d.qid.type&QTDIR){
+				dirbuf = realloc(dirbuf, offset+nr);
+				memmove(dirbuf+offset, m->io->rp, nr);
+			}else
 				nr = wdata(fd, m->io->rp, nr, offset);
 		offset += nr;
 		freemsg(m);
 	}while(nr > 0);
 	close(fd);
 	fd = -1;
-
+	if(dirbuf != nil){
+		printdir(dirbuf, offset);
+		free(dirbuf);
+		dirbuf = nil;
+	}
 Done:
 	if(fd >= 0){
 		close(fd);
 		remove(fn);
 	}
+	free(dirbuf);
 	sendul(wc, 0);
 	free(path);
 	threadexits(nil);
@@ -195,11 +311,10 @@ Done:
 static void
 condproc(void *a)
 {
-	char *path, *els[64], *fn;
-	int nels, fd, i;
+	char *path, *els[64], *fn, *dirbuf;
+	int nels, fd;
 	Ch *ch;
 	Dir d;
-	char buf[512];
 	long nr;
 	uvlong offset;
 	Dir *ld;
@@ -209,7 +324,7 @@ condproc(void *a)
 	threadsetname("condproc %s", path);
 	if(*path == '/')
 		path++;
-	path = estrdup(path);
+	path = strdup(path);
 	nels = getfields(path, els, nelem(els), 1, "/");
 	if(nels < 1)
 		sysfatal("short path");
@@ -218,38 +333,45 @@ condproc(void *a)
 	if(ld == nil)
 		sysfatal("%s: dirstat: %r", fn);
 	ch = newch(cm);
-	xtfid(ch, rootfid, 0);
-	xtclone(ch, OCEND|OCERR, 0);
-	for(i = 0; i < nels; i++)
-		xtwalk(ch, els[i], 0);
+	ixtsid(ch, ssid, 0);
+	ixtfid(ch, rootfid, 0);
+	ixtclone(ch, OCEND|OCERR, 0);
+	ixtwalk(ch, nels, els, 0);
 	nulldir(&d);
 	d.qid = ld->qid;
-	xtcond(ch, CNE, &d, 0);
+	m = newmsg(pool);
+	m->io->wp += tcondhdrsz;
+	PBIT64(m->io->wp, d.qid.path);	m->io->wp += BIT64SZ;
+	ixtcond(ch, m, CEQ, "path", BIT64SZ+BIT32SZ+BIT8SZ, 0);
 	free(ld);
-	xtstat(ch, 0);
-	xtopen(ch, OREAD, 0);
-	xtread(ch, -1, 0ULL, msz, 1);
+	getstat(ch, 0);
+	ixtopen(ch, OREAD, 0);
+	ixtread(ch, -1, msz, 0ULL, 1);
 	/* fid automatically clunked on errors and eof */
+	dirbuf = nil;
 
 	fd = -1;
-	if(xrfid(ch) < 0){
+	if(ixrsid(ch) < 0){
+		fprint(2, "%s: sid: %r\n", a);
+		goto Done;
+	}
+	if(ixrfid(ch) < 0){
 		fprint(2, "%s: fid: %r\n", a);
 		goto Done;
 	}
-	if(xrclone(ch) < 0){
+	if(ixrclone(ch, nil) < 0){
 		fprint(2, "%s: clone: %r\n", a);
 		goto Done;
 	}
-	for(i = 0; i < nels; i++)
-		if(xrwalk(ch, nil) < 0){
-			fprint(2, "%s: walk[%s]: %r\n", a, els[i]);
-			goto Done;
-		}
-	if(xrcond(ch) < 0){
+	if(ixrwalk(ch) < 0){
+		fprint(2, "%s: walk: %r\n", a);
+		goto Done;
+	}
+	if(ixrcond(ch) < 0){
 		fprint(2, "%s: cond: %r\n", a);
 		goto Done;
 	}
-	if(xrstat(ch, &d, buf) < 0){
+	if(gotstat(ch, &d) < 0){
 		fprint(2, "%s: stat: %r\n", a);
 		goto Done;
 	}
@@ -260,65 +382,77 @@ condproc(void *a)
 		fprint(2, "create %s: %r\n", fn);
 		goto Done;
 	}
-	if(xropen(ch) < 0){
+	if(ixropen(ch) < 0){
 		fprint(2, "%s: open: %r\n", a);
 		goto Done;
 	}
 	offset = 0ULL;
 	do{
-		m = xrread(ch);
+		m = ixrread(ch);
 		if(m == nil){
 			fprint(2, "%s: read: %r\n", a);
 			goto Done;
 		}
 		nr = IOLEN(m->io);
 		if(nr > 0)
-			if(d.qid.type&QTDIR)
-				nr = wdent(fd, m->io->rp, nr, offset);
-		else
+			if(d.qid.type&QTDIR){
+				dirbuf = realloc(dirbuf, offset+nr);
+				memmove(dirbuf+offset, m->io->rp, nr);
+			}else
 				nr = wdata(fd, m->io->rp, nr, offset);
 		offset += nr;
 		freemsg(m);
 	}while(nr > 0);
 	close(fd);
 	fd = -1;
+	if(dirbuf != nil){
+		printdir(dirbuf, offset);
+		free(dirbuf);
+		dirbuf = nil;
+	}
 
 Done:
 	if(fd >= 0){
 		close(fd);
 		remove(fn);
 	}
+	free(dirbuf);
 	sendul(wc, 0);
 	free(path);
 	threadexits(nil);
 	close(fd);
 }
+
 static void
 settwritehdrsz(void)
 {
-	Fscall t;
+	IXcall t;
 
-	t.type = Twrite;
-	twritehdrsz = packedsize(&t);
+	t.type = IXTwrite;
+	twritehdrsz = ixpackedsize(&t);
+	t.type = IXTcond;
+	t.attr = "qid";
+	tcondhdrsz = ixpackedsize(&t);
 }
 
 static void
 putproc(void *a)
 {
 	char *path, *els[64], *fn;
-	int nels, fd, i, nw;
+	int nels, fd, nw;
 	Ch *ch;
 	Dir *d;
 	long nr;
 	Msg *m;
 	uvlong offset;
+	uchar buf[BIT32SZ];
 
 	path = a;
 	threadsetname("putproc %s", path);
 	settwritehdrsz();
 	if(*path == '/')
 		path++;
-	path = estrdup(path);
+	path = strdup(path);
 	nels = getfields(path, els, nelem(els), 1, "/");
 	if(nels < 1)
 		sysfatal("short path");
@@ -330,34 +464,49 @@ putproc(void *a)
 	if(d == nil)
 		sysfatal("%s: %r", fn);
 	ch = newch(cm);
-	xtfid(ch, rootfid, 0);
-	xtclone(ch, OCEND|OCERR, 0);
-	for(i = 0; i < nels - 1; i++)
-		xtwalk(ch, els[i], 0);
+	ixtsid(ch, ssid, 0);
+	ixtfid(ch, rootfid, 0);
+	ixtclone(ch, OCEND|OCERR, 0);
+	if(nels > 1)
+		ixtwalk(ch, nels-1, els, 0);
 	if(d->qid.type&QTDIR)
-		xtcreate(ch, els[nels-1], OREAD, d->mode, 1);
+		ixtcreate(ch, els[nels-1], OREAD, d->mode, 1);
 	else
-		xtcreate(ch, els[nels-1], OWRITE, d->mode, 0);
+		ixtcreate(ch, els[nels-1], OWRITE, d->mode, 0);
 	/* fid automatically clunked on errors and eof */
-
-	if(xrfid(ch) < 0){
+	PBIT32(buf, 0777);
+	ixtwattr(ch, "mode", buf, BIT32SZ, 0);
+	ixtwattr(ch, "gid", "planb", 5, 0);
+	if(ixrsid(ch) < 0){
+		fprint(2, "%s: sid: %r\n", a);
+		goto Done;
+	}
+	if(ixrfid(ch) < 0){
 		fprint(2, "%s: fid: %r\n", a);
 		closech(ch);
 		goto Done;
 	}
-	if(xrclone(ch) < 0){
+	if(ixrclone(ch, nil) < 0){
 		fprint(2, "%s: clone: %r\n", a);
 		closech(ch);
 		goto Done;
 	}
-	for(i = 0; i < nels-1; i++)
-		if(xrwalk(ch, nil) < 0){
-			fprint(2, "%s: walk[%s]: %r\n", a, els[i]);
-			closech(ch);
-			goto Done;
-		}
-	if(xrcreate(ch) < 0){
+	if(nels > 1 && ixrwalk(ch) < 0){
+		fprint(2, "%s: walk: %r\n", a);
+		goto Done;
+	}
+	if(ixrcreate(ch) < 0){
 		fprint(2, "%s: create: %r\n", a);
+		closech(ch);
+		goto Done;
+	}
+	if(ixrwattr(ch) < 0){
+		fprint(2, "%s: wattr: %r\n", a);
+		closech(ch);
+		goto Done;
+	}
+	if(ixrwattr(ch) < 0){
+		fprint(2, "%s: wattr: %r\n", a);
 		closech(ch);
 		goto Done;
 	}
@@ -372,11 +521,11 @@ putproc(void *a)
 			if(nr <= 0){
 				if(nr < 0)
 					fprint(2, "%s: read: %r", fn);
-				xtclunk(ch, 1);
+				ixtclose(ch, 1);
 				break;
 			}
 			m->io->wp += nr;
-			if(xtwrite(ch, m, nr, offset, 0) < 0){
+			if(ixtwrite(ch, m, nr, offset, offset+nr, 0) < 0){
 				closech(ch);
 				drainch(ch);
 				goto Done;
@@ -389,7 +538,7 @@ putproc(void *a)
 			 */
 			if(nw > 10){
 				nw--;
-				if(xrwrite(ch) < 0){
+				if(ixrwrite(ch, nil) < 0){
 					fprint(2, "%s: write: %r\n", a);
 					closech(ch);
 					goto Done;
@@ -397,12 +546,12 @@ putproc(void *a)
 			}
 		}
 		while(nw-- > 0)
-			if(xrwrite(ch) < 0){
+			if(ixrwrite(ch, nil) < 0){
 				fprint(2, "%s: write: %r\n", a);
 				closech(ch);
 				goto Done;
 			}
-		xrclunk(ch);
+		ixrclose(ch);
 	}
 Done:
 	if(fd >= 0)
@@ -414,16 +563,22 @@ Done:
 }
 
 static void
-ixattach(char *user)
+ixattach(char *)
 {
 	Ch *ch;
+	char *u;
+	int afid;
 
 	ch = newch(cm);
-	xtversion(ch, 0);
-	xtattach(ch, user, "main", 1);
-	if(xrversion(ch, &msz) < 0)
+	ixtversion(ch, 0);
+	ixtsession(ch, Nossid, getuser(), 0, 0);
+	ixtattach(ch, "main", 1);
+	if(ixrversion(ch, &msz) < 0)
 		sysfatal("wrong ix version: %r");
-	if(xrattach(ch, &rootfid) < 0)
+	if(ixrsession(ch, &ssid, &afid, &u) < 0)
+		sysfatal("can't set session: %r");
+	print("session is %d %s %s \n", ssid, getuser(), u);
+	if(ixrattach(ch, &rootfid) < 0)
 		sysfatal("can't attach: %r");
 }
 
@@ -474,14 +629,15 @@ threadmain(int argc, char *argv[])
 	}ARGEND;
 	if(argc == 0 || doput + docond + doflush> 1)
 		usage();
-	fmtinstall('G', fscallfmt);
+	outofmemoryexits(1);
+	fmtinstall('G', ixcallfmt);
 	fmtinstall('M', dirmodefmt);
 	fmtinstall('D', dirfmt);
 	ses = dialsrv(addr);
 	if(ses == nil)
 		sysfatal("dialsrv: %r");
-	pool = newpool(Msgsz, argc*Nmsgs);
-	spool = newpool(Smsgsz, argc*Nmsgs);
+	pool = newpool(Msgsz, Nmsgs);
+	spool = newpool(Smsgsz, Nmsgs);
 	startses(ses, pool, spool);
 	cm = muxses(ses->rc, ses->wc, ses->ec);
 	ixattach(getuser());

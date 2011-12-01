@@ -1,7 +1,7 @@
 enum
 {
 	KiB = 1024,
-	Stack = 8*KiB,	/* stack size for threads */
+	Stack = 32*KiB,	/* stack size for threads */
 
 	Hbufsz = 8,	/* room for message headers */
 	Msgsz = 8*KiB,	/* message size */

@@ -2,7 +2,6 @@
 #include <u.h>
 #include <libc.h>
 #include <thread.h>	/* chancreate */
-#include <error.h>
 #include <fcall.h>
 #include "conf.h"
 #include "msg.h"
@@ -51,7 +50,9 @@ newpool(ulong msize, int nmsg)
 	Mbuf *mb;
 	int i;
 
-	mp = emalloc(sizeof *mp);
+	if(nmsg == 0)
+		sysfatal("newpool: called for 0 messages");
+	mp = mallocz(sizeof *mp, 1);
 	mp->msize = msize;
 	mp->bc = echancreate(sizeof(Mbuf*), nmsg);
 	for(i = 0; i < nmsg; i++){

@@ -4,7 +4,6 @@
 #include <u.h>
 #include <libc.h>
 #include <thread.h>	/* chancreate */
-#include <error.h>
 #include <fcall.h>
 #include "conf.h"
 #include "msg.h"
