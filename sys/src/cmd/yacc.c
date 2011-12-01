@@ -91,13 +91,14 @@ enum
 	TYPEDEF,
 	TYPENAME,
 	UNION,
+	IGNORE,
 
 	ENDFILE		= 0,
 
 	EMPTY		= 1,
 	WHOKNOWS	= 0,
 	OK		= 1,
-	NOMORE		= -1000,
+	NOMORE		= -1000
 };
 
 	/* macros for getting associativity and precedence levels */
@@ -316,6 +317,9 @@ struct
 	"token",	TERM,
 	"type",		TYPEDEF,
 	"union",	UNION,
+
+	/* ignored bison directives */
+	"error-verbose",	IGNORE,
 	0,
 };
 
@@ -327,6 +331,7 @@ char*	chcopy(char*, char*);
 char*	writem(int*);
 char*	symnam(int);
 void	summary(void);
+void	grammar(void);
 void	error(char*, ...);
 void	aryfil(int*, int, int);
 int	setunion(int*, int*);
@@ -382,6 +387,7 @@ main(int argc, char *argv[])
 	cempty();		/* make a table of which nonterminals can match the empty string */
 	cpfir();		/* make a table of firsts of nonterminals */
 	stagen();		/* generate the states */
+	grammar();
 	output();		/* write the states and the tables */
 	go2out();
 	hideprod();
@@ -401,7 +407,7 @@ others(void)
 
 	finput = Bopen(parser, OREAD);
 	if(finput == 0)
-		error("cannot find parser %s", parser);
+		error("cannot open parser %s: %r", parser);
 	warray("yyr1", levprd, nprod);
 	aryfil(temp1, nprod, 0);
 	PLOOP(1, i)
@@ -525,14 +531,14 @@ writem(int *pp)
 		;
 	p = prdptr[-*p];
 	q = chcopy(sarr, nontrst[*p-NTBASE].name);
-	q = chcopy(q, ": ");
+	q = chcopy(q, ":");
 	for(;;) {
 		*q = ' ';
 		p++;
-		if(p == pp)
-			*q = '.';
 		q++;
 		*q = '\0';
+		if(p == pp)
+			q = chcopy(q, ". ");
 		i = *p;
 		if(i <= 0)
 			break;
@@ -544,7 +550,7 @@ writem(int *pp)
 	/* an item calling for a reduction */
 	i = *pp;
 	if(i < 0 ) {
-		q = chcopy(q, "    (");
+		q = chcopy(q, "   (");
 		sprint(q, "%d)", -i);
 	}
 	return sarr;
@@ -556,12 +562,40 @@ writem(int *pp)
 char*
 symnam(int i)
 {
-	char* cp;
+	return (i >= NTBASE)? nontrst[i-NTBASE].name: tokset[i].name;
+}
 
-	cp = (i >= NTBASE)? nontrst[i-NTBASE].name: tokset[i].name;
-	if(*cp == ' ')
-		cp++;
-	return cp;
+/*
+ * output the grammar rules on y.output
+ */
+void
+grammar(void)
+{
+	int i, j, n, prev;
+	int *p;
+
+	if(foutput == 0)
+		return;
+
+	Bprint(foutput, "\nGrammar\n");
+	prev = 0;
+	n = 0;
+	PLOOP(0, i) {
+		p = prdptr[i];
+		if(p[0] == prev)
+			Bprint(foutput, "\t%d \t|", n++);
+		else {
+			Bprint(foutput, "\n\t%d %s:", n++, symnam(p[0]));
+			if(p[1] <= 0)
+				Bprint(foutput, " /* empty */");
+		}
+		for(j = 1; p[j] > 0; j++) {
+			Bprint(foutput, " %s", symnam(p[j]));
+		}
+		Bputc(foutput, '\n');
+		prev = p[0];
+	}
+	Bprint(foutput, "\n");
 }
 
 /*
@@ -614,10 +648,13 @@ summary(void)
 void
 error(char *s, ...)
 {
+	va_list arg;
 
 	nerrors++;
 	fprint(2, "\n fatal error:");
-	fprint(2, s, (&s)[1]);
+	va_start(arg, s);
+	vfprint(2, s, arg);
+	va_end(arg);
 	fprint(2, ", %s:%d\n", infile, lineno);
 	if(!fatfl)
 		return;
@@ -1357,6 +1394,10 @@ setup(int argc, char *argv[])
 		t = gettok();
 		continue;
 
+	case IGNORE:
+		t = gettok();
+		continue;
+
 	default:
 		error("syntax error");
 	}
@@ -1520,6 +1561,7 @@ finact(void)
 	Bterm(faction);
 	Bprint(ftable, "#define YYEOFCODE %d\n", 1);
 	Bprint(ftable, "#define YYERRCODE %d\n", 2);
+	Bprint(ftable, "#define YYEMPTY (%d)\n", -2);
 }
 
 /*
@@ -1549,17 +1591,17 @@ defin(int nt, char *s)
 
 	/* establish value for token */
 	/* single character literal */
-	if(s[0] == ' ') {
+	if(s[0] == '\'') {
 		val = chartorune(&rune, &s[1]);
-		if(s[val+1] == 0) {
+		if(s[val] != '\\' && s[val+1] == '\'') {
 			val = rune;
 			goto out;
 		}
 	}
 
 	/* escape sequence */
-	if(s[0] == ' ' && s[1] == '\\') {
-		if(s[3] == 0) {
+	if(s[0] == '\'' && s[1] == '\\') {
+		if(s[3] == '\'') {
 			/* single character escape sequence */
 			switch(s[2]) {
 			case 'n':	val = '\n'; break;
@@ -1610,7 +1652,7 @@ defout(int last)
 	for(i=ndefout; i<=ntokens; i++) {
 		/* non-literals */
 		c = tokset[i].name[0];
-		if(c != ' ' && c != '$') {
+		if(c != '\'' && c != '$') {
 			Bprint(ftable, "#define	%s	%d\n",
 				tokset[i].name, tokset[i].value);
 			if(fdefine)
@@ -1705,7 +1747,7 @@ begin:
 	case '"':
 	case '\'':
 		match = c;
-		tokname[0] = ' ';
+		tokname[0] = '\'';
 		i = 1;
 		for(;;) {
 			c = Bgetrune(finput);
@@ -1724,6 +1766,8 @@ begin:
 			if(i < NAMESIZE)
 				i += c;
 		}
+		tokname[i] = '\'';
+		i++;
 		break;
 
 	case '%':
@@ -1815,7 +1859,7 @@ chfind(int t, char *s)
 {
 	int i;
 
-	if(s[0] == ' ')
+	if(s[0] == '\'')
 		t = 0;
 	TLOOP(i)
 		if(!strcmp(s, tokset[i].name))
@@ -2059,22 +2103,30 @@ swt:
 		/* look for comments */
 		Bputrune(faction, c);
 		c = Bgetrune(finput);
-		if(c != '*')
-			goto swt;
-
-		/* it really is a comment */
-		Bputrune(faction, c);
-		c = Bgetrune(finput);
-		while(c >= 0) {
-			while(c == '*') {
+		switch(c) {
+		case '/':
+			while(c != Beof) {
+				if(c == '\n')
+					goto swt;
 				Bputrune(faction, c);
-				if((c=Bgetrune(finput)) == '/')
-					goto lcopy;
+				c = Bgetrune(finput);
 			}
-			Bputrune(faction, c);
-			if(c == '\n')
-				lineno++;
-			c = Bgetrune(finput);
+			break;
+		case '*':
+			while(c != Beof) {
+				while(c == '*') {
+					Bputrune(faction, c);
+					if((c = Bgetrune(finput)) == '/')
+						goto lcopy;
+				}
+				if(c == '\n')
+					lineno++;
+				Bputrune(faction, c);
+				c = Bgetrune(finput);
+			}
+			break;
+		default:
+			goto swt;
 		}
 		error("EOF inside comment");
 
@@ -2635,7 +2687,7 @@ callopt(void)
 		case '$':
 			break;
 		default:
-			error("bad tempfile");
+			error("bad tempfile %s", tempname);
 		}
 		break;
 	}
