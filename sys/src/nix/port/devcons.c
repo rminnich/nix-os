@@ -1138,7 +1138,7 @@ conswrite(Chan *c, void *va, long n, vlong off)
 		break;
 
 	case Qsysstat:
-		for(i = 0; i < 32; i++)
+		for(i = 0; i < MACHMAX; i++)
 			if((mp = sys->machptr[i]) != nil && mp->online != 0){
 				mp = MACHP(i);
 				mp->cs = 0;
