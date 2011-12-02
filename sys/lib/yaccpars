@@ -80,7 +80,7 @@ out:
 	if(c == 0)
 		c = yytok2[1];	/* unknown char */
 	if(yydebug >= 3)
-		printf("lex %.4lX %s\n", yychar, yytokname(c));
+		printf("lex %.4X %s\n", yychar, yytokname(c));
 	return c;
 }
 
@@ -192,6 +192,7 @@ yydefault:
 				printf("%s", yystatname(yystate));
 				printf("saw %s\n", yytokname(yyc));
 			}
+			goto yyerrlab;
 yyerrlab:
 			yynerrs++;
 

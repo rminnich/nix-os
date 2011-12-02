@@ -81,7 +81,7 @@ out:
 	if(c == 0)
 		c = yytok2[1];	/* unknown char */
 	if(yydebug >= 3)
-		fprint(2, "lex %.4lux %s\n", yychar, yytokname(c));
+		fprint(2, "lex %.4ux %s\n", yychar, yytokname(c));
 	return c;
 }
 
@@ -193,6 +193,7 @@ yydefault:
 				fprint(2, "%s", yystatname(yystate));
 				fprint(2, "saw %s\n", yytokname(yyc));
 			}
+			goto yyerrlab;
 yyerrlab:
 			yynerrs++;
 
