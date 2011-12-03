@@ -707,7 +707,7 @@ procread(Chan *c, void *va, long n, vlong off)
 	Confmem *cm;
 	Mntwalk *mw;
 	Segment *sg, *s;
-	int i, j, navail, ne, pid, rsize;
+	int i, j, navail, pid, rsize;
 	char flag[10], *sps, *srv, statbuf[NSEG*64];
 	uintptr offset;
 	int tesz;

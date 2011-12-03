@@ -98,19 +98,6 @@ addwaitstat(uintptr pc, uvlong t0, int type)
 	unlock(&waitstatslk);
 }
 
-static void
-dumplockmem(char *tag, Lock *l)
-{
-	uchar *cp;
-	int i;
-
-	iprint("%s: ", tag);
-	cp = (uchar*)l;
-	for(i = 0; i < 64; i++)
-		iprint("%2.2ux ", cp[i]);
-	iprint("\n");
-}
-
 void
 lockloop(Lock *l, uintptr pc)
 {
