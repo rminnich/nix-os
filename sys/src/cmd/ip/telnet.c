@@ -97,7 +97,12 @@ dodial(char *dest)
 	data = dial(name, 0, devdir, 0);
 	if(data < 0)
 		fatal("%s: %r", name, 0);
-	fprint(2, "connected to %s on %s\n", name, devdir);
+	if(srv != nil){
+		if(rfork(RFPROC | RFNOWAIT | RFNOTEG) != 0)
+			exits("");
+	}
+	else
+		fprint(2, "connected to %s on %s\n", name, devdir);
 	return data;
 }
 
@@ -317,21 +322,29 @@ fromnet(int net)
 	}
 }
 
-/*
- *  turn keyboard raw mode on
- */
 void
-rawon(void)
+consctlcmd(char *s)
 {
+	if(srv != nil)
+		return;
 	if(debug)
-		fprint(2, "rawon\n");
+		fprint(2, "consctl: %s\n", s);
 	if(consctl < 0)
 		consctl = open("/dev/consctl", OWRITE);
 	if(consctl < 0){
 		fprint(2, "can't open consctl: %r\n");
 		return;
 	}
-	write(consctl, "rawon", 5);
+	write(consctl, s, strlen(s));
+}
+
+/*
+ *  turn keyboard raw mode on
+ */
+void
+rawon(void)
+{
+	consctlcmd("rawon");
 }
 
 /*
@@ -340,15 +353,7 @@ rawon(void)
 void
 rawoff(void)
 {
-	if(debug)
-		fprint(2, "rawoff\n");
-	if(consctl < 0)
-		consctl = open("/dev/consctl", OWRITE);
-	if(consctl < 0){
-		fprint(2, "can't open consctl: %r\n");
-		return;
-	}
-	write(consctl, "rawoff", 6);
+	consctlcmd("rawoff");
 }
 
 /*
@@ -556,21 +561,16 @@ islikeatty(int fd)
 }
 
 /*
- *  create a shared segment.  Make is start 2 meg higher than the current
- *  end of process memory.
+ *  create a shared segment.
  */
 void*
 share(ulong len)
 {
 	uchar *vastart;
 
-	vastart = sbrk(0);
-	if(vastart == (void*)-1)
-		return 0;
-	vastart += 2*1024*1024;
-
-	if(segattach(0, "shared", vastart, len) == (void*)-1)
-		return 0;
+	vastart = segattach(0, "shared", 0, len);
+	if(vastart== (void*)-1)
+		sysfatal("segattach: %r");
 
 	return vastart;
 }
