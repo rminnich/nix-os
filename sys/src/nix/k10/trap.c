@@ -18,6 +18,7 @@ static void debugbpt(Ureg*, void*);
 static void faultamd64(Ureg*, void*);
 static void doublefault(Ureg*, void*);
 static void unexpected(Ureg*, void*);
+static void expected(Ureg*, void*);
 static void dumpstackwithureg(Ureg*);
 
 static Lock vctllock;
@@ -185,6 +186,7 @@ trapinit(void)
 	trapenable(VectorBPT, debugbpt, 0, "#BP");
 	trapenable(VectorPF, faultamd64, 0, "#PF");
 	trapenable(Vector2F, doublefault, 0, "#DF");
+	trapenable(IdtIPI, expected, 0, "#IPI");
 	trapenable(Vector15, unexpected, 0, "#15");
 	nmienable();
 
@@ -565,6 +567,11 @@ unexpected(Ureg* ureg, void*)
 }
 
 static void
+expected(Ureg*, void*)
+{
+}
+
+static void
 faultamd64(Ureg* ureg, void*)
 {
 	u64int addr;
@@ -602,11 +609,8 @@ faultamd64(Ureg* ureg, void*)
 		 * (up->nerrlab != 0) if this is a system call, if not then
 		 * the game's a bogey.
 		 */
-		if(!user && (!insyscall || up->nerrlab == 0)){
-			dumpregs(ureg);
-			dumpmmuwalk(m->cr2);
+		if(!user && (!insyscall || up->nerrlab == 0))
 			panic("fault: %#llux\n", addr);
-		}
 		sprint(buf, "sys: trap: fault %s addr=%#llux",
 			read? "read": "write", addr);
 		postnote(up, 1, buf, NDebug);

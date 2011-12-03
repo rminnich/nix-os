@@ -10,6 +10,24 @@
 #include <keyboard.h>
 #include "trace.h"
 
+#define	GBIT8(p)	((p)[0])
+#define	GBIT16(p)	((p)[0]|((p)[1]<<8))
+#define	GBIT32(p)	((p)[0]|((p)[1]<<8)|((p)[2]<<16)|((p)[3]<<24))
+#define	GBIT64(p)	((u32int)((p)[0]|((p)[1]<<8)|((p)[2]<<16)|((p)[3]<<24)) |\
+				((vlong)((p)[4]|((p)[5]<<8)|((p)[6]<<16)|((p)[7]<<24)) << 32))
+
+#define	PBIT8(p,v)	(p)[0]=(v)
+#define	PBIT16(p,v)	(p)[0]=(v);(p)[1]=(v)>>8
+#define	PBIT32(p,v)	(p)[0]=(v);(p)[1]=(v)>>8;(p)[2]=(v)>>16;(p)[3]=(v)>>24
+#define	PBIT64(p,v)	(p)[0]=(v);(p)[1]=(v)>>8;(p)[2]=(v)>>16;(p)[3]=(v)>>24;\
+			(p)[4]=(v)>>32;(p)[5]=(v)>>40;(p)[6]=(v)>>48;(p)[7]=(v)>>56
+
+#define	BIT8SZ		1
+#define	BIT16SZ		2
+#define	BIT32SZ		4
+#define	BIT64SZ		8
+
+#pragma	varargck	type	"t"		uvlong
 #pragma	varargck	type	"t"		vlong
 #pragma	varargck	type	"U"		uvlong
 
@@ -69,6 +87,7 @@ Event	*event;
 void drawtrace(void);
 int schedparse(char*, char*, char*);
 int timeconv(Fmt*);
+static void tracefile(int);
 
 char *schedstatename[] = {
 	[SAdmit] =	"Admit",
@@ -85,6 +104,7 @@ char *schedstatename[] = {
 	[SInte] =	"Inte",
 	[SUser] = 	"User",
 	[SYield] =	"Yield",
+	[SLock] =	"Lock",
 };
 
 struct {
@@ -125,18 +145,26 @@ char*profdev = "/proc/trace";
 static void
 usage(void)
 {
-	fprint(2, "Usage: %s [-d profdev] [-w] [-v] [-t triggerproc] [processes]\n", argv0);
+	fprint(2, "Usage: %s [-f file [-g]] [-d profdev] [-w] [-v] [-t triggerproc] [processes]\n", argv0);
 	exits(nil);
 }
 
 void
 threadmain(int argc, char **argv)
 {
-	int fd, i;
+	int fd, i, justfile, graph;
 	char fname[80];
 
 	fmtinstall('t', timeconv);
+	justfile = graph = 0;
 	ARGBEGIN {
+	case 'f':
+		justfile = 1;
+		profdev = EARGF(usage());
+		break;
+	case 'g':
+		graph = 1;
+		break;
 	case 'd':
 		profdev = EARGF(usage());
 		break;
@@ -153,7 +181,13 @@ threadmain(int argc, char **argv)
 		usage();
 	}
 	ARGEND;
-
+	if(justfile){
+		if(argc != 0)
+		usage();
+		tracefile(graph);
+		exits(nil);
+	}
+	
 	fname[sizeof fname - 1] = 0;
 	for(i = 0; i < argc; i++){
 		snprint(fname, sizeof fname - 2, "/proc/%s/ctl", 
@@ -171,6 +205,101 @@ threadmain(int argc, char **argv)
 	}
 
 	drawtrace();
+}
+
+static
+struct{
+	int pid;
+	int state;
+}graphs[16];
+
+static void
+addtograph(Traceevent *t)
+{
+	int i;
+
+	for(i = 0; i < nelem(graphs); i++){
+		if(graphs[i].pid == t->pid)
+			break;
+		if(graphs[i].pid == 0){
+			graphs[i].pid = t->pid;
+			break;
+		}
+	}
+	if(i == nelem(graphs))
+		return;
+	graphs[i].state = t->etype;
+}
+
+static void
+printgraph(Biobuf *bout, int pid, int core, uvlong time)
+{
+	int i;
+	static char *schar[] = {
+	[SAdmit] =	"!a",
+	[SSleep] =	".s",
+	[SDead] =	"xd",
+	[SDeadline] =	"??",
+	[SEdf] =	"??",
+	[SExpel] =	"??",
+	[SReady] =	"!r",
+	[SRelease] =	"??",
+	[SRun] =	"|R",
+	[SSlice] =	"??",
+	[SInts] =	"!i",
+	[SInte] =	"|e",
+	[SUser] = 	"|u",
+	[SYield] =	"!y",
+	[SLock] =	"!l",
+	};
+
+	Bprint(bout, "%20.20lld %02d", time, core);
+	for(i = 0; i < nelem(graphs); i++){
+		if(graphs[i].pid == 0)
+			break;
+		Bprint(bout, "\t%c", schar[graphs[i].state][0]);
+		if(graphs[i].pid == pid)
+			Bputc(bout, schar[graphs[i].state][1]);
+	}
+	Bprint(bout, "\n");
+}
+
+static void
+tracefile(int graph)
+{
+	int logfd;
+	Traceevent t;
+	Biobuf bout;
+	uchar buf[BIT32SZ+BIT32SZ+BIT64SZ+BIT32SZ];
+	uvlong t0;
+
+	if((logfd = open(profdev, OREAD)) < 0)
+		sysfatal("%s: open: %r", profdev);
+	if(Binit(&bout, 1, OWRITE) < 0)
+		sysfatal("stdout: Binit: %r");
+	while(read(logfd, buf, sizeof buf) == sizeof buf){
+		t.pid = GBIT32(buf);
+		t.etype = GBIT32(buf+BIT32SZ);
+		t.time = GBIT64(buf+BIT32SZ+BIT32SZ);
+		t.core = GBIT32(buf+BIT32SZ+BIT32SZ+BIT64SZ);
+		if(t.pid == 0)
+			continue;
+		if(t.etype >= nelem(schedstatename) || schedstatename[t.etype] == nil){
+			fprint(2, "unknown state %ud\n", t.etype);
+			continue;
+		}
+		if(graph == 0)
+			Bprint(&bout, "%ud\t%-10.10s\t%ulld\t%ud\n",
+				t.pid, schedstatename[t.etype], t.time, t.core);
+		else{
+			addtograph(&t);
+			if(t0 == 0)
+				t0 = t.time;
+			printgraph(&bout, t.pid, t.core, t.time-t0);
+		}
+	}
+	Bterm(&bout);
+	close(logfd);
 }
 
 static void
@@ -263,8 +392,8 @@ redraw(int scaleno)
 		s = now - t->tstart;
 		if(t->tevents[SRelease])
 			snprint(buf, sizeof(buf), " per %t — avg: %t max: %t",
-				(vlong)(s/t->tevents[SRelease]),
-				(vlong)(t->runtime/t->tevents[SRelease]),
+				(uvlong)(s/t->tevents[SRelease]),
+				(uvlong)(t->runtime/t->tevents[SRelease]),
 				t->runmax);
 		else if((s /=1000000000LL) != 0)
 			snprint(buf, sizeof(buf), " per 1s — avg: %t total: %t",
@@ -538,7 +667,7 @@ doevent(Task *t, Traceevent *ep)
 		}
 		break;
 	case SDead:
-print("task died %ld %t %s\n", event->pid, event->time, schedstatename[event->etype & 0xffff]);
+print("task died %d %t %s\n", event->pid, event->time, schedstatename[event->etype & 0xffff]);
 		free(t->events);
 		free(t->name);
 		ntasks--;
@@ -695,12 +824,12 @@ drawtrace(void)
 				nevents = n / sizeof(Traceevent);
 				for (ep = eventbuf; ep < eventbuf + nevents; ep++){
 					if ((ep->etype & 0xffff) >= Nevent){
-						print("%ld %t Illegal event %ld\n",
+						print("%ud %t Illegal event %ud\n",
 							ep->pid, ep->time, ep->etype & 0xffff);
 						continue;
 					}
 					if (verbose)
-						print("%ld %t %s\n",
+						print("%ud %t %s\n",
 							ep->pid, ep->time, schedstatename[ep->etype & 0xffff]);
 
 					for(i = 0; i < ntasks; i++)

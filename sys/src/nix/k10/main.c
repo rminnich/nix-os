@@ -7,7 +7,10 @@
 #include "init.h"
 #include "io.h"
 
-
+enum
+{
+	InitialTCs = 32	/* default # of TCs */
+};
 
 Conf conf;			/* XXX - must go - gag */
 
@@ -76,13 +79,20 @@ options(int argc, char* argv[])
 	}
 }
 
+extern void setmachsched(Mach*);
+
 void
 squidboy(int apicno)
 {
+	char *n[] = {
+		[NIXAC] "AC",
+		[NIXTC] "TC",
+		[NIXKC]	"KC"
+	};
 	vlong hz;
 
 	sys->machptr[m->machno] = m;
-
+	setmachsched(m);
 	/*
 	 * Need something for initial delays
 	 * until a timebase is worked out.
@@ -110,7 +120,6 @@ squidboy(int apicno)
 	mmuinit();
 	if(!apiconline())
 		ndnr();
-
 	fpuinit();
 
 	acmodeset(m->nixtype);
@@ -123,14 +132,17 @@ squidboy(int apicno)
 	DBG("Wait for the thunderbirds!\n");
 	while(!active.thunderbirdsarego)
 		;
+	wrmsr(0x10, sys->epoch);
+	m->rdtsc = rdtsc();
 
-	DBG("mach %d is go\n", m->machno);
+	print("cpu%d color %d role %s tsc %lld\n",
+		m->machno, corecolor(m->machno), n[m->nixtype], m->rdtsc);
 	switch(m->nixtype){
 	case NIXAC:
 		acmmuswitch();
 		acinit();
 		adec(&active.nbooting);
-//		ainc(&active.nonline);
+		ainc(&active.nonline);	/* this was commented out */
 		acsched();
 		panic("squidboy");
 		break;
@@ -149,9 +161,9 @@ squidboy(int apicno)
 
 		timersinit();
 		adec(&active.nbooting);
-		ainc(&active.nonline);
+		ainc(&active.nonline);	/* this was commented out */
 
-	ndnr();	schedinit();
+		schedinit();
 		break;
 	}
 	panic("squidboy returns (type %d)", m->nixtype);
@@ -163,26 +175,19 @@ testiccs(void)
 	int i;
 	Mach *mp;
 	extern void testicc(int);
-	char *n[] = {
-		[NIXAC] "AC",
-		[NIXTC] "TC",
-		[NIXKC]	"KC"
-	};
 
 	/* setup arguments for all */
 	for(i = 1; i < MACHMAX; i++)
-		if((mp = sys->machptr[i]) != nil && mp->online != 0){
-			print("cpu%d machno %d role %s\n",
-				i, mp->machno, n[mp->nixtype]);
-		if(mp->nixtype == NIXAC)
-			testicc(i);
-	}
+		if((mp = sys->machptr[i]) != nil && mp->online != 0)
+			if(mp->nixtype == NIXAC)
+				testicc(i);
 	print("bootcore: all cores done\n");
 }
 
 /*
  * Rendezvous with other cores. Set roles for those that came
  * up online, and wait until they are initialized.
+ * Sync TSC with them.
  * We assume other processors that could boot had time to
  * set online to 1 by now.
  */
@@ -201,10 +206,16 @@ nixsquids(void)
 			 */
 			mp->icc = mallocalign(sizeof *m->icc, ICCLNSZ, 0, 0);
 			mp->icc->fn = nil;
-			if(i < 4)
+			if(i < InitialTCs){
+				conf.nmach++;
 				mp->nixtype = NIXTC;
+			}
 			ainc(&active.nbooting);
 		}
+	sys->epoch = rdtsc();
+	mfence();
+	wrmsr(0x10, sys->epoch);
+	m->rdtsc = rdtsc();
 	active.thunderbirdsarego = 1;
 	start = fastticks2us(fastticks(nil));
 	do{
@@ -278,7 +289,7 @@ main(u32int ax, u32int bx)
 	conf.nmach = 1;			
 
 	fmtinit();
-	print("\nNIX with 2M pages\n");
+	print("\nNIX\n");
 	if(vflag){
 		print("&ax = %#p, ax = %#ux, bx = %#ux\n", &ax, ax, bx);
 		multiboot(ax, bx, vflag);
@@ -314,6 +325,7 @@ main(u32int ax, u32int bx)
 	 * things like that completely broken).
 	 */
 	acpiinit();
+	
 	umeminit();
 	trapinit();
 	printinit();
@@ -326,6 +338,7 @@ main(u32int ax, u32int bx)
 	 */
 	i8259init(32);
 
+	procinit0();
 	mpsinit(maxcores);
 	apiconline();
 	sipi();
@@ -462,7 +475,7 @@ userinit(void)
 	s = newseg(SG_STACK, USTKTOP-USTKSIZE, USTKSIZE/BIGPGSZ);
 	p->seg[SSEG] = s;
 
-	pg = newpage(1, 0, USTKTOP-BIGPGSZ, BIGPGSZ);
+	pg = newpage(1, 0, USTKTOP-BIGPGSZ, BIGPGSZ, -1);
 	segpage(s, pg);
 	k = kmap(pg);
 	bootargs(VA(k));
@@ -474,7 +487,7 @@ userinit(void)
 	s = newseg(SG_TEXT, UTZERO, 1);
 	s->flushme++;
 	p->seg[TSEG] = s;
-	pg = newpage(1, 0, UTZERO, BIGPGSZ);
+	pg = newpage(1, 0, UTZERO, BIGPGSZ, -1);
 	memset(pg->cachectl, PG_TXTFLUSH, sizeof(pg->cachectl));
 	segpage(s, pg);
 	k = kmap(s->map[0]->pages[0]);

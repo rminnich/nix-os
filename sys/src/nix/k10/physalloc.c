@@ -189,16 +189,14 @@ static void*
 xphystag(Bal *b, uintmem data)
 {
 	uint i;
-	Buddy *l, *p;
-	Buddy *blocks, *avail;
+	Buddy *blocks;
 
 	DBG("phystag\n");
 
 	blocks = b->blocks;
-	avail = b->avail;
 
 	if(data == 0 /*|| !ALIGNED(data, b->bminsz)*/)
-		return;
+		return nil;
 	i = INDEX(b,data);
 	return blocks[BLOCK(b,i)].p;
 }
@@ -338,6 +336,7 @@ xphysalloc(Bal *b, u64int size, void *tag)
 	m = b->memory + b->bminsz*BLOCK(b,i);
 	assert(m >= b->base && m < b->base + b->size);
 	blocks[BLOCK(b,i)].p = tag;
+
 	return m;
 }
 
@@ -483,7 +482,8 @@ physinit(uintmem a, u64int size)
 		 * This code assumes that a domain may be extended later and
 		 * that there is no interleaving of domains. Ok by now.
 		 */
-		DBG("physmem block dom %d addr %#ullx size %#ullx\n", dom, addr, len);
+		DBG("physmem block dom %d addr %#ullx size %#ullx\n",
+			dom, addr, len);
 		if(dom < 0 || dom >= Ndoms){
 			print("physinit: invalid dom %d\n", dom);
 			dom = 0;
@@ -523,6 +523,7 @@ physinit(uintmem a, u64int size)
 					panic("physinit: doms overlap");
 		}
 		assert(addr >= b->base && addr+len <= b->base + b->size);
+
 		iimbchunk(b, addr, addr+len, 0);
 	}
 

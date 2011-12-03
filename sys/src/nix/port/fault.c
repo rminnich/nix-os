@@ -5,11 +5,19 @@
 #include	"fns.h"
 #include	"../port/error.h"
 
+/*
+ * Fault calls fixfault which ends up calling newpage, which
+ * might fail to allocate a page for the right color. So, we
+ * might enter a loop and retry forever.
+ * We first try with the desired color, and then with any
+ * other one, if we failed for some time.
+ */
 int
 fault(uintptr addr, int read)
 {
 	Segment *s;
 	char *sps;
+	int i, color;
 
 if(up->nlocks) print("fault nlocks %d\n", up->nlocks);
 
@@ -18,8 +26,8 @@ if(up->nlocks) print("fault nlocks %d\n", up->nlocks);
 	spllo();
 
 	m->pfault++;
-	for(;;) {
-		s = seg(up, addr, 1);		/* leaves s->lk qlocked if seg != nil */
+	for(i = 0;; i++) {
+		s = seg(up, addr, 1);	 /* leaves s->lk qlocked if seg != nil */
 		if(s == 0) {
 			up->psstate = sps;
 			return -1;
@@ -31,13 +39,19 @@ if(up->nlocks) print("fault nlocks %d\n", up->nlocks);
 			return -1;
 		}
 
-		if(fixfault(s, addr, read, 1) == 0)
+		color = s->color;
+		if(i > 3)
+			color = -1;
+		if(fixfault(s, addr, read, 1, color) == 0)
 			break;
 
 		/*
 		 * See the comment in newpage that describes
 		 * how to get here.
 		 */
+
+		if(i > 0 && (i%1000) == 0)
+			print("fault: tried %d times\n", i);
 	}
 
 	up->psstate = sps;
@@ -62,7 +76,7 @@ faulterror(char *s, Chan *c, int freemem)
 
 
 int
-fixfault(Segment *s, uintptr addr, int read, int dommuput)
+fixfault(Segment *s, uintptr addr, int read, int dommuput, int color)
 {
 	int type;
 	int ref;
@@ -74,7 +88,6 @@ fixfault(Segment *s, uintptr addr, int read, int dommuput)
 	Page *(*fn)(Segment*, uintptr);
 
 	pgsz = m->pgsz[s->pgszi];
-
 	addr &= ~(pgsz-1);
 	soff = addr-s->base;
 	p = &s->map[soff/PTEMAPMEM];
@@ -98,7 +111,7 @@ fixfault(Segment *s, uintptr addr, int read, int dommuput)
 
 	case SG_TEXT: 			/* Demand load */
 		if(pagedout(*pg))
-			pio(s, addr, soff, pg);
+			pio(s, addr, soff, pg, color);
 
 		mmuattr = PTERONLY|PTEVALID;
 		(*pg)->modref = PG_REF;
@@ -108,7 +121,7 @@ fixfault(Segment *s, uintptr addr, int read, int dommuput)
 	case SG_SHARED:			/* Zero fill on demand */
 	case SG_STACK:
 		if(*pg == 0) {
-			new = newpage(1, &s, addr, pgsz);
+			new = newpage(1, &s, addr, pgsz, color);
 			if(s == 0)
 				return -1;
 
@@ -119,7 +132,7 @@ fixfault(Segment *s, uintptr addr, int read, int dommuput)
 	case SG_DATA:
 	common:			/* Demand load/pagein/copy on write */
 		if(pagedout(*pg))
-			pio(s, addr, soff, pg);
+			pio(s, addr, soff, pg, color);
 
 		/*
 		 *  It's only possible to copy on write if
@@ -138,7 +151,7 @@ fixfault(Segment *s, uintptr addr, int read, int dommuput)
 		if(ref > 1) {
 			unlock(lkp);
 
-			new = newpage(0, &s, addr, pgsz);
+			new = newpage(0, &s, addr, pgsz, color);
 			if(s == 0)
 				return -1;
 			*pg = new;
@@ -189,7 +202,7 @@ fixfault(Segment *s, uintptr addr, int read, int dommuput)
 }
 
 void
-pio(Segment *s, uintptr addr, ulong soff, Page **p)
+pio(Segment *s, uintptr addr, ulong soff, Page **p, int color)
 {
 	Page *new;
 	KMap *k;
@@ -222,7 +235,7 @@ pio(Segment *s, uintptr addr, ulong soff, Page **p)
 
 	qunlock(&s->lk);
 
-	new = newpage(0, 0, addr, pgsz);
+	new = newpage(0, 0, addr, pgsz, color);
 	k = kmap(new);
 	kaddr = (char*)VA(k);
 

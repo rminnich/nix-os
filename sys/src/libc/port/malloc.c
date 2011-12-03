@@ -46,6 +46,7 @@ outofmemoryexits(int yn)
 	oomexits = yn;
 }
 
+#define TESTSEGBRK
 /*
  * we do minimal bookkeeping so we can tell pool
  * whether two blocks are adjacent and thus mergeable.
@@ -56,9 +57,20 @@ sbrkalloc(ulong n)
 	ulong *x;
 
 	n += 2*sizeof(ulong);	/* two longs for us */
+#ifdef TESTSEGBRK
+static char *top;
+	if(top == nil)
+		top = segbrk(0,0);
+	x = segbrk(top, top+n);
+	if(x == 0 || x == (void*)-1)
+		return nil;
+	x = (ulong*)top;
+	top += n;
+#else
 	x = sbrk(n);
 	if(x == (void*)-1)
 		return nil;
+#endif
 	x[0] = (n+7)&~7;	/* sbrk rounds size up to mult. of 8 */
 	x[1] = 0xDeadBeef;
 	return x+2;

@@ -667,6 +667,7 @@ enum{
 	Qtime,
 	Quser,
 	Qzero,
+	Qdebug,
 };
 
 enum
@@ -698,6 +699,7 @@ static Dirtab consdir[]={
 	"time",		{Qtime},	NUMSIZE+3*VLNUMSIZE,	0664,
 	"user",		{Quser},	0,		0666,
 	"zero",		{Qzero},	0,		0444,
+	"debug",	{Qdebug},	0,		0666,
 };
 
 int
@@ -822,6 +824,8 @@ consread(Chan *c, void *buf, long n, vlong off)
 	char tmp[512];		/* Qswap is 381 bytes at clu */
 	int i, k, id, send;
 	long offset;
+	extern int schedsteals, scheddonates;
+
 
 	if(n <= 0)
 		return n;
@@ -940,7 +944,7 @@ consread(Chan *c, void *buf, long n, vlong off)
 		return 0;
 
 	case Qsysstat:
-		b = smalloc(MACHMAX*(NUMSIZE*10+2+1) + 1);	/* +1 for NUL */
+		b = smalloc(MACHMAX*(NUMSIZE*11+2+1) + 1);	/* +1 for NUL */
 		bp = b;
 		for(id = 0; id < MACHMAX; id++) {
 			mp = sys->machptr[id];
@@ -968,6 +972,8 @@ consread(Chan *c, void *buf, long n, vlong off)
 				readnum(0, bp, NUMSIZE,
 					(mp->perf.avg_inintr*100)/mp->perf.period,
 					NUMSIZE);
+				bp += NUMSIZE;
+				readnum(0, bp, NUMSIZE, (mp->sch - run), NUMSIZE);
 				bp += NUMSIZE;
 				switch(mp->nixtype){
 				case NIXAC:
@@ -1028,6 +1034,16 @@ consread(Chan *c, void *buf, long n, vlong off)
 		n = readstr(offset, buf, n, tmp);
 		return n;
 
+	case Qdebug:
+		s = seprint(tmp, tmp + sizeof tmp, "steal %d\n", schedsteals);
+		s = seprint(s, tmp + sizeof tmp, "donate %d\n", scheddonates);
+		s = seprint(s, tmp + sizeof tmp, "locks %uld\n", lockstats.locks);
+		s = seprint(s, tmp + sizeof tmp, "glare %uld\n", lockstats.glare);
+		s = seprint(s, tmp + sizeof tmp, "inglare %uld\n", lockstats.inglare);
+		s = seprint(s, tmp + sizeof tmp, "qlock %uld\n", qlockstats.qlock);
+		seprint(s, tmp + sizeof tmp, "qlockq %uld\n", qlockstats.qlockq);
+		return readstr(offset, buf, n, tmp);
+		break;
 	default:
 		print("consread %#llux\n", c->qid.path);
 		error(Egreg);
@@ -1046,7 +1062,7 @@ conswrite(Chan *c, void *va, long n, vlong off)
 	ulong offset;
 	Cmdbuf *cb;
 	Cmdtab *ct;
-
+	extern int schedsteals, scheddonates;
 	a = va;
 	offset = off;
 
@@ -1177,6 +1193,24 @@ conswrite(Chan *c, void *va, long n, vlong off)
 		kstrdup(&sysname, buf);
 		break;
 
+	case Qdebug:
+		if(n >= sizeof(buf))
+			n = sizeof(buf)-1;
+		strncpy(buf, a, n);
+		buf[n] = 0;
+		if(n > 0 && buf[n-1] == '\n')
+			buf[n-1] = 0;
+		if(strcmp(buf, "steal") == 0)
+			schedsteals = 1;
+		else if(strcmp(buf, "nosteal") == 0)
+			schedsteals = 0;
+		else if(strcmp(buf, "donate") == 0)
+			scheddonates = 1;
+		else if(strcmp(buf, "nodonate") == 0)
+			scheddonates = 0;
+		else
+			error(Ebadctl);
+		break;
 	default:
 		print("conswrite: %#llux\n", c->qid.path);
 		error(Egreg);

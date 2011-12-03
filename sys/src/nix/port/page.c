@@ -107,11 +107,10 @@ pgalloc(usize size, int color)
 	}
 	memset(pg, 0, sizeof *pg);
 	if((pg->pa = physalloc(size, &color, pg)) == 0){
-		DBG("pgalloc: physalloc failed for size %#ulx color %d\n", size, color);
+		DBG("pgalloc: physalloc failed: size %#ulx color %d\n", size, color);
 		free(pg);
 		return nil;
 	}
-assert(phystag(pg->pa) == pg);
 	pg->pgszi = si;	/* size index */
 	incref(&pga.pgsza[si].npages);
 	pg->color = color;
@@ -188,32 +187,62 @@ pagechainhead(Page *p)
 	pa->freecount++;
 }
 
+static Page*
+findpg(Page *pl, int color)
+{
+	Page *p;
+
+	for(p = pl; p != nil; p = p->next)
+		if(color == NOCOLOR || p->color == color)
+			return p;
+	return nil;
+}
 /*
- * XXX: newpage could receive a hit regarding the color we prefer.
- * fault calls newpage to do pio and install new pages.
- * Also, processes could keep track of a preferred color, so
- * that they try to allocate all their segments of the same color.
+ * can be called with up == nil during boot.
  */
 Page*
-newpage(int clear, Segment **s, uintptr va, usize size)
+newpage(int clear, Segment **s, uintptr va, usize size, int color)
 {
 	Page *p;
 	KMap *k;
 	uchar ct;
 	Pgsza *pa;
-	int i, color, dontalloc, si;
+	int i, dontalloc, si;
 	static int once;
 
 	si = getpgszi(size);
 	pa = &pga.pgsza[si];
-	color = -1;
-	if(s && (*s)->color != NOCOLOR)
-		color = (*s)->color;
 
 	lock(&pga);
-	for(;;){
-		if(pa->freecount > 1)
+	/*
+	 * Beware, new page may enter a loop even if this loop does not
+	 * loop more than once, if the segment is lost and fault calls us
+	 * again. Either way, we accept any color if we failed a couple of times.
+	 */
+	for(i = 0;; i++){
+		if(i > 3)
+			color = NOCOLOR;
+
+		/*
+		 * 1. try to reuse a free one.
+		 */
+		p = findpg(pa->head, color);
+		if(p != nil)
 			break;
+
+		/*
+		 * 2. try to allocate a new one from physical memory
+		 */
+		p = pgalloc(size, color);
+		if(p != nil){
+			pagechainhead(p);
+			break;
+		}
+
+		/*
+		 * 3. out of memory, try with the pager.
+		 * but release the segment (if any) while in the pager.
+		 */
 		unlock(&pga);
 
 		dontalloc = 0;
@@ -224,9 +253,8 @@ newpage(int clear, Segment **s, uintptr va, usize size)
 		}
 
 		/*
-		 * Tries 3) flusing images if size is <= 2M,
-		 * 4) releasing bigger pages, and 5) releasing smaller pages.
-		 * in that order.
+		 * Try to get any page of the desired color
+		 * or any color for NOCOLOR.
 		 */
 		kickpager(si, color);
 
@@ -242,17 +270,8 @@ newpage(int clear, Segment **s, uintptr va, usize size)
 		lock(&pga);
 	}
 
-	/* First try for our colour */
-	for(p = pa->head; p; p = p->next)
-		if(p->color == color)
-			break;
-
-	ct = PG_NOFLUSH;
-	if(p == 0) {
-		p = pa->head;
-		p->color = color;
-		ct = PG_NEWCOL;
-	}
+	assert(p != nil);
+	ct = PG_NEWCOL;
 
 	pageunchain(p);
 
@@ -274,8 +293,8 @@ newpage(int clear, Segment **s, uintptr va, usize size)
 		memset((void*)VA(k), 0, m->pgsz[p->pgszi]);
 		kunmap(k);
 	}
-	DBG("newpage: va %#p pa %#ullx pgsz %#ux\n",
-		p->va, p->pa, m->pgsz[p->pgszi]);
+	DBG("newpage: va %#p pa %#ullx pgsz %#ux color %d\n",
+		p->va, p->pa, m->pgsz[p->pgszi], p->color);
 
 	return p;
 }

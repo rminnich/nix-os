@@ -219,36 +219,17 @@ noerrorsleft(void)
 	}
 }
 
-int
-linuxproc(void)
-{
-	return (up->linux != 0);
-}
-
 /* it should be unsigned. FIXME */
 void
-syscall(  int badscallnr, Ureg* ureg)
+syscall(int badscallnr, Ureg* ureg)
 {
 	unsigned int scallnr = (unsigned int) badscallnr;
-	void linuxsyscall(int, Ureg*);
 	char *e;
 	uintptr	sp;
 	int s;
 	vlong startns, stopns;
 	Ar0 ar0;
 	static Ar0 zar0;
-
-	/* make this merge with linuxsyscall much tighter. 
-	 * lots of overlap here. 
-	 */
-	if(linuxproc()){
-		linuxsyscall(scallnr, ureg);
-		/* there are just enough differences to make it 
-		 * hard to merge the two paths. If you start to do it, 
-		 * make sure you know what you are doing!
-		 */
-		return;
-	}
 
 	if(!userureg(ureg))
 		panic("syscall: cs %#llux\n", ureg->cs);

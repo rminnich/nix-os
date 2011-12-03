@@ -16,6 +16,7 @@ typedef struct Image	Image;
 typedef struct Kzio 	Kzio;
 typedef struct Log	Log;
 typedef struct Logflag	Logflag;
+typedef struct Lockstats Lockstats;
 typedef struct Mhead	Mhead;
 typedef struct Mnt	Mnt;
 typedef struct Mntcache Mntcache;
@@ -36,11 +37,13 @@ typedef struct Proc	Proc;
 typedef struct Procalloc	Procalloc;
 typedef struct Pte	Pte;
 typedef struct QLock	QLock;
+typedef struct QLockstats QLockstats;
 typedef struct Queue	Queue;
 typedef struct Ref	Ref;
 typedef struct Rendez	Rendez;
 typedef struct Rgrp	Rgrp;
 typedef struct RWlock	RWlock;
+typedef struct Sched	Sched;
 typedef struct Schedq	Schedq;
 typedef struct Segment	Segment;
 typedef struct Sem	Sem;
@@ -50,6 +53,7 @@ typedef struct Timer	Timer;
 typedef struct Timers	Timers;
 typedef struct Uart	Uart;
 typedef struct Waitq	Waitq;
+typedef struct Waitstats Waitstats;
 typedef struct Walkqid	Walkqid;
 typedef struct Watchdog	Watchdog;
 typedef struct Zseg	Zseg;
@@ -76,12 +80,55 @@ struct Rendez
 	Proc	*p;
 };
 
+enum{
+	NWstats = 500,
+	WSlock = 0,
+	WSqlock,
+	WSslock,
+};
+
+/*
+ * different arrays with stat info, so we can memset any of them
+ * to 0 to clear stats.
+ */
+struct Waitstats
+{
+	int	on;
+	int	npcs;
+	int*	type;
+	uintptr*	pcs;
+	int*	ns;
+	uvlong*	wait;
+	uvlong* total;
+};
+extern Waitstats waitstats;
+
+struct Lockstats
+{
+	ulong	locks;
+	ulong	glare;
+	ulong	inglare;
+};
+extern Lockstats lockstats;
+
+struct QLockstats
+{
+	ulong rlock;
+	ulong rlockq;
+	ulong wlock;
+	ulong wlockq;
+	ulong qlock;
+	ulong qlockq;
+};
+extern QLockstats qlockstats;
+
 struct QLock
 {
 	Lock	use;		/* to access Qlock structure */
 	Proc	*head;		/* next process waiting for object */
 	Proc	*tail;		/* last process waiting for object */
 	int	locked;		/* flag */
+	uintptr	pc;
 };
 
 struct RWlock
@@ -319,7 +366,7 @@ struct Page
 	ulong	daddr;			/* Disc address on swap */
 	int	ref;			/* Reference count */
 	uchar	modref;			/* Simulated modify/reference bits */
-	uchar	color;			/* Cache coloring */
+	int	color;			/* Cache coloring */
 	char	cachectl[MACHMAX];	/* Cache flushing control for mmuput */
 	Image	*image;			/* Associated text or swap image */
 	Page	*next;			/* Lru free list */
@@ -355,6 +402,7 @@ struct Image
 	Image	*next;			/* Free list or lru list */
 	Image	*prev;			/* lru list */
 	int	notext;			/* no file associated */
+	int	color;
 };
 
 /*
@@ -453,7 +501,7 @@ struct Zseg
 	Rendez	rr;	/* process waiting to read free addresses */
 };
 
-#define NOCOLOR ((uchar)~0)
+#define NOCOLOR -1
 
 struct Segment
 {
@@ -463,7 +511,7 @@ struct Segment
 	ushort	type;		/* segment type */
 	int	pgszi;		/* page size index in Mach MMMU */
 	uint	ptepertab;
-	uchar	color;
+	int	color;
 	uintptr	base;		/* virtual base */
 	uintptr	top;		/* virtual top */
 	usize	size;		/* size in pages */
@@ -685,11 +733,27 @@ enum
 
 struct Schedq
 {
-	Lock;
 	Proc*	head;
 	Proc*	tail;
 	int	n;
 };
+
+struct Sched
+{
+	Lock;			/* runq */
+	int	nrdy;
+	ulong delayedscheds;	/* statistics */
+	long skipscheds;
+	long preempts;
+	int schedgain;
+	ulong balancetime;
+	Schedq	runq[Nrq];
+	ulong	runvec;
+	int	nmach;		/* # of cores with this color */
+	ulong	nrun;		/* to compute load */
+};
+
+extern Sched run[];
 
 typedef union Ar0 Ar0;
 union Ar0 {
@@ -829,6 +893,7 @@ struct Proc
 	int	setargs;
 
 	void	*ureg;		/* User registers for notes */
+	int	color;
 
 	Fastcall* fc;
 	int	fcount;
@@ -853,13 +918,6 @@ struct Proc
 	int	nqtrap;		/* # of traps in last quantum */
 	int	nqsyscall;	/* # of syscalls in the last quantum */
 	int	nfullq;
-
-	/* might want a struct someday  but this is good for now.
-	 * if that day comes, better use a pointer to a Linux struct, so
-	 * we don't pay the price for all processes.
-	 */
-	int 	linux;		/* bit 0 is "linux emulation". Others debug */
-	int	linuxexec;	/* Plan 9 process starting a Linux process */
 
 	/*
 	 *  machine specific fpu, mmu and notify

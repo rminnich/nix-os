@@ -27,8 +27,10 @@ vlong	archhz(void);
 void	cgaconsputs(char*, int);
 void	cgainit(void);
 void	cgapost(int);
+void	checkpa(char*, uintmem);
 #define	clearmmucache()				/* x86 doesn't have one */
 void	(*coherence)(void);
+int	corecolor(int);
 u32int	cpuid(u32int, u32int, u32int[4]);
 int	dbgprint(char*, ...);
 int	decref(Ref*);
@@ -180,11 +182,14 @@ extern void splx(Mpl);
 int	cas32(void*, u32int, u32int);
 int	cas64(void*, u64int, u64int);
 int	tas32(void*);
+u64int	fas64(u64int*, u64int);
 
 #define CASU(p, e, n)	cas64((p), (u64int)(e), (u64int)(n))
 #define CASV(p, e, n)	cas64((p), (u64int)(e), (u64int)(n))
+#define CASP(p, e, n)	cas64((p), (u64int)(e), (u64int)(n))
 #define CASW(p, e, n)	cas32((p), (e), (n))
 #define TAS(addr)	tas32((addr))
+#define	FASP(p, v)	((void*)fas64((u64int*)(p), (u64int)(v)))
 
 void	touser(uintptr);
 void	syscallentry(void);
@@ -223,7 +228,7 @@ extern void ioapiconline(void);
  * archk10.c
  */
 extern void millidelay(int);
-void k10mwait(void *);
+extern void k10mwait(void*);
 
 /*
  * i8259.c

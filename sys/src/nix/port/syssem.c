@@ -98,9 +98,9 @@ semsleep(Sem *s, int dontblock)
 		panic("semsleep: no memory");
 	s->q[s->nq++] = up;
 	up->waitsem = nil;
+	up->state = Semdown;
 	unlock(s);
 	DBG("semsleep up %#p blocked\n", up);
-	up->state = Semdown;
 	sched();
 Done:
 	DBG("semsleep up %#p awaken\n", up);

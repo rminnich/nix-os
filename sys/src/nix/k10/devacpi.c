@@ -773,6 +773,27 @@ acpimblocksize(uintmem addr, int *dom)
 	return 0;
 }
 
+/*
+ * we use mp->machno (or index in Mach array) as the identifier,
+ * but ACPI relies on the apic identifier.
+ */
+int
+corecolor(int core)
+{
+	Srat *sl;
+	Mach *m;
+
+	if(core < 0 || core >= MACHMAX)
+		return -1;
+	m = MACHP(core);
+	if(m == nil)
+		return -1;
+	for(sl = srat; sl != nil; sl = sl->next)
+		if(sl->type == SRlapic && sl->lapic.apic == m->apicno)
+			return sl->lapic.dom;
+	return -1;
+}
+
 static void
 dumpmadt(Madt *apics)
 {

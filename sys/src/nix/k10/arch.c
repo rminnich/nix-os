@@ -51,6 +51,9 @@ procrestore(Proc *p)
 
 /*
  *  Save the mach dependent part of the process state.
+ *  NB: the caller should mmuflushtlb after procsave().
+ *  procsave/procrestore don't touch the mmu, they
+ *  care about fpu, mostly.
  */
 void
 procsave(Proc *p)
@@ -61,10 +64,6 @@ procsave(Proc *p)
 	p->pcycles += t;
 
 	fpuprocsave(p);
-
-	/*
-	 */
-	mmuflushtlb(m->pml4->pa);
 }
 
 static void
@@ -94,10 +93,14 @@ kprocchild(Proc* p, void (*func)(void*), void* arg)
 /*
  *  put the processor in the halt state if we've no processes to run.
  *  an interrupt will get us going again.
+ *  The boot TC in nix can't halt, because it must stay alert in
+ *  case an AC makes a handler process ready.
+ *  We should probably use mwait in that case.
  */
 void
 idlehands(void)
 {
-	if(conf.nmach == 1)
+if(0)
+	if(m->machno != 0)
 		halt();
 }

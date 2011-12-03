@@ -6,17 +6,97 @@
 
 #include "../port/edf.h"
 
+/*
+ * measure max lock cycles and max lock waiting time.
+ */
+#define	LOCKCYCLES	0
+
 uvlong maxlockcycles;
 uvlong maxilockcycles;
-ulong maxlockpc;
-ulong maxilockpc;
+uintptr maxlockpc;
+uintptr maxilockpc;
 
-struct
+Lockstats lockstats;
+Waitstats waitstats;
+Lock waitstatslk;
+
+static void
+newwaitstats(void)
 {
-	ulong	locks;
-	ulong	glare;
-	ulong	inglare;
-} lockstats;
+	if(waitstats.pcs != nil)
+		return;
+	waitstats.pcs = malloc(NWstats * sizeof waitstats.pcs[0]);
+	waitstats.ns = malloc(NWstats * sizeof waitstats.ns[0]);
+	waitstats.wait = malloc(NWstats * sizeof waitstats.wait[0]);
+	waitstats.total = malloc(NWstats * sizeof waitstats.total[0]);
+	waitstats.type = malloc(NWstats * sizeof waitstats.type[0]);
+}
+
+void
+startwaitstats(int on)
+{
+	newwaitstats();
+	mfence();
+	waitstats.on = on;
+	print("lockstats %s\n", on?"on":"off");
+}
+
+void
+clearwaitstats(void)
+{
+	newwaitstats();
+	memset(waitstats.ns, 0, NWstats * sizeof(int));
+	memset(waitstats.wait, 0, NWstats * sizeof(uvlong));
+	memset(waitstats.total, 0, NWstats * sizeof(uvlong));
+}
+
+void
+addwaitstat(uintptr pc, uvlong t0, int type)
+{
+	uint i;
+	uvlong w;
+
+	if(waitstats.on == 0)
+		return;
+
+	cycles(&w);
+	w -= t0;
+	mfence();
+	for(i = 0; i < NWstats; i++)
+		if(waitstats.pcs[i] == pc){
+			ainc(&waitstats.ns[i]);
+			if(w > waitstats.wait[i])
+				waitstats.wait[i] = w;	/* race but ok */
+			waitstats.total[i] += w;		/* race but ok */
+			return;
+		}
+	if(!canlock(&waitstatslk))
+		return;
+
+	for(i = 0; i < NWstats; i++)
+		if(waitstats.pcs[i] == pc){
+			ainc(&waitstats.ns[i]);
+			if(w > waitstats.wait[i])
+				waitstats.wait[i] = w;	/* race but ok */
+			waitstats.total[i] += w;
+			unlock(&waitstatslk);
+			return;
+		}
+
+	for(i = 0; i < NWstats; i++)
+		if(waitstats.pcs[i] == 0){
+			waitstats.ns[i] = 1;
+			waitstats.type[i] = type;
+			waitstats.wait[i] = w;
+			waitstats.total[i] = w;
+			mfence();
+			waitstats.pcs[i] = pc;
+			waitstats.npcs++;
+			break;
+		}
+
+	unlock(&waitstatslk);
+}
 
 static void
 dumplockmem(char *tag, Lock *l)
@@ -49,6 +129,7 @@ lock(Lock *l)
 {
 	int i;
 	uintptr pc;
+	uvlong t0;
 
 	pc = getcallerpc(&l);
 
@@ -61,14 +142,15 @@ lock(Lock *l)
 		l->pc = pc;
 		l->p = up;
 		l->isilock = 0;
-#ifdef LOCKCYCLES
-		cycles(&l->lockcycles);
-#endif
+		if(LOCKCYCLES)
+			cycles(&l->lockcycles);
+
 		return 0;
 	}
 	if(up)
 		adec(&up->nlocks);
 
+	cycles(&t0);
 	lockstats.glare++;
 	for(;;){
 		lockstats.inglare++;
@@ -96,9 +178,10 @@ lock(Lock *l)
 			l->pc = pc;
 			l->p = up;
 			l->isilock = 0;
-#ifdef LOCKCYCLES
-			cycles(&l->lockcycles);
-#endif
+			if(LOCKCYCLES)
+				cycles(&l->lockcycles);
+			if(l != &waitstatslk)
+				addwaitstat(pc, t0, WSlock);
 			return 1;
 		}
 		if(up)
@@ -111,12 +194,14 @@ ilock(Lock *l)
 {
 	Mpl pl;
 	uintptr pc;
+	uvlong t0;
 
 	pc = getcallerpc(&l);
 	lockstats.locks++;
 
 	pl = splhi();
 	if(TAS(&l->key) != 0){
+		cycles(&t0);
 		lockstats.glare++;
 		/*
 		 * Cannot also check l->pc, l->m, or l->isilock here
@@ -129,8 +214,11 @@ ilock(Lock *l)
 			while(l->key)
 				;
 			pl = splhi();
-			if(TAS(&l->key) == 0)
+			if(TAS(&l->key) == 0){
+				if(l != &waitstatslk)
+					addwaitstat(pc, t0, WSlock);
 				goto acquire;
+			}
 		}
 	}
 acquire:
@@ -142,9 +230,8 @@ acquire:
 	l->p = up;
 	l->isilock = 1;
 	l->m = MACHP(m->machno);
-#ifdef LOCKCYCLES
-	cycles(&l->lockcycles);
-#endif
+	if(LOCKCYCLES)
+		cycles(&l->lockcycles);
 }
 
 int
@@ -164,24 +251,25 @@ canlock(Lock *l)
 	l->p = up;
 	l->m = MACHP(m->machno);
 	l->isilock = 0;
-#ifdef LOCKCYCLES
-	cycles(&l->lockcycles);
-#endif
+	if(LOCKCYCLES)
+		cycles(&l->lockcycles);
+
 	return 1;
 }
 
 void
 unlock(Lock *l)
 {
-#ifdef LOCKCYCLES
 	uvlong x;
-	cycles(&x);
-	l->lockcycles = x - l->lockcycles;
-	if(l->lockcycles > maxlockcycles){
-		maxlockcycles = l->lockcycles;
-		maxlockpc = l->pc;
+
+	if(LOCKCYCLES){
+		cycles(&x);
+		l->lockcycles = x - l->lockcycles;
+		if(l->lockcycles > maxlockcycles){
+			maxlockcycles = l->lockcycles;
+			maxlockpc = l->pc;
+		}
 	}
-#endif
 
 	if(l->key == 0)
 		print("unlock: not locked: pc %#p\n", getcallerpc(&l));
@@ -206,16 +294,16 @@ void
 iunlock(Lock *l)
 {
 	Mpl pl;
-
-#ifdef LOCKCYCLES
 	uvlong x;
-	cycles(&x);
-	l->lockcycles = x - l->lockcycles;
-	if(l->lockcycles > maxilockcycles){
-		maxilockcycles = l->lockcycles;
-		maxilockpc = l->pc;
+
+	if(LOCKCYCLES){
+		cycles(&x);
+		l->lockcycles = x - l->lockcycles;
+		if(l->lockcycles > maxilockcycles){
+			maxilockcycles = l->lockcycles;
+			maxilockpc = l->pc;
+		}
 	}
-#endif
 
 	if(l->key == 0)
 		print("iunlock: not locked: pc %#p\n", getcallerpc(&l));

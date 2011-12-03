@@ -17,6 +17,7 @@ dev +dev
 	acpi
 	tube
 	zp
+	ws
 
 # add to get cec in the kernel
 #	cec
@@ -135,7 +136,6 @@ amd64 +dev
 	i8254
 	i8259
 	kbd
-	linuxsyscall linuxarchsys
 	main
 	map
 	memory
@@ -160,7 +160,6 @@ port
 	image
 	latin1
 	nixcall
-	linuxsysemu
 	page
 	pager
 	parse

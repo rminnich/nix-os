@@ -308,6 +308,11 @@ TEXT tas32(SB), 1, $-4
 	XCHGL	AX, (RARG)			/*  */
 	RET
 
+TEXT fas64(SB), 1, $-4
+	MOVQ	p+8(FP), AX
+	LOCK; XCHGQ	AX, (RARG)			/*  */
+	RET
+
 TEXT cas32(SB), 1, $-4
 	MOVL	exp+8(FP), AX
 	MOVL	new+16(FP), BX
@@ -347,21 +352,6 @@ TEXT setlabel(SB), 1, $-4
 	MOVQ	0(SP), BX			/* store return PC */
 	MOVQ	BX, 8(RARG)
 	MOVL	$0, AX				/* return 0 */
-	RET
-
-/*
- * Wait for something to happen.
- */
-TEXT halt(SB), 1, $-4
-	CLI
-	CMPL	nrdy(SB), $0
-	JEQ	_nothingready
-	STI
-	RET
-
-_nothingready:
-	STI
-	HLT
 	RET
 
 TEXT hardhalt(SB), 1, $-4

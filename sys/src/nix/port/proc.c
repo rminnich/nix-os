@@ -9,14 +9,26 @@
 #include	"errstr.h"
 #include	<trace.h>
 
-int	nrdy;
+enum
+{
+	Scaling=2,
+
+	/*
+	 * number of schedulers used.
+	 * 1 uses just one, which is the behavior of Plan 9.
+	 */
+	Nsched = 16,
+};
+
 Ref	noteidalloc;
 
-ulong delayedscheds;	/* statistics */
-long skipscheds;
-long preempts;
-
 static Ref pidalloc;
+
+/*
+ * Because machines with many cores are NUMA, we try to use
+ * a different scheduler per color
+ */
+Sched run[Nsched];
 
 struct Procalloc procalloc;
 
@@ -25,20 +37,13 @@ extern void pshash(Proc*);
 extern void psrelease(Proc*);
 extern void psunhash(Proc*);
 
-enum
-{
-	Scaling=2,
-};
-
 static int reprioritize(Proc*);
 static void updatecpu(Proc*);
-static int schedgain = 30;	/* units in seconds */
 
 static void rebalance(void);
-static ulong balancetime;
 
-Schedq	runq[Nrq];
-ulong	runvec;
+int schedsteals = 1;
+int scheddonates = 0;
 
 char *statename[] =
 {	/* BUG: generate automatically */
@@ -59,6 +64,45 @@ char *statename[] =
 	"Down",
 };
 
+void
+setmachsched(Mach *mp)
+{
+	int color;
+
+	color = corecolor(mp->machno);
+	if(color < 0){
+		print("unknown color for cpu%d\n", mp->machno);
+		color = 0;
+	}
+	mp->sch = &run[color%Nsched];
+}
+
+Sched*
+procsched(Proc *p)
+{
+	Mach *pm;
+
+	pm = p->mp;
+	if(pm == nil)
+		pm = m;
+	if(pm->sch == nil)
+		setmachsched(pm);
+	return pm->sch;
+}
+
+/*
+ * bad planning, once more.
+ */
+void
+procinit0(void)
+{
+	int i;
+
+	for(i = 0; i < Nsched; i++)
+		run[i].schedgain = 30;
+
+}
+
 /*
  * Always splhi()'ed.
  */
@@ -66,6 +110,13 @@ void
 schedinit(void)		/* never returns */
 {
 	Edf *e;
+
+	m->inidle = 1;
+	if(m->sch == nil){
+		print("schedinit: no sch for cpu%d\n", m->machno);
+		setmachsched(m);
+	}
+	ainc(&m->sch->nmach);
 
 	setlabel(&m->sched);
 	if(up) {
@@ -126,7 +177,9 @@ void
 sched(void)
 {
 	Proc *p;
+	Sched *sch;
 
+	sch = m->sch;
 	if(m->ilockdepth)
 		panic("cpu%d: ilockdepth %d, last lock %#p at %#p, sched called from %#p",
 			m->machno,
@@ -156,7 +209,7 @@ sched(void)
 		|| pga.Lock.p == up
 		|| procalloc.Lock.p == up){
 			up->delaysched++;
- 			delayedscheds++;
+ 			sch->delayedscheds++;
 			return;
 		}
 		up->delaysched = 0;
@@ -171,6 +224,7 @@ sched(void)
 		stackok();
 
 		procsave(up);
+		mmuflushtlb(m->pml4->pa);
 		if(setlabel(&up->sched)){
 			procrestore(up);
 			spllo();
@@ -178,7 +232,9 @@ sched(void)
 		}
 		gotolabel(&m->sched);
 	}
+	m->inidle = 1;
 	p = runproc();
+	m->inidle = 0;
 	if(!p->edf){
 		updatecpu(p);
 		p->priority = reprioritize(p);
@@ -193,19 +249,21 @@ sched(void)
 	up->mach = MACHP(m->machno);
 	m->proc = up;
 	mmuswitch(up);
+
+	assert(!up->wired || up->wired == m);
 	gotolabel(&up->sched);
 }
 
 int
 anyready(void)
 {
-	return runvec;
+	return m->sch->runvec;
 }
 
 int
 anyhigher(void)
 {
-	return runvec & ~((1<<(up->priority+1))-1);
+	return m->sch->runvec & ~((1<<(up->priority+1))-1);
 }
 
 /*
@@ -301,7 +359,9 @@ updatecpu(Proc *p)
 
 	if(n == 0)
 		return;
-	D = schedgain*HZ*Scaling;
+	if(m->sch == nil)	/* may happen during boot */
+		return;
+	D = m->sch->schedgain*HZ*Scaling;
 	if(n > D)
 		n = D;
 
@@ -356,13 +416,16 @@ reprioritize(Proc *p)
 /*
  * add a process to a scheduling queue
  */
-void
-queueproc(Schedq *rq, Proc *p)
+static void
+queueproc(Sched *sch, Schedq *rq, Proc *p, int locked)
 {
 	int pri;
 
-	pri = rq - runq;
-	lock(runq);
+	pri = rq - sch->runq;
+	if(!locked)
+		lock(sch);
+	else if(canlock(sch))
+		panic("queueproc: locked and can lock");
 	p->priority = pri;
 	p->rnext = 0;
 	if(rq->tail)
@@ -371,20 +434,21 @@ queueproc(Schedq *rq, Proc *p)
 		rq->head = p;
 	rq->tail = p;
 	rq->n++;
-	nrdy++;
-	runvec |= 1<<pri;
-	unlock(runq);
+	sch->nrdy++;
+	sch->runvec |= 1<<pri;
+	if(!locked)
+		unlock(sch);
 }
 
 /*
  *  try to remove a process from a scheduling queue (called splhi)
  */
 Proc*
-dequeueproc(Schedq *rq, Proc *tp)
+dequeueproc(Sched *sch, Schedq *rq, Proc *tp)
 {
 	Proc *l, *p;
 
-	if(!canlock(runq))
+	if(!canlock(sch))
 		return nil;
 
 	/*
@@ -402,7 +466,7 @@ dequeueproc(Schedq *rq, Proc *tp)
 	 *  p->mach==0 only when process state is saved
 	 */
 	if(p == 0 || p->mach){
-		unlock(runq);
+		unlock(sch);
 		return nil;
 	}
 	if(p->rnext == 0)
@@ -412,27 +476,22 @@ dequeueproc(Schedq *rq, Proc *tp)
 	else
 		rq->head = p->rnext;
 	if(rq->head == nil)
-		runvec &= ~(1<<(rq-runq));
+		sch->runvec &= ~(1<<(rq-sch->runq));
 	rq->n--;
-	nrdy--;
+	sch->nrdy--;
 	if(p->state != Ready)
 		print("dequeueproc %s %d %s\n", p->text, p->pid, statename[p->state]);
 
-	unlock(runq);
+	unlock(sch);
 	return p;
 }
 
-/*
- *  ready(p) picks a new priority for a process and sticks it in the
- *  runq for that priority.
- */
-void
-ready(Proc *p)
+static void
+schedready(Sched *sch, Proc *p, int locked)
 {
 	Mpl pl;
 	int pri;
 	Schedq *rq;
-	void (*pt)(Proc*, int, vlong);
 
 	pl = splhi();
 	if(edfready(p)){
@@ -442,19 +501,33 @@ ready(Proc *p)
 
 	if(m->nixtype == NIXAC)
 		MACHP(0)->readied = p;
+
+	/*
+	 * BUG: if schedready is called to rebalance the scheduler,
+	 * for another core, then this is wrong.
+	 */
 	if(up != p)
 		m->readied = p;	/* group scheduling */
 
 	updatecpu(p);
 	pri = reprioritize(p);
 	p->priority = pri;
-	rq = &runq[pri];
+	rq = &sch->runq[pri];
 	p->state = Ready;
-	queueproc(rq, p);
-	pt = proctrace;
-	if(pt)
-		pt(p, SReady, 0);
+	queueproc(sch, rq, p, locked);
+	if(p->trace)
+		proctrace(p, SReady, 0);
 	splx(pl);
+}
+
+/*
+ *  ready(p) picks a new priority for a process and sticks it in the
+ *  runq for that priority.
+ */
+void
+ready(Proc *p)
+{
+	schedready(procsched(p), p, 0);
 }
 
 /*
@@ -480,15 +553,17 @@ rebalance(void)
 {
 	Mpl pl;
 	int pri, npri, t;
+	Sched *sch;
 	Schedq *rq;
 	Proc *p;
 
+	sch = m->sch;
 	t = m->ticks;
-	if(t - balancetime < HZ)
+	if(t - sch->balancetime < HZ)
 		return;
-	balancetime = t;
+	sch->balancetime = t;
 
-	for(pri=0, rq=runq; pri<Npriq; pri++, rq++){
+	for(pri=0, rq=sch->runq; pri<Npriq; pri++, rq++){
 another:
 		p = rq->head;
 		if(p == nil)
@@ -501,9 +576,9 @@ another:
 		npri = reprioritize(p);
 		if(npri != pri){
 			pl = splhi();
-			p = dequeueproc(rq, p);
+			p = dequeueproc(sch, rq, p);
 			if(p)
-				queueproc(&runq[npri], p);
+				queueproc(sch, &sch->runq[npri], p, 0);
 			splx(pl);
 			goto another;
 		}
@@ -512,28 +587,99 @@ another:
 
 
 /*
+ * Is this scheduler overloaded?
+ * should it pass processes to any other underloaded scheduler?
+ */
+static int
+overloaded(Sched *sch)
+{
+	return sch->nmach != 0 && sch->nrdy > sch->nmach;
+}
+
+/*
+ * Is it reasonable to give processes to this scheduler?
+ */
+static int
+underloaded(Sched *sch)
+{
+	return sch->nrdy < sch->nmach;
+}
+
+static void
+ipisched(Sched *sch)
+{
+	Mach* mp;
+	int i;
+
+	for(i = 0; i < MACHMAX; i++){
+		mp = sys->machptr[i];
+		if(mp != nil && mp != m && mp->online && mp->sch == sch)
+			apicipi(mp->apicno);
+	}
+}
+
+/*
+ * If we are idle, check if another scheduler is overloaded and
+ * steal a new process from it. But steal low priority processes to
+ * avoid disturbing high priority ones.
+ */
+static Proc*
+steal(void)
+{
+	static int last;	/* donate in round robin */
+	int start, i;
+	Schedq *rq;
+	Sched *sch;
+	Proc *p;
+
+	/*
+	 * measures show that stealing is expensive, we are donating
+	 * by now but only when calling exec(). See maydonate().
+	 */
+	if(!schedsteals)
+		return nil;
+
+	start = last;
+	for(i = 0; i < Nsched; i++){
+		last = (start+i)%Nsched;
+		sch = &run[last];
+		if(sch == m->sch || sch->nmach == 0 || !overloaded(sch))
+			continue;
+		for(rq = &sch->runq[Nrq-1]; rq >= sch->runq; rq--){
+			for(p = rq->head; p != nil; p = p->rnext)
+				if(!p->wired && p->priority < PriKproc)
+					break;
+			if(p != nil && dequeueproc(sch, rq, p) != nil)
+				return p;
+		}
+	}
+	return nil;
+}
+
+/*
  *  pick a process to run
  */
 Proc*
 runproc(void)
 {
 	Schedq *rq;
+	Sched *sch;
 	Proc *p;
 	ulong start, now;
 	int i;
-	void (*pt)(Proc*, int, vlong);
 
 	start = perfticks();
-
+	sch = m->sch;
 	/* cooperative scheduling until the clock ticks */
 	if((p=m->readied) && p->mach==0 && p->state==Ready
-	&& runq[Nrq-1].head == nil && runq[Nrq-2].head == nil){
-		skipscheds++;
-		rq = &runq[p->priority];
+	&& sch->runq[Nrq-1].head == nil && sch->runq[Nrq-2].head == nil
+	&& (!p->wired || p->wired == m)){
+		sch->skipscheds++;
+		rq = &sch->runq[p->priority];
 		goto found;
 	}
 
-	preempts++;
+	sch->preempts++;
 
 loop:
 	/*
@@ -548,7 +694,7 @@ loop:
 		 *  processor can run given affinity constraints.
 		 *
 		 */
-		for(rq = &runq[Nrq-1]; rq >= runq; rq--){
+		for(rq = &sch->runq[Nrq-1]; rq >= sch->runq; rq--){
 			for(p = rq->head; p; p = p->rnext){
 				if(p->mp == nil || p->mp == MACHP(m->machno)
 				|| (!p->wired && i > 0))
@@ -556,13 +702,13 @@ loop:
 			}
 		}
 
+		p = steal();
+		if(p != nil){
+			splhi();
+			goto stolen;
+		}
 		/* waste time or halt the CPU */
-		/* But not on NIX. We need the TC to be alert in
-		 * case the AC issues a syscall and makes its
-		 * handler process ready.
 		idlehands();
-		 */
-
 		/* remember how much time we're here */
 		now = perfticks();
 		m->perf.inidle += now-start;
@@ -571,20 +717,19 @@ loop:
 
 found:
 	splhi();
-	p = dequeueproc(rq, p);
+	p = dequeueproc(sch, rq, p);
 	if(p == nil)
 		goto loop;
-
+stolen:
 	p->state = Scheding;
 	p->mp = MACHP(m->machno);
 
 	if(edflock(p)){
-		edfrun(p, rq == &runq[PriEdf]);	/* start deadline timer and do admin */
+		edfrun(p, rq == &sch->runq[PriEdf]);	/* start deadline timer and do admin */
 		edfunlock();
 	}
-	pt = proctrace;
-	if(pt)
-		pt(p, SRun, 0);
+	if(p->trace)
+		proctrace(p, SRun, 0);
 	return p;
 }
 
@@ -592,9 +737,11 @@ int
 canpage(Proc *p)
 {
 	int ok;
+	Sched *sch;
 
 	splhi();
-	lock(runq);
+	sch = procsched(p);
+	lock(sch);
 	/* Only reliable way to see if we are Running */
 	if(p->mach == 0) {
 		p->newtlb = 1;
@@ -602,7 +749,7 @@ canpage(Proc *p)
 	}
 	else
 		ok = 0;
-	unlock(runq);
+	unlock(sch);
 	spllo();
 
 	return ok;
@@ -677,6 +824,7 @@ newproc(void)
 	p->tctime = 0ULL;
 	p->ac = nil;
 	p->nfullq = 0;
+	memset(&p->PMMU, 0, sizeof p->PMMU);
 	return p;
 }
 
@@ -712,6 +860,18 @@ procwired(Proc *p, int bm)
 
 	p->wired = MACHP(bm);
 	p->mp = p->wired;
+
+	/*
+	 * adjust our color to the new domain.
+	 */
+	if(up == nil || p != up)
+		return;
+	up->color = corecolor(up->mp->machno);
+	qlock(&up->seglock);
+	for(i = 0; i < NSEG; i++)
+		if(up->seg[i])
+			up->seg[i]->color = up->color;
+	qunlock(&up->seglock);
 }
 
 void
@@ -742,7 +902,6 @@ void
 sleep(Rendez *r, int (*f)(void*), void *arg)
 {
 	Mpl pl;
-	void (*pt)(Proc*, int, vlong);
 
 	pl = splhi();
 
@@ -778,9 +937,8 @@ sleep(Rendez *r, int (*f)(void*), void *arg)
 		 *  now we are committed to
 		 *  change state and call scheduler
 		 */
-		pt = proctrace;
-		if(pt)
-			pt(up, SSleep, 0);
+		if(up->trace)
+			proctrace(up, SSleep, 0);
 		up->state = Wakeme;
 		up->r = r;
 
@@ -788,6 +946,7 @@ sleep(Rendez *r, int (*f)(void*), void *arg)
 		m->cs++;
 
 		procsave(up);
+		mmuflushtlb(m->pml4->pa);
 		if(setlabel(&up->sched)) {
 			/*
 			 *  here when the process is awakened
@@ -1063,7 +1222,6 @@ pexit(char *exitstr, int freemem)
 	Rgrp *rgrp;
 	Pgrp *pgrp;
 	Chan *dot;
-	void (*pt)(Proc*, int, vlong);
 
 	if(0 && up->nfullq > 0)
 		iprint(" %s=%d", up->text, up->nfullq);
@@ -1077,9 +1235,8 @@ pexit(char *exitstr, int freemem)
 
 	if (up->tt)
 		timerdel(up);
-	pt = proctrace;
-	if(pt)
-		pt(up, SDead, 0);
+	if(up->trace)
+		proctrace(up, SDead, 0);
 
 	/* nil out all the resources under lock (free later) */
 	qlock(&up->debug);
@@ -1354,18 +1511,21 @@ void
 scheddump(void)
 {
 	Proc *p;
+	Sched *sch;
 	Schedq *rq;
 
-	for(rq = &runq[Nrq-1]; rq >= runq; rq--){
-		if(rq->head == 0)
-			continue;
-		print("rq%ld:", rq-runq);
-		for(p = rq->head; p; p = p->rnext)
-			print(" %d(%lud)", p->pid, m->ticks - p->readytime);
-		print("\n");
-		delay(150);
+	for(sch = run; sch < &run[Nsched]; sch++){
+		for(rq = &sch->runq[Nrq-1]; rq >= sch->runq; rq--){
+			if(rq->head == 0)
+				continue;
+			print("sch%ld rq%ld:", sch - run, rq-sch->runq);
+			for(p = rq->head; p; p = p->rnext)
+				print(" %d(%lud)", p->pid, m->ticks - p->readytime);
+			print("\n");
+			delay(150);
+		}
+		print("sch%ld: nrdy %d\n", sch - run, sch->nrdy);
 	}
-	print("nrdy %d\n", nrdy);
 }
 
 void
@@ -1584,17 +1744,20 @@ renameuser(char *old, char *new)
 
 /*
  *  time accounting called by clock() splhi'd
+ *  only cpu0 computes system load average
  */
 void
 accounttime(void)
 {
+	Sched *sch;
 	Proc *p;
 	ulong n, per;
-	static ulong nrun;
 
+	sch = m->sch;
 	p = m->proc;
 	if(p) {
-		nrun++;
+		if(m->machno == 0)
+			sch->nrun++;
 		p->time[p->insyscall]++;
 	}
 
@@ -1625,9 +1788,16 @@ accounttime(void)
 	 * approximately the load over the last second,
 	 * with a tail lasting about 5 seconds.
 	 */
-	n = nrun;
-	nrun = 0;
-	n = (nrdy+n)*1000;
+	n = sch->nrun;
+	sch->nrun = 0;
+	n = (sch->nrdy+n)*1000;
 	m->load = (m->load*(HZ-1)+n)/HZ;
 }
 
+void
+halt(void)
+{
+	if(m->sch->nrdy != 0)
+		return;
+	hardhalt();
+}

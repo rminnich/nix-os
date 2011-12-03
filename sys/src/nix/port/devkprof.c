@@ -16,6 +16,7 @@ struct
 	int	nbuf;
 	int	time;
 	ulong	*buf;
+	Lock;
 }kprof;
 
 enum{
@@ -28,35 +29,6 @@ Dirtab kproftab[]={
 	"kpdata",	{Kprofdataqid},		0,	0600,
 	"kpctl",	{Kprofctlqid},		0,	0600,
 };
-
-static void
-_kproftimer(uintptr pc)
-{
-	if(kprof.time == 0)
-		return;
-	/*
-	 *  if the pc is coming out of spllo or splx,
-	 *  use the pc saved when we went splhi.
-	 */
-	if(pc>=PTR2UINT(spllo) && pc<=PTR2UINT(spldone))
-		pc = m->splpc;
-
-	kprof.buf[0] += TK2MS(1);
-	if(kprof.minpc<=pc && pc<kprof.maxpc){
-		pc -= kprof.minpc;
-		pc >>= LRES;
-		kprof.buf[pc] += TK2MS(1);
-	}else
-		kprof.buf[1] += TK2MS(1);
-}
-
-static void
-kprofinit(void)
-{
-	if(SZ != sizeof kprof.buf[0])
-		panic("kprof size");
-	kproftimer = _kproftimer;
-}
 
 static Chan*
 kprofattach(char *spec)
@@ -75,6 +47,43 @@ kprofattach(char *spec)
 	}
 	kproftab[1].length = n;
 	return devattach('K', spec);
+}
+
+static void
+_kproftimer(uintptr pc)
+{
+	if(kprof.time == 0)
+		return;
+
+	/*
+	 * if the pc corresponds to the idle loop, don't consider it.
+	 */
+	if(m->inidle)
+		return;
+	/*
+	 *  if the pc is coming out of spllo or splx,
+	 *  use the pc saved when we went splhi.
+	 */
+	if(pc>=PTR2UINT(spllo) && pc<=PTR2UINT(spldone))
+		pc = m->splpc;
+
+//	ilock(&kprof);
+	kprof.buf[0] += TK2MS(1);
+	if(kprof.minpc<=pc && pc<kprof.maxpc){
+		pc -= kprof.minpc;
+		pc >>= LRES;
+		kprof.buf[pc] += TK2MS(1);
+	}else
+		kprof.buf[1] += TK2MS(1);
+//	iunlock(&kprof);
+}
+
+static void
+kprofinit(void)
+{
+	if(SZ != sizeof kprof.buf[0])
+		panic("kprof size");
+	kproftimer = _kproftimer;
 }
 
 static Walkqid*

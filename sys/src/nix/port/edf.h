@@ -52,3 +52,7 @@ extern Lock	edftestlock;	/* for atomic admitting/expelling */
 /* Interface: */
 Edf*		edflock(Proc*);
 void		edfunlock(void);
+
+
+/* sched interface, used only by edf */
+Sched*		procsched(Proc*);

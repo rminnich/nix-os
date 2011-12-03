@@ -226,12 +226,27 @@ tryalloc(int pgszi, int color)
 	return -1;
 }
 
+static int
+hascolor(Page *pl, int color)
+{
+	Page *p;
+
+	lock(&pga);
+	for(p = pl; p != nil; p = p->next)
+		if(color == NOCOLOR || p->color == color){
+			unlock(&pga);
+			return 1;
+		}
+	unlock(&pga);
+	return 0;
+}
+
 /*
- * Someone thinks pages of size m->pgsz[pgszi] are needed
- * and is trying to make them available.
+ * Someone couldn't find pages of the given size index and color.
+ * (color may be NOCOLOR if the caller is trying to get any page
+ * and is desperate).
  * Many processes may be calling this at the same time,
- * in which case they will enter one by one. Only when more than
- * Minpages are available they will simply return.
+ * The first one operates as a pager and does what it can.
  */
 void
 kickpager(int pgszi, int color)
@@ -246,51 +261,64 @@ kickpager(int pgszi, int color)
 	pa = &pga.pgsza[pgszi];
 
 	/*
-	 * First try allocating from physical memory.
+	 * 1. did anyone else release one for us in the mean time?
 	 */
-	tryalloc(pgszi, color);
-	if(pa->freecount > Minpages)
+	if(hascolor(pa->head, color))
 		goto Done;
 
 	/*
-	 * If pgszi is <= page size for text (assumed to be 2M)
-	 * try to release text pages.
+	 * 2. try allocating from physical memory
+	 */
+	tryalloc(pgszi, color);
+	if(hascolor(pa->head, color))
+		goto Done;
+
+	/*
+	 * If pgszi is <= text page size, try releasing text pages.
 	 */
 	if(m->pgsz[pgszi] <= 2*MiB){
 		pstats.ntext++;
 		DBG("kickpager() up %#p: reclaiming text pages\n", up);
 		pageouttext(pgszi, color);
 		tryalloc(pgszi, color);
-		if(pa->freecount > Minpages){
+		if(hascolor(pa->head, color)){
 			DBG("kickpager() found %uld free\n", pa->freecount);
 			goto Done;
 		}
 	}
 
 	/*
-	 * Try releasing memory from one bigger page, perhaps from text
-	 * pages released in the previous step.
+	 * Try releasing memory from bigger pages.
 	 */
 	pstats.nbig++;
 	freepages(pgszi+1, 1);
-	while(tryalloc(pgszi, color) != -1 && pa->freecount < Minpages)
-		;
-	if(pa->freecount > 1){
+	tryalloc(pgszi, color);
+	if(hascolor(pa->head, color)){
 		DBG("kickpager() found %uld free\n", pa->freecount);
 		goto Done;
 	}
+
 	/*
-	 * Try releasing memory from all pages.
+	 * Really the last resort. Try releasing memory from all pages.
 	 */
 	pstats.nall++;
 	DBG("kickpager() up %#p: releasing all pages\n", up);
 	freepages(0, 0);
 	tryalloc(pgszi, color);
-	if(pa->freecount > 1){
+	if(pa->freecount > 0){
 		DBG("kickpager() found %uld free\n", pa->freecount);
 		goto Done;
 	}
-	panic("kickpager(): no physical memory");
+
+	/*
+	 * What else can we do?
+	 * But don't panic if we are still trying to get memory of
+	 * a particular color and there's none. We'll retry asking
+	 * for any color.
+	 */
+	if(color == NOCOLOR)
+		panic("kickpager(): no physical memory");
+
 Done:
 	poperror();
 	qunlock(&pagerlck);

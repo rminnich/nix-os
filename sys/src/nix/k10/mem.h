@@ -86,7 +86,6 @@
 
 
 
-
 /*
  * Hierarchical Page Tables.
  * For example, traditional IA-32 paging structures have 2 levels,
@@ -97,3 +96,4 @@
  */
 #define PTLX(v, l)	(((v)>>(((l)*PTSHFT)+PGSHFT)) & ((1<<PTSHFT)-1))
 #define PGLSZ(l)	(1<<(((l)*PTSHFT)+PGSHFT))
+

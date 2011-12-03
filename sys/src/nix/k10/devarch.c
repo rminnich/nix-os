@@ -516,64 +516,25 @@ void (*coherence)(void) = mfence;
 static long
 cputyperead(Chan*, void *a, long n, vlong off)
 {
-	char str[32];
+	char buf[512], *s, *e;
+	int i, k;
 
-	snprint(str, sizeof(str), "%s %ud\n", "AMD64", m->cpumhz);
-	return readstr(off, a, n, str);
-}
-
-static long
-cpuidread(Chan*, void *a, long n, vlong off)
-{
-	char str[64];
-	int nstr, ns;
-	int i;
-
-	nstr = sizeof(str);
-	for(i = ns = 0; i < 4; i++)
-		ns += snprint(str+ns, nstr-ns, "%08x ", m->cpuinfo[1][i]);
-
-	return readstr(off, a, n, str);
-}
-
-static long
-linuxread(Chan*, void* a, long n, vlong offset)
-{
-	char str[32];
-
-	snprint(str, sizeof(str), "linuxexec %d linux %d", up->linuxexec, up->linux);
-
-	return readstr(offset, a, n, str);
-}
-
-static long
-linuxwrite(Chan*, void* a, long, vlong offset)
-{
-	char *cp;
-	unsigned int val;
-
-	if (offset)
-		error("linuxwrite: offset 0 set");
-
-	cp = a;
-	val = strtoul(cp, 0, 16);
-	if (val == 0)
-		up->linuxexec = up->linux = 0;
-	else if (val & 1)
-		up->linuxexec = val;
-	else if (val & 2)
-		up->linux = val;
-	else error("linuxwrite: val 0 or val&3 == 0");
-
-	return 1;
+	e = buf+sizeof buf;
+	s = seprint(buf, e, "%s %ud\n", "AMD64", m->cpumhz);
+	k = m->ncpuinfoe - m->ncpuinfos;
+	if(k > 4)
+		k = 4;
+	for(i = 0; i < k; i++)
+		s = seprint(s, e, "%#8.8ux %#8.8ux %#8.8ux %#8.8ux\n",
+			m->cpuinfo[i][0], m->cpuinfo[i][1],
+			m->cpuinfo[i][2], m->cpuinfo[i][3]);
+	return readstr(off, a, n, buf);
 }
 
 void
 archinit(void)
 {
 	addarchfile("cputype", 0444, cputyperead, nil);
-	addarchfile("cpuidread", 0444, cpuidread, nil);
-	addarchfile("linux", 0644, linuxread, linuxwrite);
 }
 
 void

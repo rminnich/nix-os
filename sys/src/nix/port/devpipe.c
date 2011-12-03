@@ -41,15 +41,16 @@ Dirtab pipedir[] =
 #define PIPEID(x)	((((unsigned)x))>>5)
 #define PIPEQID(i, t)	((((unsigned)i)<<5)|(t))
 
+
+enum
+{
+	/* Plan 9 default for conf.nmach > 1 */
+	Pipeqsize = 256*1024
+};
+
 static void
 pipeinit(void)
 {
-	if(conf.pipeqsize == 0){
-		if(conf.nmach > 1)
-			conf.pipeqsize = 256*1024;
-		else
-			conf.pipeqsize = 32*1024;
-	}
 }
 
 /*
@@ -67,12 +68,12 @@ pipeattach(char *spec)
 		exhausted("memory");
 	p->ref = 1;
 
-	p->q[0] = qopen(conf.pipeqsize, 0, 0, 0);
+	p->q[0] = qopen(Pipeqsize, 0, 0, 0);
 	if(p->q[0] == 0){
 		free(p);
 		exhausted("memory");
 	}
-	p->q[1] = qopen(conf.pipeqsize, 0, 0, 0);
+	p->q[1] = qopen(Pipeqsize, 0, 0, 0);
 	if(p->q[1] == 0){
 		free(p->q[0]);
 		free(p);

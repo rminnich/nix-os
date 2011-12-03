@@ -11,7 +11,6 @@
  *	PteNX;
  *	mmukmapsync grot for >1 processor;
  *	replace vmap with newer version (no PDMAP);
- *	mmuinit machno != fix;
  *	mmuptcopy (PteSHARED trick?);
  *	calculate and map up to TMFM (conf crap);
  */
@@ -113,11 +112,12 @@ dumpmmu(Proc *p)
 	for(i = 3; i > 0; i--){
 		print("mmuptp[%d]:\n", i);
 		for(pg = p->mmuptp[i]; pg != nil; pg = pg->next)
-			print("\tva %#ullx ppn %#ullx d %#ulx\n",
-				pg->va, pg->pa, pg->daddr);
+			print("\tpg %#p = va %#ullx pa %#ullx"
+				" daddr %#ulx next %#p prev %#p\n",
+				pg, pg->va, pg->pa, pg->daddr, pg->next, pg->prev);
 	}
 	print("pml4 %#ullx\n", m->pml4->pa);
-	dumpptepg(4, m->pml4->pa);
+	if(0)dumpptepg(4, m->pml4->pa);
 }
 
 void
@@ -162,6 +162,8 @@ mmuptpalloc(void)
 		page->prev = page->next = nil;
 		memset(UINT2PTR(page->va), 0, PTSZ);
 
+		if(page->pa == 0)
+			panic("mmuptpalloc: free page with pa == 0");
 		return page;
 	}
 	unlock(&mmuptpfreelist);
@@ -182,6 +184,8 @@ mmuptpalloc(void)
 	page->pa = PADDR(va);
 	page->ref = 1;
 
+	if(page->pa == 0)
+		panic("mmuptpalloc: no pa");
 	return page;
 }
 
@@ -213,6 +217,7 @@ mmuswitch(Proc* proc)
 		pte[page->daddr] = PPN(page->pa)|PteU|PteRW|PteP;
 		if(page->daddr >= m->pml4->daddr)
 			m->pml4->daddr = page->daddr+1;
+		page->prev = m->pml4;
 	}
 
 	tssrsp0(STACKALIGN(PTR2UINT(proc->kstack+KSTACK)));
@@ -252,23 +257,90 @@ checkpte(uintmem ppn, void *a)
 	int l;
 	PTE *pte, *pml4;
 	u64int addr;
+	char buf[240], *s;
 
 	addr = PTR2UINT(a);
 	pml4 = UINT2PTR(m->pml4->va);
 	pte = 0;
+	s = buf;
+	*s = 0;
 	if((l = mmuwalk(pml4, addr, 3, &pte, nil)) < 0 || (*pte&PteP) == 0)
 		goto Panic;
-	else if((l = mmuwalk(pml4, addr, 2, &pte, nil)) < 0 || (*pte&PteP) == 0)
+	s = seprint(buf, buf+sizeof buf,
+		"check3: l%d pte %#p = %llux\n",
+		l, pte, pte?*pte:~0);
+	if((l = mmuwalk(pml4, addr, 2, &pte, nil)) < 0 || (*pte&PteP) == 0)
 		goto Panic;
-	else if(*pte&PtePS)
+	s = seprint(s, buf+sizeof buf,
+		"check2: l%d  pte %#p = %llux\n",
+		l, pte, pte?*pte:~0);
+	if(*pte&PtePS)
 		return;
-	else if((l = mmuwalk(pml4, addr, 1, &pte, nil)) < 0 || (*pte&PteP) == 0)
+	if((l = mmuwalk(pml4, addr, 1, &pte, nil)) < 0 || (*pte&PteP) == 0)
 		goto Panic;
+	seprint(s, buf+sizeof buf,
+		"check1: l%d  pte %#p = %llux\n",
+		l, pte, pte?*pte:~0);
 	return;
 Panic:
-	panic("cpu%d: checkpte l%d ppn %#ullx kadr %#ullx pte %#p = %llux\n",
-		m->machno, l, ppn, KADDR(ppn), pte, *pte);
+	
+	seprint(s, buf+sizeof buf,
+		"checkpte: l%d addr %#p ppn %#ullx kaddr %#p pte %#p = %llux",
+		l, a, ppn, KADDR(ppn), pte, pte?*pte:~0);
+	print("%s\n", buf);
+	seprint(buf, buf+sizeof buf, "start %#ullx unused %#ullx"
+		" unmap %#ullx end %#ullx\n",
+		sys->vmstart, sys->vmunused, sys->vmunmapped, sys->vmend);
+	panic("%s", buf);
+}
 
+
+static void
+mmuptpcheck(Proc *proc)
+{
+	int lvl, npgs, i;
+	Page *lp, *p, *pgs[16], *fp;
+	uint idx[16];
+
+	if(proc == nil)
+		return;
+	lp = m->pml4;
+	for(lvl = 3; lvl >= 2; lvl--){
+		npgs = 0;
+		for(p = proc->mmuptp[lvl]; p != nil; p = p->next){
+			for(fp = proc->mmuptp[0]; fp != nil; fp = fp->next)
+				if(fp == p){
+					dumpmmu(proc);
+					panic("ptpcheck: using free page");
+				}
+			for(i = 0; i < npgs; i++){
+				if(pgs[i] == p){
+					dumpmmu(proc);
+					panic("ptpcheck: dup page");
+				}
+				if(idx[i] == p->daddr){
+					dumpmmu(proc);
+					panic("ptcheck: dup daddr");
+				}
+			}
+			if(npgs >= nelem(pgs))
+				panic("ptpcheck: pgs is too small");
+			idx[npgs] = p->daddr;
+			pgs[npgs++] = p;
+			if(lvl == 3 && p->prev != lp){
+				dumpmmu(proc);
+				panic("ptpcheck: wrong prev");
+			}
+		}
+		
+	}
+	npgs = 0;
+	for(fp = proc->mmuptp[0]; fp != nil; fp = fp->next){
+		for(i = 0; i < npgs; i++)
+			if(pgs[i] == fp)
+				panic("ptpcheck: dup free page");
+		pgs[npgs++] = fp;
+	}
 }
 
 /*
@@ -284,12 +356,19 @@ mmuput(uintptr va, Page *pg, uint attr)
 	PTE *pte;
 	Page *page, *prev;
 	Mpl pl;
-	uintmem pa;
+	uintmem pa, ppn;
+	char buf[80];
 
-uintmem ppn;
-
+	ppn = 0;
 	pa = pg->pa;
-	DBG("up %#p mmuput %#p %#Px %#ux\n", up, va, pa, attr);
+	if(pa == 0)
+		panic("mmuput: zero pa");
+
+	if(DBGFLG){
+		snprint(buf, sizeof buf, "cpu%d: up %#p mmuput %#p %#P %#ux\n", 
+			m->machno, up, va, pa, attr);
+		print("%s", buf);
+	}
 	assert(pg->pgszi >= 0);
 	pgsz = m->pgsz[pg->pgszi];
 	if(pa & (pgsz-1))
@@ -297,12 +376,17 @@ uintmem ppn;
 	if(attr & ~(PTEVALID|PTEWRITE|PTERONLY|PTEUSER|PTEUNCACHED))
 		panic("mmuput: wrong attr bits: %#ux\n", attr);
 	pa |= attr;
+
 	pl = splhi();
+	if(DBGFLG)
+		mmuptpcheck(up);
 	user = (va < KZERO);
 	x = PTLX(va, 3);
+
 	pte = UINT2PTR(m->pml4->va);
 	pte += x;
 	prev = m->pml4;
+
 	for(lvl = 3; lvl >= 0; lvl--){
 		if(user){
 			if(pgsz == 2*MiB && lvl == 1)	 /* use 2M */
@@ -310,10 +394,15 @@ uintmem ppn;
 			if(pgsz == 1ull*GiB && lvl == 2)	/* use 1G */
 				break;
 		}
-		for(page = up->mmuptp[lvl]; page != nil; page = page->next){
-			if(page->prev == prev && page->daddr == x)
+		for(page = up->mmuptp[lvl]; page != nil; page = page->next)
+			if(page->prev == prev && page->daddr == x){
+				if(*pte == 0){
+					print("mmu: jmk and nemo had fun\n");
+					*pte = PPN(page->pa)|PteU|PteRW|PteP;
+				}
 				break;
-		}
+			}
+
 		if(page == nil){
 			if(up->mmuptp[0] == nil)
 				page = mmuptpalloc();
@@ -330,16 +419,20 @@ uintmem ppn;
 				m->pml4->daddr = x+1;
 		}
 		x = PTLX(va, lvl-1);
-ppn = PPN(*pte);
+
+		ppn = PPN(*pte);
+		if(ppn == 0)
+			panic("mmuput: ppn=0 l%d pte %#p = %#P\n", lvl, pte, *pte);
 
 		pte = UINT2PTR(KADDR(ppn));
 		pte += x;
-ppn += x;
 		prev = page;
 	}
 
-checkpte(ppn, pte);
+	if(DBGFLG)
+		checkpte(ppn, pte);
 	*pte = pa|PteU;
+
 	if(user)
 		switch(pgsz){
 		case 2*MiB:
@@ -350,7 +443,12 @@ checkpte(ppn, pte);
 			panic("mmuput: user pages must be 2M or 1G");
 		}
 	splx(pl);
-	DBG("up %#p new pte %#p = %#llux\n", up, pte, *pte);
+
+	if(DBGFLG){
+		snprint(buf, sizeof buf, "cpu%d: up %#p new pte %#p = %#llux\n", 
+			m->machno, up, pte, pte?*pte:~0);
+		print("%s", buf);
+	}
 
 	invlpg(va);			/* only if old entry valid? */
 }
@@ -666,6 +764,7 @@ mmuinit(void)
 		 */
 		p = UINT2PTR(m->stack);
 		p += MACHSTKSZ;
+
 		memmove(p, UINT2PTR(mach0pml4.va), PTSZ);
 		m->pml4 = &m->pml4kludge;
 		m->pml4->va = PTR2UINT(p);

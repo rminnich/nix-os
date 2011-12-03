@@ -163,7 +163,9 @@ static Traceevent *tevents;
 static Lock tlock;
 static int topens;
 static int tproduced, tconsumed;
-void (*proctrace)(Proc*, int, vlong);
+static void notrace(Proc*, int, vlong);
+
+void (*proctrace)(Proc*, int, vlong) = notrace;
 
 static void
 profclock(Ureg *ur, Timer *)
@@ -274,6 +276,11 @@ procgen(Chan *c, char *name, Dirtab *tab, int, int s, Dir *dp)
 }
 
 static void
+notrace(Proc*, Tevent, vlong)
+{
+}
+
+static void
 _proctrace(Proc* p, Tevent etype, vlong ts)
 {
 	Traceevent *te;
@@ -289,6 +296,7 @@ _proctrace(Proc* p, Tevent etype, vlong ts)
 		te->time = todget(nil);
 	else
 		te->time = ts;
+	te->core = m->machno;
 	tproduced++;
 }
 
@@ -629,7 +637,7 @@ procclose(Chan * c)
 		if(topens > 0)
 			topens--;
 		if(topens == 0)
-			proctrace = nil;
+			proctrace = notrace;
 		unlock(&tlock);
 	}
 	if(QID(c->qid) == Qns && c->aux != 0)
@@ -702,6 +710,7 @@ procread(Chan *c, void *va, long n, vlong off)
 	int i, j, navail, ne, pid, rsize;
 	char flag[10], *sps, *srv, statbuf[NSEG*64];
 	uintptr offset;
+	int tesz;
 
 	if(c->qid.type & QTDIR)
 		return devdirread(c, va, n, 0, 0, procgen);
@@ -713,20 +722,21 @@ procread(Chan *c, void *va, long n, vlong off)
 			return 0;
 
 		rptr = va;
+		tesz = BIT32SZ + BIT32SZ + BIT64SZ + BIT32SZ;
 		navail = tproduced - tconsumed;
-		if(navail > n / sizeof(Traceevent))
-			navail = n / sizeof(Traceevent);
+		if(navail > n / tesz)
+			navail = n / tesz;
 		while(navail > 0) {
-			if((tconsumed & Emask) + navail > Nevents)
-				ne = Nevents - (tconsumed & Emask);
-			else
-				ne = navail;
-			i = ne * sizeof(Traceevent);
-			memmove(rptr, &tevents[tconsumed & Emask], i);
-
-			tconsumed += ne;
-			rptr += i;
-			navail -= ne;
+			PBIT32(rptr, tevents[tconsumed & Emask].pid);
+			rptr += BIT32SZ;
+			PBIT32(rptr, tevents[tconsumed & Emask].etype);
+			rptr += BIT32SZ;
+			PBIT64(rptr, tevents[tconsumed & Emask].time);
+			rptr += BIT64SZ;
+			PBIT32(rptr, tevents[tconsumed & Emask].core);
+			rptr += BIT32SZ;
+			tconsumed++;
+			navail--;
 		}
 		return rptr - (uchar*)va;
 	}
@@ -1383,7 +1393,6 @@ procctlreq(Proc *p, char *va, int n)
 	Cmdtab *ct;
 	vlong time;
 	char *e;
-	void (*pt)(Proc*, int, vlong);
 
 	if(p->kp)	/* no ctl requests to kprocs */
 		error(Eperm);
@@ -1480,7 +1489,9 @@ procctlreq(Proc *p, char *va, int n)
 		procstopwait(p, 0);
 		break;
 	case CMwired:
-		procwired(p, atoi(cb->f[1]));
+		core = atoi(cb->f[1]);
+		procwired(p, core);
+		sched();
 		break;
 	case CMtrace:
 		switch(cb->nf){
@@ -1545,9 +1556,8 @@ procctlreq(Proc *p, char *va, int n)
 			edfstop(p);
 		break;
 	case CMevent:
-		pt = proctrace;
-		if(up->trace && pt)
-			pt(up, SUser, 0);
+		if(up->trace)
+			proctrace(up, SUser, 0);
 		break;
 	case CMcore:
 		core = atoi(cb->f[1]);
@@ -1612,7 +1622,7 @@ procctlmemio(Proc *p, uintptr offset, int n, void *va, int read)
 			s->steal--;
 			nexterror();
 		}
-		if(fixfault(s, offset, read, 0) == 0)
+		if(fixfault(s, offset, read, 0, s->color) == 0)
 			break;
 		poperror();
 		s->steal--;

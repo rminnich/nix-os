@@ -217,7 +217,6 @@ Post:
 	m->load = 0;
 	mwait(&m->icc->fn);
 
-
 	m->load = 100;
 	if(m->icc->flushtlb)
 		acmmuswitch();

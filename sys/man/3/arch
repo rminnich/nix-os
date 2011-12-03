@@ -18,7 +18,8 @@ user-level control of the I/O ports on x86-class and DEC Alpha machines.
 .PP
 Reads from
 .I cputype
-recover the processor type and clock rate in MHz.
+recover the processor type and clock rate in MHz in the first line, followed
+by further lines with CPU information values as provided by the processor.
 Reads from
 .I archctl
 yield at least data of this form:

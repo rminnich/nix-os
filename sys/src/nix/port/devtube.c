@@ -44,7 +44,7 @@ ftdump(void)
 {
 	Tio *ft;
 
-	if(dbgflg[_DBGC_] == 0)
+	if(DBGFLG == 0)
 		return;
 	qlock(&ftiolck);
 	for(ft = ftio; ft != nil; ft = ft->next)

@@ -78,7 +78,7 @@ xrecv(Tube *t, void *p, int nb)
 	c = (uchar*)&t[1];
 	c += (1+t->msz) * n;
 	while(*c == 0)
-		sleep(0);
+		; 		/* could yield */
 	memmove(p, c+1, t->msz);
 	coherence();
 	*c = 0;

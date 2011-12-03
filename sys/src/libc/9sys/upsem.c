@@ -60,7 +60,7 @@ downsem(int *s, int dontblock)
 	typesok();
 	/* busy wait */
 	for(i = 0; *s <= 0 && i < semtrytimes; i++)
-		sleep(0);
+		; // sleep(0);
 
 	if(*s <= 0 && dontblock)
 		return -1;

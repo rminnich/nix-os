@@ -8,6 +8,7 @@
 
 #include	"../port/edf.h"
 #include	<a.out.h>
+#include <trace.h>
 
 
 void
@@ -233,6 +234,7 @@ sysrfork(Ar0* ar0, va_list list)
 	wm = up->wired;
 	if(wm)
 		procwired(p, wm->machno);
+	p->color = up->color;
 	ready(p);
 	sched();
 
@@ -264,6 +266,38 @@ typedef struct {
 } Hdr;
 
 static void
+donate(Proc *p)
+{
+	static int coreno;
+	int core, i;
+	Mach *mp;
+	extern int scheddonates;
+
+	if(!scheddonates || p->wired)
+		return;
+
+	for(i = 0; i < MACHMAX; i++){
+		core = i;
+		mp = MACHP(core);
+		if(mp == m || mp == nil || mp->online == 0 || mp->sch == nil)
+			continue;
+		if(mp->nixtype != NIXTC || mp->sch == m->sch)
+			continue;
+		if(mp->sch->nrdy > m->sch->nrdy)/* more loaded than us, ignore */
+			continue;
+		p->mp = mp;
+		p->color = corecolor(mp->machno);
+		if(p->color < 0)
+			p->color = 0;
+		coreno = core + 1;
+iprint("donate %d -> %d\n", m->machno, mp->machno);
+		sched();
+		return;
+	}
+	/* no core preferred, don't change the process color */
+}
+
+static void
 execac(Ar0* ar0, int core, char *ufile, char **argv)
 {
 	Hdr hdr;
@@ -278,6 +312,7 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 	long hdrsz, magic, textsz, datasz, bsssz;
 	uintptr textlim, datalim, bsslim, entry, stack;
 	Mach *mp;
+	static int colorgen;
 
 	/*
 	 * Open the file, remembering the final element and the full name.
@@ -385,6 +420,11 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 	|| datalim < textlim || bsslim < datalim)
 		error(Ebadexec);
 
+	if(core != 0)
+		up->color = corecolor(core);
+	else
+		donate(up);
+
 	/*
 	 * The new stack is created in ESEG, temporarily mapped elsewhere.
 	 * The stack contains, in descending address order:
@@ -407,13 +447,7 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 		nexterror();
 	}
 	up->seg[ESEG] = newseg(SG_STACK, TSTKTOP-USTKSIZE, USTKSIZE/BIGPGSZ);
-	/*
-	 * The color for the new stack determines the colors for the new segments.
-	 * Even a cached text image changes its color to that of the stack.
-	 * This will make new pages allocated for these segments prefer the color
-	 * for the core where the program will run.
-	 */
-	// up->seg[ESEG]->color = acpicorecolor(core);
+	up->seg[ESEG]->color = up->color;
 
 	/*
 	 * Stack is a pointer into the temporary stack
@@ -561,10 +595,9 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 	/* Text.  Shared. Attaches to cache image if possible
 	 * but prepaged if core > 0.
 	 */
-	img = attachimage(SG_TEXT|SG_RONLY, chan, UTZERO, (textlim-UTZERO)/BIGPGSZ);
+	img = attachimage(SG_TEXT|SG_RONLY, chan, up->color, UTZERO, (textlim-UTZERO)/BIGPGSZ);
 	s = img->s;
 	up->seg[TSEG] = s;
-	s->color = up->seg[ESEG]->color;
 	s->flushme = 1;
 	s->fstart = 0;
 	s->flen = hdrsz+textsz;
@@ -573,7 +606,7 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 	/* Data. Shared. */
 	s = newseg(SG_DATA, textlim, (datalim-textlim)/BIGPGSZ);
 	up->seg[DSEG] = s;
-	s->color = up->seg[ESEG]->color;
+	s->color = up->color;
 
 	/* Attached by hand */
 	incref(img);
@@ -583,7 +616,7 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 
 	/* BSS. Zero fill on demand for TS */
 	up->seg[BSEG] = newseg(SG_BSS, datalim, (bsslim-datalim)/BIGPGSZ);
-	up->seg[BSEG]->color= up->seg[ESEG]->color;
+	up->seg[BSEG]->color= up->color;
 
 	/*
 	 * Move the stack
@@ -954,6 +987,8 @@ sysrendezvous(Ar0* ar0, va_list list)
 	up->rendhash = *l;
 	*l = up;
 	up->state = Rendezvous;
+	if(up->trace)
+		proctrace(up, SLock, 0);
 	unlock(up->rgrp);
 
 	sched();

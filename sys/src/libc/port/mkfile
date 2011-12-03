@@ -37,6 +37,7 @@ CFILES=\
 	lock.c\
 	log.c\
 	lrand.c\
+#	qmalloc.c\
 	malloc.c\
 	memccpy.c\
 	memchr.c\

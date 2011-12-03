@@ -39,14 +39,23 @@ typedef struct Vctl Vctl;
 /*
  *  machine dependent definitions used by ../port/portdat.h
  */
+
+
 struct Lock
 {
-	u32int	key;
+	union{
+		u64int	key;
+		struct{
+			u32int ticket;
+			u32int users;
+		};
+	};
 	int	isilock;
 	Mpl	pl;
 	uintptr	pc;
 	Proc*	p;
 	Mach*	m;
+	uvlong	lockcycles;
 };
 
 struct Label
@@ -113,7 +122,6 @@ struct Conf
 	usize	upages;		/* user page pool */
 	ulong	copymode;	/* 0 is copy on write, 1 is copy on reference */
 	ulong	ialloc;		/* max interrupt time allocation in bytes */
-	ulong	pipeqsize;	/* size in bytes of pipe queues */
 	ulong	nimage;		/* number of page cache image headers */
 	ulong	nswap;		/* number of swap pages */
 	int	nswppo;		/* max # of pageouts per segment pass */
@@ -271,19 +279,22 @@ struct Mach
 	int	mmuflush;		/* make current proc flush it's mmu state */
 	int	ilockdepth;
 	Perf	perf;			/* performance counters */
-
+	int	inidle;			/* profiling */
 	int	lastintr;
 
 	Lock	apictimerlock;
 	uvlong	cyclefreq;		/* Frequency of user readable cycle counter */
 	vlong	cpuhz;
 	int	cpumhz;
+	u64int	rdtsc;
 
-	MFPU;
-	MCPU;
+	Sched*	sch;			/* scheduler used */
 
 	Lock	pmclock;
 	PmcCtr	pmc[PmcMaxCtrs];
+
+	MFPU;
+	MCPU;
 
 	NIX;
 };
@@ -325,6 +336,7 @@ struct Sys {
 			uintptr	vmunused;	/* 1st unused va */
 			uintptr	vmunmapped;	/* 1st unmapped va */
 			uintptr	vmend;		/* 1st unusable va */
+			u64int	epoch;		/* crude time synchronisation */
 		};
 		uchar	syspage[4*KiB];
 	};

@@ -17,10 +17,6 @@ enum {
 #define DPRINT	if(Dontprint){}else print
 
 static long	now;	/* Low order 32 bits of time in µs */
-extern ulong	delayedscheds;
-extern Schedq	runq[Nrq];
-extern int	nrdy;
-extern ulong	runvec;
 
 /* Statistics stuff */
 ulong		nilcount;
@@ -137,7 +133,6 @@ deadlineintr(Ureg*, Timer *t)
 	/* Proc reached deadline */
 	extern int panicking;
 	Proc *p;
-	void (*pt)(Proc*, int, vlong);
 
 	if(panicking || active.exiting)
 		return;
@@ -153,10 +148,11 @@ deadlineintr(Ureg*, Timer *t)
 	 * returns to user space
 	 */
 	if(p == up){
-		if(up->trace && (pt = proctrace))
-			pt(up, SInts, 0);
+		if(up->trace)
+			proctrace(up, SInts, 0);
 		up->delaysched++;
- 		delayedscheds++;
+		assert(m->sch);
+ 		m->sch->delayedscheds++;
 	}
 }
 
@@ -165,7 +161,6 @@ release(Proc *p)
 {
 	/* Called with edflock held */
 	Edf *e;
-	void (*pt)(Proc*, int, vlong);
 	long n;
 	vlong nowns;
 
@@ -196,10 +191,10 @@ release(Proc *p)
 		e->S = e->C;
 		DPRINT("%lud release %d[%s], r=%lud, d=%lud, t=%lud, S=%lud\n",
 			now, p->pid, statename[p->state], e->r, e->d, e->t, e->S);
-		if(pt = proctrace){
+		if(p->trace){
 			nowns = todget(nil);
-			pt(p, SRelease, nowns);
-			pt(p, SDeadline, nowns + 1000LL*e->D);
+			proctrace(p, SRelease, nowns);
+			proctrace(p, SDeadline, nowns + 1000LL*e->D);
 		}
 	}else{
 		DPRINT("%lud release %d[%s], too late t=%lud, called from %#p\n",
@@ -212,6 +207,7 @@ releaseintr(Ureg*, Timer *t)
 {
 	Proc *p;
 	extern int panicking;
+	Sched *sch;
 	Schedq *rq;
 
 	if(panicking || active.exiting)
@@ -220,6 +216,7 @@ releaseintr(Ureg*, Timer *t)
 	p = t->ta;
 	if((edflock(p)) == nil)
 		return;
+	sch = procsched(p);
 	DPRINT("%lud releaseintr %d[%s]\n", now, p->pid, statename[p->state]);
 	switch(p->state){
 	default:
@@ -227,8 +224,8 @@ releaseintr(Ureg*, Timer *t)
 		return;
 	case Ready:
 		/* remove proc from current runq */
-		rq = &runq[p->priority];
-		if(dequeueproc(rq, p) != p){
+		rq = &sch->runq[p->priority];
+		if(dequeueproc(sch, rq, p) != p){
 			DPRINT("releaseintr: can't find proc or lock race\n");
 			release(p);	/* It'll start best effort */
 			edfunlock();
@@ -245,7 +242,7 @@ releaseintr(Ureg*, Timer *t)
 		ready(p);
 		if(up){
 			up->delaysched++;
-			delayedscheds++;
+			sch->delayedscheds++;
 		}
 		return;
 	case Running:
@@ -260,7 +257,7 @@ releaseintr(Ureg*, Timer *t)
 		p->trend = nil;
 		if(up){
 			up->delaysched++;
-			delayedscheds++;
+			sch->delayedscheds++;
 		}
 		return;
 	}
@@ -272,7 +269,6 @@ edfrecord(Proc *p)
 {
 	long used;
 	Edf *e;
-	void (*pt)(Proc*, int, vlong);
 
 	if((e = edflock(p)) == nil)
 		return;
@@ -283,8 +279,8 @@ edfrecord(Proc *p)
 		e->extraused += used;
 	if(e->S > 0){
 		if(e->S <= used){
-			if(pt = proctrace)
-				pt(p, SSlice, 0);
+			if(p->trace)
+				proctrace(p, SSlice, 0);
 			DPRINT("%lud edfrecord slice used up\n", now);
 			e->d = now;
 			e->S = 0;
@@ -299,7 +295,6 @@ void
 edfrun(Proc *p, int edfpri)
 {
 	Edf *e;
-	void (*pt)(Proc*, int, vlong);
 	long tns;
 
 	e = p->edf;
@@ -311,7 +306,8 @@ edfrun(Proc *p, int edfpri)
 			 * deschedule forthwith
 			 */
 			p->delaysched++;
- 			delayedscheds++;
+ 			assert(m->sch);
+			m->sch->delayedscheds++;
 			e->s = now;
 			return;
 		}
@@ -325,8 +321,8 @@ edfrun(Proc *p, int edfpri)
 		}else{
 			DPRINT("v");
 		}
-		if(p->trace && (pt = proctrace))
-			pt(p, SInte, todget(nil) + e->tns);
+		if(p->trace)
+			proctrace(p, SInte, todget(nil) + e->tns);
 		e->tmode = Trelative;
 		e->tf = deadlineintr;
 		e->ta = p;
@@ -344,7 +340,6 @@ edfadmit(Proc *p)
 	Edf *e;
 	int i;
 	Proc *r;
-	void (*pt)(Proc*, int, vlong);
 	long tns;
 
 	e = p->edf;
@@ -372,8 +367,8 @@ edfadmit(Proc *p)
 
 	edflock(p);
 
-	if(p->trace && (pt = proctrace))
-		pt(p, SAdmit, 0);
+	if(p->trace)
+		proctrace(p, SAdmit, 0);
 
 	/* Look for another proc with the same period to synchronize to */
 	for(i=0; (r = psincref(i)) != nil; i++) {
@@ -439,12 +434,11 @@ void
 edfstop(Proc *p)
 {
 	Edf *e;
-	void (*pt)(Proc*, int, vlong);
 
 	if(e = edflock(p)){
 		DPRINT("%lud edfstop %d[%s]\n", now, p->pid, statename[p->state]);
-		if(p->trace && (pt = proctrace))
-			pt(p, SExpel, 0);
+		if(p->trace)
+			proctrace(p, SExpel, 0);
 		e->flags &= ~Admitted;
 		if(e->tt)
 			timerdel(e);
@@ -464,13 +458,12 @@ edfyield(void)
 {
 	/* sleep until next release */
 	Edf *e;
-	void (*pt)(Proc*, int, vlong);
 	long n;
 
 	if((e = edflock(up)) == nil)
 		return;
-	if(up->trace && (pt = proctrace))
-		pt(up, SYield, 0);
+	if(up->trace)
+		proctrace(up, SYield, 0);
 	if((n = now - e->t) > 0){
 		if(n < e->T)
 			e->t += e->T;
@@ -500,9 +493,9 @@ int
 edfready(Proc *p)
 {
 	Edf *e;
+	Sched *sch;
 	Schedq *rq;
 	Proc *l, *pp;
-	void (*pt)(Proc*, int, vlong);
 	long n;
 
 	if((e = edflock(p)) == nil)
@@ -563,9 +556,10 @@ edfready(Proc *p)
 	}
 	edfunlock();
 	DPRINT("^");
-	rq = &runq[PriEdf];
+	sch = procsched(p);
+	rq = &sch->runq[PriEdf];
 	/* insert in queue in earliest deadline order */
-	lock(runq);
+	lock(sch);
 	l = nil;
 	for(pp = rq->head; pp; pp = pp->rnext){
 		if(pp->edf->d > e->d)
@@ -580,14 +574,14 @@ edfready(Proc *p)
 	if(pp == nil)
 		rq->tail = p;
 	rq->n++;
-	nrdy++;
-	runvec |= 1 << PriEdf;
+	sch->nrdy++;
+	sch->runvec |= 1 << PriEdf;
 	p->priority = PriEdf;
 	p->readytime = m->ticks;
 	p->state = Ready;
-	unlock(runq);
-	if(p->trace && (pt = proctrace))
-		pt(p, SReady, 0);
+	unlock(sch);
+	if(p->trace)
+		proctrace(p, SReady, 0);
 	return 1;
 }
 

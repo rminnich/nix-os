@@ -134,7 +134,6 @@ amd64 +dev
 	i8254
 	i8259
 	kbd
-	linuxsyscall
 	main
 	map
 	memory
@@ -179,7 +178,6 @@ port
 	syssem
 	syszio
 	nixcall
-	linuxsysemu
 
 #
 #dir
