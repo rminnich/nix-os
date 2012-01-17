@@ -7,10 +7,7 @@
 #include "init.h"
 #include "io.h"
 
-enum
-{
-	InitialTCs = 32	/* default # of TCs */
-};
+static int	initialTCs = 32;	/* default # of TCs */
 
 Conf conf;			/* XXX - must go - gag */
 
@@ -74,6 +71,11 @@ options(int argc, char* argv[])
 	vflag = dbgflg['v'];
 	if(argc > 0){
 		maxcores = strtol(argv[0], 0, 0);
+		argc--;
+		argv++;
+	}
+	if(argc > 0){
+		initialTCs = strtol(argv[0], 0, 0);
 		//argc--;
 		//argv++;
 	}
@@ -206,7 +208,7 @@ nixsquids(void)
 			 */
 			mp->icc = mallocalign(sizeof *m->icc, ICCLNSZ, 0, 0);
 			mp->icc->fn = nil;
-			if(i < InitialTCs){
+			if(i < initialTCs){
 				conf.nmach++;
 				mp->nixtype = NIXTC;
 			}
@@ -338,6 +340,7 @@ main(u32int ax, u32int bx)
 	 */
 	i8259init(32);
 
+
 	procinit0();
 	mpsinit(maxcores);
 	apiconline();
@@ -355,6 +358,7 @@ main(u32int ax, u32int bx)
 	userinit();
 	nixsquids();
 testiccs();	
+print("schedinit...\n");
 	schedinit();
 }
 
