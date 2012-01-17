@@ -40,10 +40,16 @@ Clears the configuration for the counter disabling any possible
 feature it has.
 .TP
 .B user
-The counter only runs when the processor is in user space.
+and
+.B nouser
+Enable and or disable whether the counter only
+runs when the processor is in user space.
 .TP
 .B os
-The counter only runs when the processor is in the kernel.
+and
+.B noos
+Enable and or disable whether the counter only
+runs when the processor is in the kernel.
 .TP
 .BI "set configuration
 Sets the counter configuration. The detail of what the configuration
@@ -80,17 +86,19 @@ Configure the counter 0 to count L2 misses in the kernel.
 		L2 ITLB miss
 		DRAM access
 		L3 miss
-	% echo reset > /dev/core0000/ctr00ctl
-	% echo kernel > /dev/core0000/ctr00ctl
-	% echo set L2 miss > /dev/core0000/ctr00ctl
-	% echo enable > /dev/core0000/ctr00ctl
-	% cat /dev/core0000/ctr00
+	echo reset > /dev/core0001/ctr00ctl
+	echo os > /dev/core0001/ctr00ctl
+	echo nouser > /dev/core0001/ctr00ctl
+	echo set L2 miss > /dev/core0001/ctr00ctl
+	echo 0 > /dev/core0001/ctr00
+	echo enable > /dev/core0001/ctr00ctl
+	cat /dev/core0001/ctr00
 		0x00000000000003e5
 	%
 .EE
 .SH "SEE ALSO
 .IR pmc (2)
 .SH SOURCE
-.B /sys/src/9/port/pmc.h
-.B /sys/src/9/port/devpmc.c
-.B /sys/src/9/k8/pmcio.c
+.B /sys/src/nix/port/pmc.h
+.B /sys/src/nix/port/devpmc.c
+.B /sys/src/nix/k10/pmcio.c

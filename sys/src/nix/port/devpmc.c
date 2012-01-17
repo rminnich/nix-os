@@ -150,6 +150,7 @@ pmcgen(Chan *c, char *name, Dirtab*, int, int s, Dir *dp)
 	case Qctr:
 		return devgen(c, name, pmctab, npmctab, s, dp);
 	case Qcore:
+		c->aux = (void *)PMCID(c->qid.path);		/* core no */
 		return devgen(c, name, pmctab, npmctab, s, dp);
 	default:
 		if(s != 0)
@@ -180,8 +181,6 @@ pmcgen(Chan *c, char *name, Dirtab*, int, int s, Dir *dp)
 static Walkqid*
 pmcwalk(Chan *c, Chan *nc, char **name, int nname)
 {
-	if(PMCTYPE(c->qid.path) == Qcore)
-		c->aux = (void *)PMCID(c->qid.path);		/* core no */
 	return devwalk(c, nc, name, nname, nil, 0, pmcgen);
 }
 
@@ -230,7 +229,6 @@ pmcread(Chan *c, void *a, long n, vlong offset)
 		free(s);
 		nexterror();
 	}
-
 	coreno = (u64int)c->aux;
 	p.coreno = coreno;
 	switch(type){
@@ -262,6 +260,8 @@ enum{
 	Disable,
 	User,
 	Os,
+	NoUser,
+	NoOs,
 	Reset,
 	Debug,
 };
@@ -272,6 +272,8 @@ static Cmdtab pmcctlmsg[] =
 	Disable,	"disable",	0,
 	User,		"user",		0,
 	Os,		"os",		0,
+	NoUser,		"nouser",		0,
+	NoOs,		"noos",		0,
 	Reset,		"reset",	0,
 	Debug, 		"debug",	0,
 };
@@ -386,6 +388,12 @@ pmcwrite(Chan *c, void *a, long n, vlong)
 			break;
 		case Os:
 			p.os = 1;
+			break;
+		case NoUser:
+			p.user = 0;
+			break;
+		case NoOs:
+			p.os = 0;
 			break;
 		case Reset:
 			p.reset = 1;

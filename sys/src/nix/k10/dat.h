@@ -18,6 +18,7 @@ typedef struct Pcidev Pcidev;
 typedef struct PFPU PFPU;
 typedef struct PmcCtr PmcCtr;
 typedef struct PmcCtl PmcCtl;
+typedef struct PmcWait PmcWait;
 typedef struct PMMU PMMU;
 typedef struct PNOTIFY PNOTIFY;
 typedef u64int PTE;
@@ -44,7 +45,7 @@ typedef struct Vctl Vctl;
 struct Lock
 {
 	union{
-		u64int	key;
+		u64int key;
 		struct{
 			u32int ticket;
 			u32int users;
@@ -217,9 +218,14 @@ struct PmcCtl {
 	int reset;
 };
 
+struct PmcWait{
+	Rendez r;
+	PmcWait*	next;
+};
+
 struct PmcCtr{
 	int stale;
-	Rendez r;
+	PmcWait *wq;
 	u64int ctr;
 	int ctrset;
 	PmcCtl;

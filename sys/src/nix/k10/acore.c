@@ -150,7 +150,7 @@ actrapret(void)
 }
 
 /*
- * Entered in AP core context, upon traps and system calls.
+ * Entered in AP core context, upon traps (system calls go through acsyscall)
  * using up->dbgreg means cores MUST be homogeneous.
  *
  * BUG: We should setup some trapenable() mechanism for the AC,
@@ -240,12 +240,14 @@ acsyscall(void)
 	 */
 	DBG("acsyscall: cpu%d\n", m->machno);
 
+	_pmcupdate(m);
 	p = m->proc;
 	p->actime1 = fastticks(nil);
 	m->syscall++;	/* would also count it in the TS core */
 	m->icc->rc = ICCSYSCALL;
 	m->cr2 = cr2get();
 	fpuprocsave(p);
+	_pmcupdate(m);
 	mfence();
 	m->icc->fn = nil;
 	ready(p);

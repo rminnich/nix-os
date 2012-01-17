@@ -12,7 +12,8 @@
 #include	"../port/pmc.h"
 
 
-/* non portable, for intel will be CPUID.0AH.EDX */
+/* non portable, for intel will be CPUID.0AH.EDX 
+ */
 
 enum {
 	PeNreg		= 4,	/* Number of Pe/Pct regs */
@@ -50,7 +51,7 @@ pmcuserenab(int enable)
 }
 
 PmcCtlCtrId pmcids[] = {
-	{"locked instr", "0x024 0x0"},
+	{"locked instr", "0x024 0x1"},
 	{"SMI intr", "0x02b 0"},
 	{"data access", "0x040 0x0"},
 	{"data miss", "0x041 0x0"},
@@ -223,7 +224,7 @@ setctr(u64int v, u32int regno)
 	return 0;
 }
 
-int
+static int
 notstale(void *x)
 {
 	PmcCtr *p;
@@ -231,26 +232,57 @@ notstale(void *x)
 	return !p->stale;
 }
 
+/*
+ *	As it is now, it sends an ipi if the proccessor is an ocuppied AC or a TC
+ *	to update the counter, in case the processor is idle. Probably not needed for TC
+ *	as it will be updated every time we cross the kernel boundary, but we are doing
+ *	it now just in case it is idle or not being updated
+ *	NB: this function releases the ilock
+ */
+static void
+waitnotstale(Mach *mp, PmcCtr *p)
+{
+	PmcWait *w;
+
+	w = malloc(sizeof (PmcWait));
+	w->next = p->wq;
+	p->wq = w;
+	iunlock(&mp->pmclock);
+	apicipi(mp->apicno);
+	sleep(&w->r, notstale, p);
+	free(w);
+}
+
 u64int
 pmcgetctr(u32int coreno, u32int regno)
 {
 	PmcCtr *p;
 	Mach *mp;
+	u64int v;
 
-	if(coreno == m->machno)
-		return getctr(regno);
+	if(coreno == m->machno){
+		v = getctr(regno);
+		if (pmcdebug) {
+			print("int getctr[%#ux, %#ux] = %#llux\n", regno, coreno, v);
+		}
+		return v;
+	}
 
 	mp = sys->machptr[coreno];
 	p = &mp->pmc[regno];
-	ilock(&m->pmclock);
+	ilock(&mp->pmclock);
 	p->ctrset |= PmcGet;
 	p->stale = 1;
-	iunlock(&m->pmclock);
 	if(mp->proc != nil || mp->nixtype != NIXAC){
-		apicipi(mp->apicno);
-		sleep(&p->r, notstale, p);
+		waitnotstale(mp, p);
+		ilock(&mp->pmclock);
 	}
-	return p->ctr;
+	v = p->ctr;
+	iunlock(&mp->pmclock);
+	if (pmcdebug) {
+		print("ext getctr[%#ux, %#ux] = %#llux\n", regno, coreno, v);
+	}
+	return v;
 }
 
 int
@@ -259,20 +291,26 @@ pmcsetctr(u32int coreno, u64int v, u32int regno)
 	PmcCtr *p;
 	Mach *mp;
 
-	if(coreno == m->machno)
+	if(coreno == m->machno){
+		if (pmcdebug) {
+			print("int getctr[%#ux, %#ux] = %#llux\n", regno, coreno, v);
+		}
 		return setctr(v, regno);
+	}
 
 	mp = sys->machptr[coreno];
 	p = &mp->pmc[regno];
-	ilock(&m->pmclock);
+	if (pmcdebug) {
+		print("ext setctr[%#ux, %#ux] = %#llux\n", regno, coreno, v);
+	}
+	ilock(&mp->pmclock);
 	p->ctr = v;
 	p->ctrset |= PmcSet;
 	p->stale = 1;
-	iunlock(&m->pmclock);
-	if(mp->proc != nil || mp->nixtype != NIXAC){
-		apicipi(mp->apicno);
-		sleep(&p->r, notstale, p);
-	}
+	if(mp->proc != nil || mp->nixtype != NIXAC)
+		waitnotstale(mp, p);
+	else
+		iunlock(&mp->pmclock);
 	return 0;
 }
 
@@ -302,15 +340,14 @@ pmcsetctl(u32int coreno, PmcCtl *pctl, u32int regno)
 
 	mp = sys->machptr[coreno];
 	p = &mp->pmc[regno];
-	ilock(&m->pmclock);
+	ilock(&mp->pmclock);
 	ctl2ctl(&p->PmcCtl, pctl);
 	p->ctlset |= PmcSet;
 	p->stale = 1;
-	iunlock(&m->pmclock);
-	if(mp->proc != nil || mp->nixtype != NIXAC){
-		apicipi(mp->apicno);
-		sleep(&p->r, notstale, p);
-	}
+	if(mp->proc != nil || mp->nixtype != NIXAC)
+		waitnotstale(mp, p);
+	else
+		iunlock(&mp->pmclock);
 	return 0;
 }
 
@@ -326,17 +363,15 @@ pmcgetctl(u32int coreno, PmcCtl *pctl, u32int regno)
 	mp = sys->machptr[coreno];
 	p = &mp->pmc[regno];
 
-	ilock(&m->pmclock);
+	ilock(&mp->pmclock);
 	p->ctlset |= PmcGet;
 	p->stale = 1;
-	iunlock(&m->pmclock);
 	if(mp->proc != nil || mp->nixtype != NIXAC){
-		apicipi(mp->apicno);
-		sleep(&p->r, notstale, p);
+		waitnotstale(mp, p);
+		ilock(&mp->pmclock);
 	}
-	ilock(&m->pmclock);
 	memmove(pctl, &p->PmcCtl, sizeof(PmcCtl));
-	iunlock(&m->pmclock);
+	iunlock(&mp->pmclock);
 	return 0;
 }
 
@@ -345,6 +380,7 @@ pmcupdate(Mach *m)
 {
 	PmcCtr *p;
 	int i, maxct, wk;
+	PmcWait *w;
 
 	maxct = pmcnregs();
 	for (i = 0; i < maxct; i++) {
@@ -360,9 +396,13 @@ pmcupdate(Mach *m)
 		p->ctlset = PmcIgn;
 		wk = p->stale;
 		p->stale = 0;
+		if(wk){
+			for(w = p->wq; w != nil; w = w->next){
+				p->wq = w->next;
+				wakeup(&w->r);
+			}
+		}
 		iunlock(&m->pmclock);
-		if(wk)
-			wakeup(&p->r);
 	}
 }
 
