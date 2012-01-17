@@ -359,10 +359,30 @@ trap(Ureg* ureg)
 				preempted();
 		}
 	}
-	else if(vno <= nelem(excname) && user){
+	else if(vno < nelem(excname) && user){
 		spllo();
 		sprint(buf, "sys: trap: %s", excname[vno]);
 		postnote(up, 1, buf, NDebug);
+	}
+	else if(vno >= VectorPIC && vno != VectorSYSCALL){
+		/*
+		 * An unknown interrupt.
+		 * Check for a default IRQ7. This can happen when
+		 * the IRQ input goes away before the acknowledge.
+		 * In this case, a 'default IRQ7' is generated, but
+		 * the corresponding bit in the ISR isn't set.
+		 * In fact, just ignore all such interrupts.
+		 */
+
+		/* clear the interrupt */
+		i8259isr(vno);
+
+		iprint("cpu%d: spurious interrupt %d, last %d\n",
+			m->machno, vno, m->lastintr);
+
+		if(user)
+			kexit(ureg);
+		return;
 	}
 	else{
 		if(vno == VectorNMI){
