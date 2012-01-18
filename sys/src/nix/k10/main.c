@@ -7,7 +7,6 @@
 #include "init.h"
 #include "io.h"
 
-static int	initialTCs = 32;	/* default # of TCs */
 
 Conf conf;			/* XXX - must go - gag */
 
@@ -32,6 +31,7 @@ static char oargb[128];
 static int oargblen;
 
 static int maxcores = 1024;	/* max # of cores given as an argument */
+static int numtcs = 16;		/* initial # of TCs */
 
 char dbgflg[256];
 static int vflag = 0;
@@ -75,7 +75,7 @@ options(int argc, char* argv[])
 		argv++;
 	}
 	if(argc > 0){
-		initialTCs = strtol(argv[0], 0, 0);
+		numtcs = strtol(argv[0], 0, 0);
 		//argc--;
 		//argv++;
 	}
@@ -208,7 +208,7 @@ nixsquids(void)
 			 */
 			mp->icc = mallocalign(sizeof *m->icc, ICCLNSZ, 0, 0);
 			mp->icc->fn = nil;
-			if(i < initialTCs){
+			if(i < numtcs){
 				conf.nmach++;
 				mp->nixtype = NIXTC;
 			}
