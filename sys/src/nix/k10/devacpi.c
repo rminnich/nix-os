@@ -609,7 +609,8 @@ acpifadt(uchar *p, int)
 		loadfacs(fp->xfacs);
 	else
 		loadfacs(fp->facs);
-	if(fp->xdsdt != 0)
+
+	if(fp->xdsdt == ((u64int)fp->dsdt)) /* acpica */
 		loaddsdt(fp->xdsdt);
 	else
 		loaddsdt(fp->dsdt);
