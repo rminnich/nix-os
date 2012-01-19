@@ -64,7 +64,11 @@ cgacursor(void)
 	cga[cgapos+1] = Attr;
 }
 
-static void
+/*
+ * extern, so we could use it to debug things like
+ * lock() if necessary.
+ */
+void
 cgaputc(int c)
 {
 	int i;
@@ -101,6 +105,27 @@ cgaputc(int c)
 		cgapos -= Width;
 	}
 	cgacursor();
+}
+
+/*
+ * debug
+ */
+void
+cgaprinthex(uintptr x)
+{
+	char str[30];
+	char *s;
+	static char dig[] = "0123456789abcdef";
+
+	str[29] = 0;
+	s = &str[29];
+	while(x != 0){
+		*--s = dig[x&0xF];
+		x >>= 4;
+	}
+	while(*s != 0)
+		cgaputc(*s++);
+	cgaputc('\n');
 }
 
 void

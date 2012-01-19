@@ -44,13 +44,7 @@ typedef struct Vctl Vctl;
 
 struct Lock
 {
-	union{
-		u64int key;
-		struct{
-			u32int ticket;
-			u32int users;
-		};
-	};
+	u32int	key;
 	int	isilock;
 	Mpl	pl;
 	uintptr	pc;
