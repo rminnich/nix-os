@@ -1,5 +1,5 @@
 # root
-mount -aC #s/boot /root $rootspec
+mount -acC #s/boot /root $rootspec
 bind -a $rootdir /
 bind -c $rootdir/mnt /mnt
 
