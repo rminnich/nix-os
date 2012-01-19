@@ -1,0 +1,15 @@
+#!/bin/rc
+
+rfork ne
+
+# import rc functions popular among scripts, e.g. fail
+#
+. ../tools
+
+# How much time does it take to sleep 2?
+../Time 'sleep 2'
+
+# What's the value for measures taken from the kernel?
+echo '#cat /dev/debug' 
+cat /dev/debug
+

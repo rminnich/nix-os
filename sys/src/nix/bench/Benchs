@@ -1,0 +1,11 @@
+#!/bin/rc
+
+# change the boot sequence to run benchs.
+
+# remove stale state from benchs if given -a
+if(~ $#* 1 && ~ $1 -a)
+	rm -f [0-9]*/^(koutput output FAIL) k[0-9]*/^(koutput output FAIL)
+
+# arrange for them to run after rebooting
+cp runbenchs /cfg/$sysname/runbenchs 
+reboot

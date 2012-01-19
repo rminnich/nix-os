@@ -1,0 +1,53 @@
+This is performance measurement for nix.
+
+Each directory named with a number  represents a single measure to be taken.
+(e.g., 1/ 2/ ...)
+A bench directory may be also named k1, k2, k....
+All k benchs run affter all std. benchs. They are meant to install ad-hoc
+kernels for measurement.
+
+The script actually running the benchs is runbenchs, which should be run from
+cpustart during the machine boot process only if it's found at /cfg/$sysname
+That is, include
+	test -x /cfg/$sysname/runbenchs && /cfg/$sysname/runbenchs
+in your  cpustart file.
+
+It is not meant to start the bench sequence by hand.
+To (re)run all the benchmarks, you should run ./Benchs instead.
+
+See 1/ for a template. Copy it to your own and tweak it at will.
+
+To start benchs, run the script ./Benchs in clu, which would
+change the boot sequence such that the machine starts to run benchs
+(perhaps installing different kernels and rebooting) until all ones
+have been run or one has failed.
+
+Each directory must contain:
+
+- kern:	a script used to compile and install a kernel.
+ if no such file is found, no new kernel is installed. the current one
+ is used. Otherwise, the indicated kernel is installed and the machine
+ reboots using this kernel.
+
+- runbench: a script used to run a bench. This is mandatory.
+
+- whichever other files must be available for the benchs to run.
+
+Benchs generate within each test directory whichever files they want.
+By convention, repeated times measured get into TIMES, and debug counters
+get into COUNTERS. The last line in TIMES reports the average.
+Repeated timing is done by Time. See the bench in ./1 as a template.
+
+
+As a result of running an to control when to run them, these files are
+generated:
+- koutput:	a file keeping the output for a kern that did run
+- output:	a file keeping the output for a test that did run
+- FAIL:		an empty file, reporting that a test did fail.
+
+
+BEWARE that if you install a kernel for a bench then that kernel is used
+for all following ones.
+As a convention, benchs installing a kernel should be named k0, k1, ...
+test 1 installs the std kernel, so that all benchs use the regular kernel.
+
