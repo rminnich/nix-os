@@ -186,7 +186,7 @@ trapinit(void)
 	trapenable(VectorBPT, debugbpt, 0, "#BP");
 	trapenable(VectorPF, faultamd64, 0, "#PF");
 	trapenable(Vector2F, doublefault, 0, "#DF");
-	trapenable(IdtIPI, expected, 0, "#IPI");
+	intrenable(IdtIPI, expected, 0, BUSUNKNOWN, "#IPI");
 	trapenable(Vector15, unexpected, 0, "#15");
 	nmienable();
 
