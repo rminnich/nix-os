@@ -64,6 +64,7 @@ extern void sysnixsyscall(Ar0*, va_list);
 extern void sysziopread(Ar0*, va_list);
 extern void sysziopwrite(Ar0*, va_list);
 extern void sysziofree(Ar0*, va_list);
+extern void systsemacquire(Ar0*, va_list);
 struct {
 	char*	n;
 	void (*f)(Ar0*, va_list);
@@ -127,6 +128,7 @@ struct {
 	[ZIOPREAD]	{ "Ziopread", sysziopread, { .l = -1 } },
 	[ZIOPWRITE]	{ "Ziopwrite", sysziopwrite, { .l = -1 } },
 	[ZIOFREE]	{ "Ziofree", sysziofree, { .i = -1 } },
+	[TSEMACQUIRE]	{ "Tsemacquire", systsemacquire, { .i = -1 } },
 };
 
 int nsyscall = nelem(systab);
