@@ -32,11 +32,11 @@ struct Qlist {
 };
 
 enum {
-	Unitsz		= sizeof(Header),
+	Unitsz		= sizeof(Header),	/* 16 bytes on amd64 */
 };
 
 #define	NUNITS(n)	(HOWMANY(n, Unitsz) + 1)
-#define	NQUICK		((512/Unitsz)+1)
+#define	NQUICK		((512/Unitsz)+1)	/* 33 on amd64 */
 
 static	Qlist	quicklist[NQUICK+1];
 static	Header	misclist;
@@ -48,8 +48,45 @@ static	Header	*tailptr;
 static	Header	checkval;
 static	int	morecore(unsigned);
 
+enum
+{
+	QSmalign = 0,
+	QSmalignquick,
+	QSmalignrover,
+	QSmalignfront,
+	QSmalignback,
+	QSmaligntail,
+	QSmalignnottail,
+	QSmalloc,
+	QSmallocrover,
+	QSmalloctail,
+	QSfree,
+	QSfreetail,
+	QSfreequick,
+	QSfreenext,
+	QSfreeprev,
+	QSmax
+};
+
 static	void	qfreeinternal(void*);
-static	int	qstats[32];
+static	int	qstats[QSmax];
+static	char*	qstatstr[QSmax] = {
+[QSmalign]		"malign",
+[QSmalignquick]	"malignquick",
+[QSmalignrover]	"malignrover",
+[QSmalignfront]	"malignfront",
+[QSmalignback]	"malignback",
+[QSmaligntail]	"maligntail",
+[QSmalignnottail]	"malignnottail",
+[QSmalloc]		"malloc",
+[QSmallocrover]	"mallocrover",
+[QSmalloctail]	"malloctail",
+[QSfree]		"free",
+[QSfreetail]	"freetail",
+[QSfreequick]	"freequick",
+[QSfreenext]	"freenext",
+[QSfreeprev]	"freeprev",
+};
 
 static	Lock		mainlock;
 
@@ -63,6 +100,18 @@ static	Lock		mainlock;
 
 #define ISPOWEROF2(x)	(/*((x) != 0) && */!((x) & ((x)-1)))
 #define ALIGNHDR(h, a)	(Header*)((((uintptr)(h))+((a)-1)) & ~((a)-1))
+
+
+/*
+ * Experiment: per-core quick lists.
+ * change quicklist to be
+ * static	Qlist	quicklist[MACHMAX][NQUICK+1];
+ * and define QLIST to be quicklist[m->machno]
+ *
+ * using quicklist[m->machno] runs out of memory soon.
+ * using quicklist[m->machno%4] yields times worse than using quicklist!
+ */
+#define QLIST	quicklist
 
 static void*
 qmallocalign(usize nbytes, uintptr align, long offset, usize span)
@@ -78,14 +127,14 @@ qmallocalign(usize nbytes, uintptr align, long offset, usize span)
 	if(!ISPOWEROF2(align) || align < sizeof(Header))
 		return nil;
 
-	qstats[5]++;
+	qstats[QSmalign]++;
 	nunits = NUNITS(nbytes);
 	if(nunits <= NQUICK){
 		/*
 		 * Look for a conveniently aligned block
 		 * on one of the quicklists.
 		 */
-		qlist = &quicklist[nunits];
+		qlist = &QLIST[nunits];
 		QLOCK(&qlist->lk);
 		pp = &qlist->first;
 		for(p = *pp; p != nil; p = p->s.next){
@@ -93,7 +142,7 @@ qmallocalign(usize nbytes, uintptr align, long offset, usize span)
 				*pp = p->s.next;
 				p->s.next = &checkval;
 				QUNLOCK(&qlist->lk);
-				qstats[6]++;
+				qstats[QSmalignquick]++;
 				return p+1;
 			}
 			pp = &p->s.next;
@@ -120,7 +169,7 @@ qmallocalign(usize nbytes, uintptr align, long offset, usize span)
 				 */
 				q->s.next = p->s.next;
 				rover = q;
-				qstats[7]++;
+				qstats[QSmalignrover]++;
 
 				/*
 				 * Free any runt in front of the alignment.
@@ -134,7 +183,7 @@ qmallocalign(usize nbytes, uintptr align, long offset, usize span)
 					r->s.size = n;
 					r->s.next = &checkval;
 					qfreeinternal(r+1);
-					qstats[8]++;
+					qstats[QSmalignfront]++;
 				}
 
 				/*
@@ -144,7 +193,7 @@ qmallocalign(usize nbytes, uintptr align, long offset, usize span)
 					r = p+nunits;
 					r->s.size = p->s.size - nunits;
 					r->s.next = &checkval;
-					qstats[9]++;
+					qstats[QSmalignback]++;
 					qfreeinternal(r+1);
 
 					p->s.size = nunits;
@@ -165,7 +214,7 @@ qmallocalign(usize nbytes, uintptr align, long offset, usize span)
 	q = ALIGNHDR(tailptr+1, align);
 	if(q == tailptr+1){
 		tailalloc(p, nunits);
-		qstats[10]++;
+		qstats[QSmaligntail]++;
 	}
 	else{
 		naligned = NUNITS(align)-1;
@@ -188,7 +237,7 @@ qmallocalign(usize nbytes, uintptr align, long offset, usize span)
 		n = q-tailptr - 1;
 		tailalloc(r, n);
 		tailalloc(p, nunits);
-		qstats[11]++;
+		qstats[QSmalignnottail]++;
 		qfreeinternal(r+1);
 	}
 	MUNLOCK;
@@ -208,10 +257,10 @@ qmalloc(usize nbytes)
 		return nil;
 //*/
 
-	qstats[0]++;
+	qstats[QSmalloc]++;
 	nunits = NUNITS(nbytes);
 	if(nunits <= NQUICK){
-		qlist = &quicklist[nunits];
+		qlist = &QLIST[nunits];
 		QLOCK(&qlist->lk);
 		if((p = qlist->first) != nil){
 			qlist->first = p->s.next;
@@ -238,7 +287,7 @@ qmalloc(usize nbytes)
 						q->s.next = p->s.next;
 					p->s.next = &checkval;
 					rover = q;
-					qstats[2]++;
+					qstats[QSmallocrover]++;
 					MUNLOCK;
 					return p+1;
 				}
@@ -250,7 +299,7 @@ qmalloc(usize nbytes)
 		}
 		tailsize += n;
 	}
-	qstats[3]++;
+	qstats[QSmalloctail]++;
 	tailalloc(p, nunits);
 	MUNLOCK;
 
@@ -266,7 +315,7 @@ qfreeinternal(void* ap)
 
 	if(ap == nil)
 		return;
-	qstats[16]++;
+	qstats[QSfree]++;
 
 	p = (Header*)ap - 1;
 	if((nunits = p->s.size) == 0 || p->s.next != &checkval)
@@ -275,16 +324,16 @@ qfreeinternal(void* ap)
 		/* block before tail */
 		tailptr = p;
 		tailsize += nunits;
-		qstats[18]++;
+		qstats[QSfreetail]++;
 		return;
 	}
 	if(nunits <= NQUICK) {
-		qlist = &quicklist[nunits];
+		qlist = &QLIST[nunits];
 		QLOCK(&qlist->lk);
 		p->s.next = qlist->first;
 		qlist->first = p;
 		QUNLOCK(&qlist->lk);
-		qstats[18]++;
+		qstats[QSfreequick]++;
 		return;
 	}
 	if((q = rover) == nil) {
@@ -298,13 +347,13 @@ qfreeinternal(void* ap)
 	if(p+p->s.size == q->s.next) {
 		p->s.size += q->s.next->s.size;
 		p->s.next = q->s.next->s.next;
-		qstats[19]++;
+		qstats[QSfreenext]++;
 	} else
 		p->s.next = q->s.next;
 	if(q+q->s.size == p) {
 		q->s.size += p->s.size;
 		q->s.next = p->s.next;
-		qstats[20]++;
+		qstats[QSfreeprev]++;
 	} else
 		q->s.next = p;
 	rover = q;
@@ -345,7 +394,7 @@ mallocreadfmt(char* s, char* e)
 	t = 0;
 	for(i = 0; i <= NQUICK; i++) {
 		n = 0;
-		qlist = &quicklist[i];
+		qlist = &QLIST[i];
 		QLOCK(&qlist->lk);
 		for(q = qlist->first; q != nil; q = q->s.next){
 //			if(q->s.size != i)
@@ -376,10 +425,10 @@ mallocreadfmt(char* s, char* e)
 	p = seprint(p, e, "total allocated %lud, %ud remaining\n",
 		(tailptr-tailbase)*sizeof(Header), tailnunits*sizeof(Header));
 
-	for(i = 0; i < 32; i++){
+	for(i = 0; i < nelem(qstats); i++){
 		if(qstats[i] == 0)
 			continue;
-		p = seprint(p, e, "qstats[%d] %ud\n", i, qstats[i]);
+		p = seprint(p, e, "%s %ud\n", qstatstr[i], qstats[i]);
 	}
 	MUNLOCK;
 }
@@ -407,7 +456,7 @@ mallocsummary(void)
 	t = 0;
 	for(i = 0; i <= NQUICK; i++) {
 		n = 0;
-		qlist = &quicklist[i];
+		qlist = &QLIST[i];
 		QLOCK(&qlist->lk);
 		for(q = qlist->first; q != nil; q = q->s.next){
 			if(q->s.size != i)
@@ -437,10 +486,10 @@ mallocsummary(void)
 	print("total allocated %lud, %ud remaining\n",
 		(tailptr-tailbase)*sizeof(Header), tailnunits*sizeof(Header));
 
-	for(i = 0; i < 32; i++){
+	for(i = 0; i < nelem(qstats); i++){
 		if(qstats[i] == 0)
 			continue;
-		print("qstats[%d] %ud\n", i, qstats[i]);
+		print("%s %ud\n", qstatstr[i], qstats[i]);
 	}
 }
 
