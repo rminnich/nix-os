@@ -4,9 +4,10 @@ echo benchs...
 cd /sys/src/nix/bench
 . tools
 failed=()
-benchs=[0-9]*
+benchs=`{ls -d [0-9]* | sort -n}
 if(test -e k[0-9]*)
 	benchs=($benchs k[0-9]*)
+
 for(t in $benchs){
 	cd $t || fail cannot cd into benchs $t
 	if(test -e FAIL)
@@ -15,13 +16,15 @@ for(t in $benchs){
 		if(! test -e output && ! test -e FAIL) {
 			echo running bench $t
 			if(test -x kern && ! test -e koutput){
-				log running kern for bench $t
+				echo running kern for bench $t
 				if(! kern >koutput >[2=1]){
 					touch FAIL
 					fail bench $t failed
 				}
 				reboot
 			}
+			if(test -x kern)
+				cp /dev/kmesg KMESG
 			if(! runbench>output >[2=1]){
 				touch FAIL
 				fail bench $t failed

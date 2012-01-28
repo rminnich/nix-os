@@ -2,10 +2,14 @@
 
 # change the boot sequence to run benchs.
 
-# remove stale state from benchs if given -a
-if(~ $#* 1 && ~ $1 -a)
-	rm -f [0-9]*/^(koutput output FAIL) k[0-9]*/^(koutput output FAIL)
+# remove output from all benchs:
+#  rm -f [0-9]*/^(koutput output FAIL KMESG) k[0-9]*/^(koutput output FAIL KMESG)
+
+# remove output from some benchs, to rerun them:
+# for(t in 93 94 95) rm -f $t/^(koutput output FAIL KMESG)
+
 
 # arrange for them to run after rebooting
 cp runbenchs /cfg/$sysname/runbenchs 
-reboot
+runbenchs
+
