@@ -53,7 +53,7 @@
 #define	SEMALT		54
 #define	EXECAC		55
 #define	NIXSYSCALL	56
-#define	ZIOPREAD		57
-#define	ZIOPWRITE		58
+#define	ZIOPREAD	57
+#define	ZIOPWRITE	58
 #define	ZIOFREE		59
 #define	TSEMACQUIRE	60

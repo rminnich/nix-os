@@ -1272,14 +1272,14 @@ systsemacquire(Ar0* ar0, va_list list)
 	int *addr, ms;
 
 	/*
-	 * int semacquire(long* addr, int block);
+	 * int tsemacquire(long* addr, ulong ms);
 	 * should be (and will be implemented below as) perhaps
-	 * int semacquire(int* addr, int block);
+	 * int tsemacquire(int* addr, ulong ms);
 	 */
 	addr = va_arg(list, int*);
 	addr = validaddr(addr, sizeof(int), 1);
 	evenaddr(PTR2UINT(addr));
-	ms = va_arg(list, int);
+	ms = va_arg(list, ulong);
 
 	if((s = seg(up, PTR2UINT(addr), 0)) == nil)
 		error(Ebadarg);

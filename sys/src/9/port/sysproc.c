@@ -180,7 +180,8 @@ sysrfork(ulong *arg)
 	if((flag&RFNOTEG) == 0)
 		p->noteid = up->noteid;
 
-	p->fpstate = up->fpstate;
+	/* don't penalize the child, it hasn't done FP in a note handler. */
+	p->fpstate = up->fpstate & ~FPillegal;
 	pid = p->pid;
 	memset(p->time, 0, sizeof(p->time));
 	p->time[TReal] = MACHP(0)->ticks;
@@ -1030,6 +1031,54 @@ semacquire(Segment *s, long *addr, int block)
 	return 1;
 }
 
+/* Acquire semaphore or timeout */
+static int
+tsemacquire(Segment *s, long *addr, ulong ms)
+{
+	int acquired;
+	Sema phore;
+	int timedout;
+	ulong t;
+	ulong tsemdbg;
+
+	if(canacquire(addr))
+		return 1;
+	if(ms == 0)
+		return 0;
+
+	acquired = 0;
+	timedout = 0;
+	semqueue(s, addr, &phore);
+	for(;;){
+		phore.waiting = 1;
+		coherence();
+		if(canacquire(addr)){
+			acquired = 1;
+			break;
+		}
+		if(waserror())
+			break;
+		t = m->ticks;
+		tsleep(&phore, semawoke, &phore, ms);
+		if((tsemdbg = TK2MS(m->ticks - t)) >= ms){
+			timedout = 1;
+			poperror();
+			break;
+		}
+		ms -= TK2MS(m->ticks - t);
+		poperror();
+	}
+	semdequeue(s, &phore);
+	coherence();	/* not strictly necessary due to lock in semdequeue */
+	if(!phore.waiting)
+		semwakeup(s, addr, 1);
+	if(timedout)
+		return 0;
+	if(!acquired)
+		nexterror();
+	return 1;
+}
+
 long
 syssemacquire(ulong *arg)
 {
@@ -1047,6 +1096,25 @@ syssemacquire(ulong *arg)
 	if(*addr < 0)
 		error(Ebadarg);
 	return semacquire(s, addr, block);
+}
+
+long
+systsemacquire(ulong *arg)
+{
+	long *addr;
+	ulong ms;
+	Segment *s;
+
+	validaddr(arg[0], sizeof(long), 1);
+	evenaddr(arg[0]);
+	addr = (long*)arg[0];
+	ms = arg[1];
+
+	if((s = seg(up, (ulong)addr, 0)) == nil)
+		error(Ebadarg);
+	if(*addr < 0)
+		error(Ebadarg);
+	return tsemacquire(s, addr, ms);
 }
 
 long

@@ -40,6 +40,7 @@ Syscall sysrendezvous;
 Syscall sysunmount;
 Syscall sys_wait;
 Syscall syssemacquire;
+Syscall systsemacquire;
 Syscall syssemrelease;
 Syscall sysseek;
 Syscall sysfversion;
@@ -93,6 +94,7 @@ Syscall *systab[]={
 	[UNMOUNT]	sysunmount,
 	[_WAIT]		sys_wait,
 	[SEMACQUIRE]	syssemacquire,
+	[TSEMACQUIRE]	systsemacquire,
 	[SEMRELEASE]	syssemrelease,
 	[SEEK]		sysseek,
 	[FVERSION]	sysfversion,
@@ -146,6 +148,7 @@ char *sysctab[]={
 	[UNMOUNT]	"Unmount",
 	[_WAIT]		"_wait",
 	[SEMACQUIRE]	"Semacquire",
+	[TSEMACQUIRE]	"Tsemacquire",
 	[SEMRELEASE]	"Semrelease",
 	[SEEK]		"Seek",
 	[FVERSION]	"Fversion",
