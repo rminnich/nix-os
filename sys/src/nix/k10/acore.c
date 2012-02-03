@@ -156,6 +156,8 @@ actrapret(void)
  * BUG: We should setup some trapenable() mechanism for the AC,
  * so that code like fpu.c could arrange for handlers specific for
  * the AC, instead of doint that by hand here.
+ *
+ * All interrupts are masked while in the "kernel"
  */
 void
 actrap(Ureg *u)
@@ -188,11 +190,6 @@ actrap(Ureg *u)
 	case IdtIPI:
 		m->intr++;
 		DBG("actrap: cpu%d: IPI\n", m->machno);
-		/*
-		 * Beware: BUG: we can get now IPIs while in kernel mode,
-		 * after declaring the end of the interrupt.
-		 * The code is not prepared for that.
-		 */
 		apiceoi(IdtIPI);
 		break;
 	case IdtPF:
