@@ -197,12 +197,6 @@ ixpackedsize(IXcall *f)
 	case IXRmove:
 		break;
 
-	case IXTcopy:
-		n += BIT32SZ;
-		break;
-	case IXRcopy:
-		break;
-
 	case IXTflush:
 	case IXRflush:
 		break;
@@ -382,23 +376,6 @@ ixpack(IXcall *f, uchar *ap, uint nap)
 		p  = pstring(p, f->newname);
 		break;
 	case IXRmove:
-		break;
-
-	case IXTcopy:
-		PBIT16(p, f->nmsg);
-		p += BIT16SZ;
-		PBIT64(p, f->offset);
-		p += BIT64SZ;
-		PBIT32(p, f->count);
-		p += BIT32SZ;
-		PBIT32(p, f->dstfid);
-		p += BIT32SZ;
-		PBIT64(p, f->dstoffset);
-		p += BIT64SZ;
-		break;
-	case IXRcopy:
-		PBIT32(p, f->count);
-		p += BIT32SZ;
 		break;
 
 	case IXTflush:
@@ -662,27 +639,6 @@ ixunpack(uchar *ap, uint nap, IXcall *f)
 		p = gstring(p, ep, &f->newname);
 		break;
 	case IXRmove:
-		break;
-
-	case IXTcopy:
-		if(p+BIT16SZ+BIT64SZ+BIT32SZ + BIT32SZ+BIT64SZ > ep)
-			return 0;
-		f->nmsg = GBIT16(p);
-		p += BIT16SZ;
-		f->offset = GBIT64(p);
-		p += BIT64SZ;
-		f->count = GBIT32(p);
-		p += BIT32SZ;
-		f->dstfid = GBIT32(p);
-		p += BIT32SZ;
-		f->dstoffset = GBIT64(p);
-		p += BIT64SZ;
-		break;
-	case IXRcopy:
-		if(p+BIT32SZ > ep)
-			return 0;
-		f->count = GBIT32(p);
-		p += BIT32SZ;
 		break;
 
 	case IXTflush:

@@ -279,25 +279,6 @@ ixtmove(Ch *ch, int dirfid, char *newname, int last)
 	return sendreq(ch, &t, m, last);
 }
 
-int
-ixtcopy(Ch *ch, int nmsg, long count, uvlong offset, long msz,
-		int dstfid, uvlong dstoffset, int last)
-{
-	IXcall t;
-	Msg *m;
-
-	m = newmsg(spool);
-	t.type = IXTcopy;
-	t.offset = offset;
-	t.count = count;
-	if(msz != 0 && t.count > msz)
-		t.count = msz;
-	t.nmsg = nmsg;
-	t.dstfid = dstfid;
-	t.dstoffset = dstoffset;
-	return sendreq(ch, &t, m, last);
-}
-
 static Msg*
 getreply(Ch *ch, int type, IXcall *r)
 {
@@ -551,19 +532,6 @@ int
 ixrmove(Ch *ch)
 {
 	return ixrmsg(ch, IXRmove);
-}
-
-long
-ixrcopy(Ch *ch)
-{
-	Msg *m;
-	IXcall r;
-
-	m = getreply(ch, IXRcopy, &r);
-	if(m == nil)
-		return -1;
-	freemsg(m);
-	return r.count;
 }
 
 /*

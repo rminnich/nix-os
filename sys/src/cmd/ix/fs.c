@@ -837,7 +837,6 @@ static Rpcfn reqfn[Tmax] = {
 [IXTwattr]	fswattr,
 [IXTcond]	fscond,
 [IXTmove]	fsmove,
-[IXTcopy]	fscopy,
 [IXTflush]	fsflush,
 };
 

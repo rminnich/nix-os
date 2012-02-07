@@ -179,14 +179,6 @@ ixcallfmt(Fmt *fmt)
 		seprint(buf, e, "Rmove");
 		break;
 
-	case IXTcopy:
-		seprint(buf, e, "Tcopy nmsg %d offset %lld count %ud dstfid %ud dstoffset %lld",
-			f->nmsg, f->offset, f->count, f->dstfid, f->dstoffset);
-		break;
-	case IXRcopy:
-		seprint(buf, e, "Rcopy count %ud", f->count);
-		break;
-
 	case IXTflush:
 		seprint(buf, e, "Tflush");
 		break;
