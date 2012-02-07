@@ -85,4 +85,5 @@ extern	Mach	*xlapicmachptr[Napic];		/* maintained, but unused */
 #define	l64get(p)	(((u64int)l32get(p+4)<<32)|l32get(p))
 
 extern void apicdump(void);
+extern void apictimerenab(void);
 extern void ioapicdump(void);

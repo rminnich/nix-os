@@ -197,6 +197,10 @@ actrap(Ureg *u)
 		m->pfault++;
 		DBG("actrap: cpu%d: PF cr2 %#ullx\n", m->machno, cr2get());
 		break;
+ 	case IdtTIMER:
+		apiceoi(IdtTIMER);
+		panic("timer interrupt in an AC");
+		break;
 	default:
 		print("actrap: cpu%d: %ulld\n", m->machno, u->type);
 	}

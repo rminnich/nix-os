@@ -5,6 +5,7 @@
 #include "fns.h"
 
 #include "init.h"
+#include "apic.h"
 #include "io.h"
 
 
@@ -159,6 +160,7 @@ squidboy(int apicno)
 		/*
 		 * Enable the timer interrupt.
 		 */
+		apictimerenab();
 		apicpri(0);
 
 		timersinit();

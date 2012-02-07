@@ -309,17 +309,33 @@ apiconline(void)
 	 * accepted by the APIC.
 	 */
 	microdelay((TK2MS(1)*1000/apmachno) * m->machno);
-	apicrput(Tic, apic->max);
 
-	if(apic->machno == 0)
+	if(apic->machno == 0){
+		apicrput(Tic, apic->max);
 		intrenable(IdtTIMER, apictimer, 0, -1, "APIC timer");
-	apicrput(Tlvt, Periodic|IrqTIMER);
+		apicrput(Tlvt, Periodic|IrqTIMER);
+	}
+
 	if(m->machno == 0)
 		apicrput(Tp, 0);
 
 	xlapicmachptr[apicno] = sys->machptr[m->machno];
 
 	return 1;
+}
+
+/* To start timers on TCs as part of the boot process. */
+void
+apictimerenab(void)
+{
+	Apic *apic;
+
+	apic = &xlapic[(apicrget(Id)>>24) & 0xff];
+
+	apiceoi(IdtTIMER);
+	apicrput(Tic, apic->max);
+	apicrput(Tlvt, Periodic|IrqTIMER);
+
 }
 
 void
