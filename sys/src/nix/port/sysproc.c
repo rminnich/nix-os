@@ -336,8 +336,15 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 		nexterror();
 	}
 
-	if(core != 0)
+	if(core != 0){
 		up->ac = getac(up, core);
+		mp = up->ac;
+		/*
+		 * This variable is not used later, so take the address
+		 * to make it go to memory for the waserror.
+		 */
+		USED(&mp);
+	}
 
 	argc = 0;
 	file = validnamedup(ufile, 1);
