@@ -25,6 +25,8 @@ dev +dev
 	ether		netif
 	ip		arp chandial ip ipv6 ipaux iproute netlog nullmedium pktmedium ptclbsum inferno
 
+	pci
+
 	uart
 
 uart +dev
