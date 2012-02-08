@@ -163,6 +163,8 @@ enum
 	NIXTC = 0,
 	NIXKC,
 	NIXAC,
+	NIXXC,
+	NIXROLES,
 };
 
 /*

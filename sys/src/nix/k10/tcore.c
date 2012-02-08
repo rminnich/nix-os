@@ -27,7 +27,7 @@ getac(Proc *p, int core)
 
 	mp = nil;
 	if(core == 0)
-		panic("can't getac for a TC");
+		panic("can't getac for a %s", rolename[NIXTC]);
 	lock(&nixaclock);
 	if(waserror()){
 		unlock(&nixaclock);
@@ -44,12 +44,10 @@ getac(Proc *p, int core)
 	Found:
 		mp->proc = p;
 	}else{
-		for(i = 1; i < MACHMAX; i++){
-			mp = sys->machptr[i];
-			if(mp != nil && mp->online && mp->nixtype == NIXAC &&
-			   mp->proc == nil)
-				goto Found;
-		}
+		for(i = 0; i < MACHMAX; i++)
+			if((mp = sys->machptr[i]) != nil && mp->online && mp->nixtype == NIXAC)
+				if(mp->proc == nil)
+					goto Found;
 		error("not enough cores");
 	}
 	unlock(&nixaclock);
@@ -277,7 +275,7 @@ runacore(void)
 					print("before PF:\n");
 					print("AC:\n");
 					dumpptepg(4, up->ac->pml4->pa);
-					print("\nTC:\n");
+					print("\n%s:\n", rolename[NIXTC]);
 					dumpptepg(4, m->pml4->pa);
 				}
 				trap(ureg);

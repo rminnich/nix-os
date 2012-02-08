@@ -319,7 +319,7 @@ apiconline(void)
 	if(m->machno == 0)
 		apicrput(Tp, 0);
 
-	xlapicmachptr[apicno] = sys->machptr[m->machno];
+	xlapicmachptr[apicno] = m;
 
 	return 1;
 }

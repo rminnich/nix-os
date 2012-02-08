@@ -14,6 +14,7 @@ enum
 {
 	Qdir,
 	Qtrace,
+	Qtracepids,
 	Qargs,
 	Qctl,
 	Qfd,
@@ -70,6 +71,7 @@ enum
 enum{
 	Nevents = 0x4000,
 	Emask = Nevents - 1,
+	Ntracedpids = 1024,
 };
 
 /* + 6 * 12 for extra NIX counters. */
@@ -160,6 +162,7 @@ static int	procstopped(void*);
 static void	mntscan(Mntwalk*, Proc*);
 
 static Traceevent *tevents;
+static char *tpids, *tpidsc, *tpidse;
 static Lock tlock;
 static int topens;
 static int tproduced, tconsumed;
@@ -206,7 +209,13 @@ procgen(Chan *c, char *name, Dirtab *tab, int, int s, Dir *dp)
 			devdir(c, qid, up->genbuf, 0, eve, 0444, dp);
 			return 1;
 		}
-
+		if(s == 1){
+			strcpy(up->genbuf, "tracepids");
+			mkqid(&qid, Qtracepids, -1, QTFILE);
+			devdir(c, qid, up->genbuf, 0, eve, 0444, dp);
+			return 1;
+		}
+		s -= 2;
 		if(name != nil){
 			/* ignore s and use name to find pid */
 			pid = strtol(name, &ename, 10);
@@ -216,7 +225,7 @@ procgen(Chan *c, char *name, Dirtab *tab, int, int s, Dir *dp)
 			if(s < 0)
 				return -1;
 		}
-		else if(--s >= conf.nproc)
+		else if(s >= conf.nproc)
 			return -1;
 
 		if((p = psincref(s)) == nil || (pid = p->pid) == 0)
@@ -235,6 +244,12 @@ procgen(Chan *c, char *name, Dirtab *tab, int, int s, Dir *dp)
 	}
 	if(c->qid.path == Qtrace){
 		strcpy(up->genbuf, "trace");
+		mkqid(&qid, Qtrace, -1, QTFILE);
+		devdir(c, qid, up->genbuf, 0, eve, 0444, dp);
+		return 1;
+	}
+	if(c->qid.path == Qtracepids){
+		strcpy(up->genbuf, "tracepids");
 		mkqid(&qid, Qtrace, -1, QTFILE);
 		devdir(c, qid, up->genbuf, 0, eve, 0444, dp);
 		return 1;
@@ -279,17 +294,24 @@ static void
 notrace(Proc*, Tevent, vlong)
 {
 }
+static Lock tlck;
 
 static void
 _proctrace(Proc* p, Tevent etype, vlong ts)
 {
 	Traceevent *te;
+	int tp;
 
+	ilock(&tlck);
 	if (p->trace == 0 || topens == 0 ||
-		tproduced - tconsumed >= Nevents)
+		tproduced - tconsumed >= Nevents){
+		iunlock(&tlck);
 		return;
+	}
+	tp = tproduced++;
+	iunlock(&tlck);
 
-	te = &tevents[tproduced&Emask];
+	te = &tevents[tp&Emask];
 	te->pid = p->pid;
 	te->etype = etype;
 	if (ts == 0)
@@ -297,9 +319,19 @@ _proctrace(Proc* p, Tevent etype, vlong ts)
 	else
 		te->time = ts;
 	te->core = m->machno;
-	tproduced++;
 }
 
+void
+proctracepid(Proc *p)
+{
+	if(p->trace == 1 && proctrace != notrace){
+		p->trace = 2;
+		ilock(&tlck);
+		tpidsc = seprint(tpidsc, tpidse, "%d %s\n", p->pid, p->text);
+		iunlock(&tlck);
+	}
+}
+	
 static void
 procinit(void)
 {
@@ -368,8 +400,12 @@ procopen(Chan *c, int omode)
 		topens++;
 		if (tevents == nil){
 			tevents = (Traceevent*)malloc(sizeof(Traceevent) * Nevents);
-			if(tevents == nil)
+			tpids = malloc(Ntracedpids * 20);
+			if(tevents == nil || tpids == nil)
 				error(Enomem);
+			tpidsc = tpids;
+			tpidse = tpids + Ntracedpids * 20;
+			*tpidsc = 0;
 			tproduced = tconsumed = 0;
 		}
 		proctrace = _proctrace;
@@ -381,7 +417,14 @@ procopen(Chan *c, int omode)
 		c->offset = 0;
 		return c;
 	}
-
+	if(QID(c->qid) == Qtracepids){
+		if (omode != OREAD)
+			error(Eperm);
+		c->mode = openmode(omode);
+		c->flag |= COPEN;
+		c->offset = 0;
+		return c;
+	}
 	if((p = psincref(SLOT(c->qid))) == nil)
 		error(Eprocdied);
 	qlock(&p->debug);
@@ -699,7 +742,7 @@ static long
 procread(Chan *c, void *va, long n, vlong off)
 {
 	Proc *p;
-	Mach *ac;
+	Mach *ac, *wired;
 	long l, r;
 	Waitq *wq;
 	Ureg kur;
@@ -741,6 +784,12 @@ procread(Chan *c, void *va, long n, vlong off)
 		return rptr - (uchar*)va;
 	}
 
+	if(QID(c->qid) == Qtracepids)
+		if(tpids == nil)
+			return 0;
+		else
+			return readstr(off, va, n, tpids);
+
 	if((p = psincref(SLOT(c->qid))) == nil || p->pid != PID(c->qid))
 		error(Eprocdied);
 
@@ -768,8 +817,11 @@ procread(Chan *c, void *va, long n, vlong off)
 	case Qcore:
 		i = 0;
 		ac = p->ac;
+		wired = p->wired;
 		if(ac != nil)
 			i = ac->machno;
+		else if(wired != nil)
+			i = wired->machno;
 		snprint(statbuf, sizeof statbuf, "%d\n", i);
 		return readstr(offset, va, n, statbuf);
 
@@ -917,7 +969,7 @@ procread(Chan *c, void *va, long n, vlong off)
 		for(i = 0; i < 6; i++) {
 			l = p->time[i];
 			if(i == TReal)
-				l = MACHP(0)->ticks - l;
+				l = sys->ticks - l;
 			l = TK2MS(l);
 			readnum(0, statbuf+j+NUMSIZE*i, NUMSIZE, l, NUMSIZE);
 		}
@@ -1496,10 +1548,10 @@ procctlreq(Proc *p, char *va, int n)
 	case CMtrace:
 		switch(cb->nf){
 		case 1:
-			p->trace ^= 1;
+			p->trace = (p->trace?0:1);
 			break;
 		case 2:
-			p->trace = (atoi(cb->f[1]) != 0);
+			p->trace = (atoi(cb->f[1])?1:0);
 			break;
 		default:
 			error("args");

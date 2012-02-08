@@ -32,7 +32,7 @@ static char oargb[128];
 static int oargblen;
 
 static int maxcores = 1024;	/* max # of cores given as an argument */
-static int numtcs = 16;		/* initial # of TCs */
+static int numtcs = 32;		/* initial # of TCs */
 
 char dbgflg[256];
 static int vflag = 0;
@@ -82,20 +82,12 @@ options(int argc, char* argv[])
 	}
 }
 
-extern void setmachsched(Mach*);
-
 void
 squidboy(int apicno)
 {
-	char *n[] = {
-		[NIXAC] "AC",
-		[NIXTC] "TC",
-		[NIXKC]	"KC"
-	};
 	vlong hz;
 
 	sys->machptr[m->machno] = m;
-	setmachsched(m);
 	/*
 	 * Need something for initial delays
 	 * until a timebase is worked out.
@@ -139,7 +131,7 @@ squidboy(int apicno)
 	m->rdtsc = rdtsc();
 
 	print("cpu%d color %d role %s tsc %lld\n",
-		m->machno, corecolor(m->machno), n[m->nixtype], m->rdtsc);
+		m->machno, corecolor(m->machno), rolename[m->nixtype], m->rdtsc);
 	switch(m->nixtype){
 	case NIXAC:
 		acmmuswitch();
@@ -165,7 +157,7 @@ squidboy(int apicno)
 
 		timersinit();
 		adec(&active.nbooting);
-		ainc(&active.nonline);	/* this was commented out */
+		ainc(&active.nonline);
 
 		schedinit();
 		break;
@@ -181,10 +173,9 @@ testiccs(void)
 	extern void testicc(int);
 
 	/* setup arguments for all */
-	for(i = 1; i < MACHMAX; i++)
-		if((mp = sys->machptr[i]) != nil && mp->online != 0)
-			if(mp->nixtype == NIXAC)
-				testicc(i);
+	for(i = 0; i < MACHMAX; i++)
+		if((mp = sys->machptr[i]) != nil && mp->online && mp->nixtype == NIXAC)
+			testicc(i);
 	print("bootcore: all cores done\n");
 }
 
@@ -203,7 +194,7 @@ nixsquids(void)
 	uvlong now, start;
 
 	for(i = 1; i < MACHMAX; i++)
-		if((mp = sys->machptr[i]) != nil && mp->online != 0){
+		if((mp = sys->machptr[i]) != nil && mp->online){
 			/*
 			 * Inter-core calls. A ensure *mp->iccall and mp->icargs
 			 * go into different cache lines.
@@ -211,9 +202,11 @@ nixsquids(void)
 			mp->icc = mallocalign(sizeof *m->icc, ICCLNSZ, 0, 0);
 			mp->icc->fn = nil;
 			if(i < numtcs){
-				conf.nmach++;
+				sys->nmach++;
 				mp->nixtype = NIXTC;
-			}
+				sys->nc[NIXTC]++;
+			}else
+				sys->nc[NIXAC]++;
 			ainc(&active.nbooting);
 		}
 	sys->epoch = rdtsc();
@@ -290,7 +283,7 @@ main(u32int ax, u32int bx)
 
 	vsvminit(MACHSTKSZ, NIXTC);
 
-	conf.nmach = 1;			
+	sys->nmach = 1;			
 
 	fmtinit();
 	print("\nNIX\n");

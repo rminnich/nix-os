@@ -197,7 +197,7 @@ lock(Lock *l)
 	}
 	l->pc = pc;
 	l->p = up;
-	l->m = MACHP(m->machno);
+	l->m = m;
 	l->isilock = 0;
 	if(up)
 		up->lastlock = l;
@@ -234,7 +234,7 @@ ilock(Lock *l)
 	l->pc = pc;
 	l->p = up;
 	l->isilock = 1;
-	l->m = MACHP(m->machno);
+	l->m = m;
 	if(l != &waitstatslk)
 		addwaitstat(pc, t0, WSlock);
 }
@@ -266,7 +266,7 @@ canlock(Lock *l)
 		goto Cant;
 	l->pc = pc;
 	l->p = up;
-	l->m = MACHP(m->machno);
+	l->m = m;
 	if(up)
 		up->lastlock = l;
 	l->isilock = 0;

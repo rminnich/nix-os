@@ -676,6 +676,15 @@ enum
 	RFCCORE		= (1<<18),
 };
 
+/* execac */
+enum
+{
+	EXTC = 0,	/* exec on time-sharing */
+	EXAC,		/* want an AC for the exec'd image */
+	EXXC,		/* want an XC for the exec'd image */
+};
+
+
 /*
  *  process memory segments - NSEG always last !
  *  HSEG is a potentially huge bss segment.
@@ -752,8 +761,6 @@ struct Sched
 	int	nmach;		/* # of cores with this color */
 	ulong	nrun;		/* to compute load */
 };
-
-extern Sched run[];
 
 typedef union Ar0 Ar0;
 union Ar0 {

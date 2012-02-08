@@ -783,15 +783,23 @@ corecolor(int core)
 {
 	Srat *sl;
 	Mach *m;
+	static int colors[32];
 
 	if(core < 0 || core >= MACHMAX)
 		return -1;
-	m = MACHP(core);
+	m = sys->machptr[core];
 	if(m == nil)
 		return -1;
+
+	if(core >= 0 && core < nelem(colors) && colors[core] != 0)
+		return colors[core] - 1;
+
 	for(sl = srat; sl != nil; sl = sl->next)
-		if(sl->type == SRlapic && sl->lapic.apic == m->apicno)
+		if(sl->type == SRlapic && sl->lapic.apic == m->apicno){
+			if(core >= 0 && core < nelem(colors))
+				colors[core] = 1 + sl->lapic.dom;
 			return sl->lapic.dom;
+		}
 	return -1;
 }
 

@@ -101,12 +101,10 @@ acsched(void)
 	acmmuswitch();
 	for(;;){
 		acstackok();
-		m->load = 0;
 		mwait(&m->icc->fn);
 		if(m->icc->flushtlb)
 			acmmuswitch();
 		DBG("acsched: cpu%d: fn %#p\n", m->machno, m->icc->fn);
-		m->load = 100;
 		m->icc->fn();
 		DBG("acsched: cpu%d: idle\n", m->machno);
 		mfence();
@@ -138,7 +136,6 @@ actouser(void)
 
 	u = m->proc->dbgreg;
 	DBG("cpu%d: touser usp = %#p entry %#p\n", m->machno, u->sp, u->ip);
-	m->load = 100;
 	xactouser(u->sp);
 	panic("actouser");
 }
@@ -156,7 +153,7 @@ actrapret(void)
  * BUG: We should setup some trapenable() mechanism for the AC,
  * so that code like fpu.c could arrange for handlers specific for
  * the AC, instead of doint that by hand here.
- *
+ * 
  * All interrupts are masked while in the "kernel"
  */
 void
@@ -192,14 +189,14 @@ actrap(Ureg *u)
 		DBG("actrap: cpu%d: IPI\n", m->machno);
 		apiceoi(IdtIPI);
 		break;
+	case IdtTIMER:
+		apiceoi(IdtTIMER);
+		panic("timer interrupt in an AC");
+		break;
 	case IdtPF:
 		/* this case is here for debug only */
 		m->pfault++;
 		DBG("actrap: cpu%d: PF cr2 %#ullx\n", m->machno, cr2get());
-		break;
- 	case IdtTIMER:
-		apiceoi(IdtTIMER);
-		panic("timer interrupt in an AC");
 		break;
 	default:
 		print("actrap: cpu%d: %ulld\n", m->machno, u->type);
@@ -215,10 +212,8 @@ Post:
 	m->icc->fn = nil;
 	ready(m->proc);
 
-	m->load = 0;
 	mwait(&m->icc->fn);
 
-	m->load = 100;
 	if(m->icc->flushtlb)
 		acmmuswitch();
 	if(m->icc->fn != actrapret)
@@ -252,7 +247,6 @@ acsyscall(void)
 	mfence();
 	m->icc->fn = nil;
 	ready(p);
-	m->load = 0;
 	/*
 	 * The next call is probably going to make us jmp
 	 * into user code, forgetting all our state in this
@@ -281,6 +275,13 @@ dumpreg(void *u)
 	ndnr();
 }
 
+char *rolename[] = 
+{
+	[NIXAC]	"AC",
+	[NIXTC]	"TC",
+	[NIXKC]	"KC",
+	[NIXXC]	"XC",
+};
 
 void
 acmodeset(int mode)
@@ -289,9 +290,10 @@ acmodeset(int mode)
 	case NIXAC:
 	case NIXKC:
 	case NIXTC:
+	case NIXXC:
 		break;
 	default:
-		panic("apmodeset: bad mode %d", mode);
+		panic("acmodeset: bad mode %d", mode);
 	}
 	m->nixtype = mode;
 }

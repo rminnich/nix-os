@@ -567,7 +567,7 @@ extern uchar IPnoaddr[IPaddrlen];
 extern uchar v4prefix[IPaddrlen];
 extern uchar IPallbits[IPaddrlen];
 
-#define	NOW	TK2MS(MACHP(0)->ticks)
+#define	NOW	TK2MS(sys->machptr[0]->ticks)
 
 /*
  *  media

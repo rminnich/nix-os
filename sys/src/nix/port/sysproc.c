@@ -107,7 +107,8 @@ sysrfork(Ar0* ar0, va_list list)
 		}
 	}
 
-	p->trace = up->trace;
+	if(up->trace)
+		p->trace = 1;
 	p->scallnr = up->scallnr;
 	memmove(p->arg, up->arg, sizeof(up->arg));
 	p->nerrlab = 0;
@@ -206,7 +207,7 @@ sysrfork(Ar0* ar0, va_list list)
 
 	pid = p->pid;
 	memset(p->time, 0, sizeof(p->time));
-	p->time[TReal] = MACHP(0)->ticks;
+	p->time[TReal] = sys->ticks;
 
 	if(flag & (RFPREPAGE|RFCPREPAGE)){
 		p->prepagemem = flag&RFPREPAGE;
@@ -265,45 +266,18 @@ typedef struct {
 	uvlong hdr[1];
 } Hdr;
 
+/*
+ * flags can ONLY specify that you want an AC for you, or
+ * that you want an XC for you.
+ * 
+ */
 static void
-donate(Proc *p)
-{
-	static int coreno;
-	int core, i;
-	Mach *mp;
-	extern int scheddonates;
-
-	if(!scheddonates || p->wired)
-		return;
-
-	for(i = 0; i < MACHMAX; i++){
-		core = i;
-		mp = MACHP(core);
-		if(mp == m || mp == nil || mp->online == 0 || mp->sch == nil)
-			continue;
-		if(mp->nixtype != NIXTC || mp->sch == m->sch)
-			continue;
-		if(mp->sch->nrdy > m->sch->nrdy)/* more loaded than us, ignore */
-			continue;
-		p->mp = mp;
-		p->color = corecolor(mp->machno);
-		if(p->color < 0)
-			p->color = 0;
-		coreno = core + 1;
-iprint("donate %d -> %d\n", m->machno, mp->machno);
-		sched();
-		return;
-	}
-	/* no core preferred, don't change the process color */
-}
-
-static void
-execac(Ar0* ar0, int core, char *ufile, char **argv)
+execac(Ar0* ar0, int flags, char *ufile, char **argv)
 {
 	Hdr hdr;
 	Fgrp *f;
 	Tos *tos;
-	Chan *chan;
+	Chan *chan, *ichan;
 	Image *img;
 	Segment *s;
 	int argc, i, n;
@@ -311,45 +285,44 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 	char line[sizeof(Exec)], *progarg[sizeof(Exec)/2+1];
 	long hdrsz, magic, textsz, datasz, bsssz;
 	uintptr textlim, datalim, bsslim, entry, stack;
-	Mach *mp;
 	static int colorgen;
+
+
+	file = nil;
+	elem = nil;
+	switch(flags){
+	case EXTC:
+	case EXXC:
+		break;
+	case EXAC:
+		up->ac = getac(up, -1);
+		break;
+	default:
+		error("unknown execac flag");
+	}
+	if(waserror()){
+		DBG("execac: failing: %s\n", up->errstr);
+		free(file);
+		free(elem);
+		if(flags == EXAC && up->ac != nil)
+			up->ac->proc = nil;
+		up->ac = nil;
+		nexterror();
+	}
 
 	/*
 	 * Open the file, remembering the final element and the full name.
 	 */
-	file = nil;
-	elem = nil;
-	chan = nil;
-	mp = nil;
-	if(waserror()){
-		DBG("execac: failing: %s\n", up->errstr);
-		if(file)
-			free(file);
-		if(elem)
-			free(elem);
-		if(chan)
-			cclose(chan);
-		if(core > 0 && mp != nil)
-			mp->proc = nil;
-		if(core != 0)
-			up->ac = nil;
-		nexterror();
-	}
-
-	if(core != 0){
-		up->ac = getac(up, core);
-		mp = up->ac;
-		/*
-		 * This variable is not used later, so take the address
-		 * to make it go to memory for the waserror.
-		 */
-		USED(&mp);
-	}
-
 	argc = 0;
 	file = validnamedup(ufile, 1);
 	DBG("execac: up %#p file %s\n", up, file);
-	chan = namec(file, Aopen, OEXEC, 0);
+	if(up->trace)
+		proctracepid(up);
+	ichan = namec(file, Aopen, OEXEC, 0);
+	if(waserror()){
+		cclose(ichan);
+		nexterror();
+	}
 	kstrdup(&elem, up->genbuf);
 
 	/*
@@ -359,7 +332,7 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 	 * The #! line must be less than sizeof(Exec) in size,
 	 * including the terminating \n.
 	 */
-	hdrsz = chan->dev->read(chan, &hdr, sizeof(Hdr), 0);
+	hdrsz = ichan->dev->read(ichan, &hdr, sizeof(Hdr), 0);
 	if(hdrsz < 2)
 		error(Ebadexec);
 	p = (char*)&hdr;
@@ -381,14 +354,21 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 		 */
 		p = progarg[0];
 		progarg[0] = elem;
-		cclose(chan);
 		chan = nil;	/* in case namec errors out */
 		USED(chan);
 		chan = namec(p, Aopen, OEXEC, 0);
 		hdrsz = chan->dev->read(chan, &hdr, sizeof(Hdr), 0);
 		if(hdrsz < 2)
 			error(Ebadexec);
+	}else{
+		chan = ichan;
+		incref(ichan);
 	}
+
+	/* chan is the chan to use, initial or not. ichan is irrelevant now */
+	cclose(ichan);
+	poperror();
+
 
 	/*
 	 * #! has had its chance, now we need a real binary.
@@ -427,10 +407,8 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 	|| datalim < textlim || bsslim < datalim)
 		error(Ebadexec);
 
-	if(core != 0)
-		up->color = corecolor(core);
-	else
-		donate(up);
+	if(up->ac != nil && up->ac != m)
+		up->color = corecolor(up->ac->machno);
 
 	/*
 	 * The new stack is created in ESEG, temporarily mapped elsewhere.
@@ -600,7 +578,7 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 	}
 
 	/* Text.  Shared. Attaches to cache image if possible
-	 * but prepaged if core > 0.
+	 * but prepaged if EXAC
 	 */
 	img = attachimage(SG_TEXT|SG_RONLY, chan, up->color, UTZERO, (textlim-UTZERO)/BIGPGSZ);
 	s = img->s;
@@ -656,7 +634,7 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 	 *  space and needs to be flushed
 	 */
 	mmuflush();
-	if(up->prepagemem || core > 0)
+	if(up->prepagemem || flags == EXAC)
 		nixprepage(-1);
 	qlock(&up->debug);
 	up->nnote = 0;
@@ -670,7 +648,7 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 
 	ar0->v = sysexecregs(entry, TSTKTOP - PTR2UINT(argv), argc);
 
-	if(core > 0){
+	if(flags == EXAC){
 		up->procctl = Proc_toac;
 		up->prepagemem = 1;
 	}
@@ -684,19 +662,19 @@ execac(Ar0* ar0, int core, char *ufile, char **argv)
 void
 sysexecac(Ar0* ar0, va_list list)
 {
-	int core;
+	int flags;
 	char *file, **argv;
 
 	/*
-	 * void* execac(int core, char* name, char* argv[]);
+	 * void* execac(int flags, char* name, char* argv[]);
 	 */
 
-	core = va_arg(list, unsigned int);
+	flags = va_arg(list, unsigned int);
 	file = va_arg(list, char*);
 	file = validaddr(file, 1, 0);
 	argv = va_arg(list, char**);
 	evenaddr(PTR2UINT(argv));
-	execac(ar0, core, file, argv);
+	execac(ar0, flags, file, argv);
 }
 
 void
@@ -711,7 +689,7 @@ sysexec(Ar0* ar0, va_list list)
 	file = validaddr(file, 1, 0);
 	argv = va_arg(list, char**);
 	evenaddr(PTR2UINT(argv));
-	execac(ar0, 0, file, argv);
+	execac(ar0, EXTC, file, argv);
 }
 
 void
@@ -1192,59 +1170,13 @@ semacquire(Segment* s, int* addr, int block)
 		sleep(&phore, semawoke, &phore);
 		poperror();
 	}
- 	semdequeue(s, &phore);
- 	coherence();	/* not strictly necessary due to lock in semdequeue */
- 	if(!phore.waiting)
- 		semwakeup(s, addr, 1);
-	if(!acquired)
-		nexterror();
-	return 1;
-}
-
-/* Acquire semaphore or time-out */
-static int
-tsemacquire(Segment* s, int* addr, ulong ms)
-{
-	int acquired;
-	Sema phore;
-	int timedout;
-	ulong t;
-
-	if(canacquire(addr))
-		return 1;
-	if(ms == 0)
-		return 0;
-
-	acquired = 0;
-	timedout = 0;
-	semqueue(s, addr, &phore);
-	for(;;){
-		phore.waiting = 1;
-		coherence();
-		if(canacquire(addr)){
-			acquired = 1;
-			break;
-		}
-		if(waserror())
-			break;
-		t = m->ticks;
-		tsleep(&phore, semawoke, &phore, ms);
-		if(TK2MS(m->ticks-t) >= ms) {
-			timedout = 1;
-			poperror();
-			break;
-		}
-		ms -= TK2MS(m->ticks-t);
-		poperror();
-	}
 	semdequeue(s, &phore);
 	coherence();	/* not strictly necessary due to lock in semdequeue */
 	if(!phore.waiting)
 		semwakeup(s, addr, 1);
-	if(timedout)
-		return 0;
 	if(!acquired)
 		nexterror();
+
 	return 1;
 }
 
@@ -1270,30 +1202,6 @@ syssemacquire(Ar0* ar0, va_list list)
 		error(Ebadarg);
 
 	ar0->i = semacquire(s, addr, block);
-}
-
-void
-systsemacquire(Ar0* ar0, va_list list)
-{
-	Segment *s;
-	int *addr, ms;
-
-	/*
-	 * int tsemacquire(long* addr, ulong ms);
-	 * should be (and will be implemented below as) perhaps
-	 * int tsemacquire(int* addr, ulong ms);
-	 */
-	addr = va_arg(list, int*);
-	addr = validaddr(addr, sizeof(int), 1);
-	evenaddr(PTR2UINT(addr));
-	ms = va_arg(list, ulong);
-
-	if((s = seg(up, PTR2UINT(addr), 0)) == nil)
-		error(Ebadarg);
-	if(*addr < 0)
-		error(Ebadarg);
-
-	ar0->i = tsemacquire(s, addr, ms);
 }
 
 void

@@ -13,22 +13,15 @@ enum
 {
 	Scaling=2,
 
-	/*
-	 * number of schedulers used.
-	 * 1 uses just one, which is the behavior of Plan 9.
-	 */
-	Nsched = 16,
+	AMPmincores = 5,
 };
 
 Ref	noteidalloc;
 
 static Ref pidalloc;
 
-/*
- * Because machines with many cores are NUMA, we try to use
- * a different scheduler per color
- */
-Sched run[Nsched];
+static Sched run;
+
 
 struct Procalloc procalloc;
 
@@ -41,9 +34,6 @@ static int reprioritize(Proc*);
 static void updatecpu(Proc*);
 
 static void rebalance(void);
-
-int schedsteals = 1;
-int scheddonates = 0;
 
 char *statename[] =
 {	/* BUG: generate automatically */
@@ -64,30 +54,10 @@ char *statename[] =
 	"Down",
 };
 
-void
-setmachsched(Mach *mp)
-{
-	int color;
-
-	color = corecolor(mp->machno);
-	if(color < 0){
-		print("unknown color for cpu%d\n", mp->machno);
-		color = 0;
-	}
-	mp->sch = &run[color%Nsched];
-}
-
 Sched*
-procsched(Proc *p)
+procsched(Proc *)
 {
-	Mach *pm;
-
-	pm = p->mp;
-	if(pm == nil)
-		pm = m;
-	if(pm->sch == nil)
-		setmachsched(pm);
-	return pm->sch;
+	return &run;
 }
 
 /*
@@ -96,10 +66,7 @@ procsched(Proc *p)
 void
 procinit0(void)
 {
-	int i;
-
-	for(i = 0; i < Nsched; i++)
-		run[i].schedgain = 30;
+	run.schedgain = 30;
 
 }
 
@@ -112,16 +79,16 @@ schedinit(void)		/* never returns */
 	Edf *e;
 
 	m->inidle = 1;
-	if(m->sch == nil){
-		print("schedinit: no sch for cpu%d\n", m->machno);
-		setmachsched(m);
-	}
-	ainc(&m->sch->nmach);
+	m->proc = nil;
+	ainc(&run.nmach);
 
 	setlabel(&m->sched);
 	if(up) {
 		if((e = up->edf) && (e->flags & Admitted))
 			edfrecord(up);
+		m->qstart = 0;
+		m->qexpired = 0;
+		coherence();
 		m->proc = 0;
 		switch(up->state) {
 		case Running:
@@ -177,9 +144,7 @@ void
 sched(void)
 {
 	Proc *p;
-	Sched *sch;
 
-	sch = m->sch;
 	if(m->ilockdepth)
 		panic("cpu%d: ilockdepth %d, last lock %#p at %#p, sched called from %#p",
 			m->machno,
@@ -209,13 +174,12 @@ sched(void)
 		|| pga.Lock.p == up
 		|| procalloc.Lock.p == up){
 			up->delaysched++;
- 			sch->delayedscheds++;
+ 			run.delayedscheds++;
 			return;
 		}
 		up->delaysched = 0;
 
 		splhi();
-
 		/* statistics */
 		if(up->nqtrap == 0 && up->nqsyscall == 0)
 			up->nfullq++;
@@ -232,21 +196,21 @@ sched(void)
 		}
 		gotolabel(&m->sched);
 	}
+
 	m->inidle = 1;
-	p = runproc();
+	p = runproc();	/* core 0 never returns */
 	m->inidle = 0;
+
 	if(!p->edf){
 		updatecpu(p);
 		p->priority = reprioritize(p);
 	}
-	if(p != m->readied)
-		m->schedticks = m->ticks + HZ/10;
-	m->readied = 0;
 	up = p;
+	m->qstart = m->ticks;
 	up->nqtrap = 0;
 	up->nqsyscall = 0;
 	up->state = Running;
-	up->mach = MACHP(m->machno);
+	up->mach = m;
 	m->proc = up;
 	mmuswitch(up);
 
@@ -257,31 +221,36 @@ sched(void)
 int
 anyready(void)
 {
-	return m->sch->runvec;
+	return run.runvec;
 }
 
 int
 anyhigher(void)
 {
-	return m->sch->runvec & ~((1<<(up->priority+1))-1);
+	return run.runvec & ~((1<<(up->priority+1))-1);
 }
 
 /*
  *  here once per clock tick to see if we should resched
  */
+
 void
 hzsched(void)
 {
 	/* once a second, rebalance will reprioritize ready procs */
-	if(m->machno == 0)
+	if(m->machno == 0){
 		rebalance();
-
-	/* unless preempted, get to run for at least 100ms */
-	if(anyhigher()
-	|| (!up->fixedpri && m->ticks > m->schedticks && anyready())){
-		m->readied = nil;	/* avoid cooperative scheduling */
-		up->delaysched++;
+		return;
 	}
+
+	/* with <= 4 cores, we use SMP and core 0 does not set qexpired for us */
+	if(sys->nmach <= AMPmincores)
+		if(m->ticks - m->qstart >= HZ/10)
+			m->qexpired = 1;
+
+	/* unless preempted, get to run */
+	if(m->qexpired && anyready())
+		up->delaysched++;
 }
 
 /*
@@ -295,7 +264,13 @@ preempted(void)
 	if(up->preempted == 0)
 	if(anyhigher())
 	if(!active.exiting){
-		m->readied = nil;	/* avoid cooperative scheduling */
+		/*  Core 0 is dispatching all interrupts, so no core
+		 *  actually running a user process is ever going call preempted, unless
+		 *  we consider IPIs for preemption or we distribute interrupts.
+		 *  But we are going to use SMP for machines with few cores.
+		panic("preemted used");
+		 */
+
 		up->preempted = 1;
 		sched();
 		splhi();
@@ -353,15 +328,13 @@ updatecpu(Proc *p)
 	if(p->edf)
 		return;
 
-	t = MACHP(0)->ticks*Scaling + Scaling/2;
+	t = sys->ticks*Scaling + Scaling/2;
 	n = t - p->lastupdate;
 	p->lastupdate = t;
 
 	if(n == 0)
 		return;
-	if(m->sch == nil)	/* may happen during boot */
-		return;
-	D = m->sch->schedgain*HZ*Scaling;
+	D = run.schedgain*HZ*Scaling;
 	if(n > D)
 		n = D;
 
@@ -379,7 +352,7 @@ updatecpu(Proc *p)
 
 /*
  * On average, p has used p->cpu of a cpu recently.
- * Its fair share is conf.nmach/m->load of a cpu.  If it has been getting
+ * Its fair share is nmach/m->load of a cpu.  If it has been getting
  * too much, penalize it.  If it has been getting not enough, reward it.
  * I don't think you can get much more than your fair share that
  * often, so most of the queues are for using less.  Having a priority
@@ -391,7 +364,7 @@ reprioritize(Proc *p)
 {
 	int fairshare, n, load, ratio;
 
-	load = MACHP(0)->load;
+	load = sys->load;
 	if(load == 0)
 		return p->basepri;
 
@@ -400,7 +373,7 @@ reprioritize(Proc *p)
 	 * except the decimal point is moved three places
 	 * on both load and fairshare.
 	 */
-	fairshare = (conf.nmach*1000*1000)/load;
+	fairshare = (sys->nmach*1000*1000)/load;
 	n = p->cpu;
 	if(n == 0)
 		n = 1;
@@ -499,16 +472,6 @@ schedready(Sched *sch, Proc *p, int locked)
 		return;
 	}
 
-	if(m->nixtype == NIXAC)
-		MACHP(0)->readied = p;
-
-	/*
-	 * BUG: if schedready is called to rebalance the scheduler,
-	 * for another core, then this is wrong.
-	 */
-	if(up != p)
-		m->readied = p;	/* group scheduling */
-
 	updatecpu(p);
 	pri = reprioritize(p);
 	p->priority = pri;
@@ -553,22 +516,20 @@ rebalance(void)
 {
 	Mpl pl;
 	int pri, npri, t;
-	Sched *sch;
 	Schedq *rq;
 	Proc *p;
 
-	sch = m->sch;
 	t = m->ticks;
-	if(t - sch->balancetime < HZ)
+	if(t - run.balancetime < HZ)
 		return;
-	sch->balancetime = t;
+	run.balancetime = t;
 
-	for(pri=0, rq=sch->runq; pri<Npriq; pri++, rq++){
+	for(pri=0, rq=run.runq; pri<Npriq; pri++, rq++){
 another:
 		p = rq->head;
 		if(p == nil)
 			continue;
-		if(p->mp != MACHP(m->machno))
+		if(p->mp != m)
 			continue;
 		if(pri == p->basepri)
 			continue;
@@ -576,110 +537,159 @@ another:
 		npri = reprioritize(p);
 		if(npri != pri){
 			pl = splhi();
-			p = dequeueproc(sch, rq, p);
+			p = dequeueproc(&run, rq, p);
 			if(p)
-				queueproc(sch, &sch->runq[npri], p, 0);
+				queueproc(&run, &run.runq[npri], p, 0);
 			splx(pl);
 			goto another;
 		}
 	}
 }
 
-
 /*
- * Is this scheduler overloaded?
- * should it pass processes to any other underloaded scheduler?
+ * Process p is ready to run, but there's no available core.
+ * Try to make a core available by
+ * 1. preempting a process with lower priority, or
+ * 2. preempting one with the same priority that had more than HZ/10, or
+ * 3. rescheduling one that run more than HZ, in the hope he gets his priority lowered.
  */
-static int
-overloaded(Sched *sch)
-{
-	return sch->nmach != 0 && sch->nrdy > sch->nmach;
-}
-
-/*
- * Is it reasonable to give processes to this scheduler?
- */
-static int
-underloaded(Sched *sch)
-{
-	return sch->nrdy < sch->nmach;
-}
-
 static void
-ipisched(Sched *sch)
+preemptfor(Proc *p)
 {
-	Mach* mp;
-	int i;
+	ulong delta;
+	uint i, rr;
+	Proc *mup;
+	Mach *mp;
 
-	for(i = 0; i < MACHMAX; i++){
-		mp = sys->machptr[i];
-		if(mp != nil && mp != m && mp->online && mp->sch == sch)
-			apicipi(mp->apicno);
-	}
+	assert(m->machno == 0);
+	/*
+	 * try to preempt a lower priority process first, default back to
+	 * round robin otherwise.
+	 */
+	for(rr = 0; rr < 2; rr++)
+		for(i = 0; i < MACHMAX; i++)
+			if((mp = sys->machptr[i]) != nil && mp->online && mp->nixtype == NIXTC){
+				if(mp == m)
+					continue;
+				/*
+				 * Caution here: mp->proc can change, even die.
+				 */
+				mup = mp->proc;
+				if(mup == nil)		/* one got idle */
+					return;
+				delta = mp->ticks - mp->qstart;
+				if(mup->priority < p->priority){
+					mp->qexpired = 1;
+					return;
+				}
+				if(rr && mup->priority == p->priority && delta > HZ/10){
+					mp->qexpired = 1;
+					return;
+				}
+				if(rr & delta > HZ){
+					mp->qexpired = 1;
+					return;
+				}
+			}
 }
 
 /*
- * If we are idle, check if another scheduler is overloaded and
- * steal a new process from it. But steal low priority processes to
- * avoid disturbing high priority ones.
+ * Scheduling thread run as the main loop of cpu 0
+ * Used in AMP sched.
  */
-static Proc*
-steal(void)
+static void
+mach0sched(void)
 {
-	static int last;	/* donate in round robin */
-	int start, i;
 	Schedq *rq;
-	Sched *sch;
 	Proc *p;
+	Mach *mp;
+	ulong start, now;
+	int n, i;
+
+	assert(m->machno == 0);
+	acmodeset(NIXKC);		/* we don't time share any more */
+	n = 0;
+	start = perfticks();
+loop:
 
 	/*
-	 * measures show that stealing is expensive, we are donating
-	 * by now but only when calling exec(). See maydonate().
+	 * find a ready process that we might run.
 	 */
-	if(!schedsteals)
-		return nil;
+	spllo();
+	for(rq = &run.runq[Nrq-1]; rq >= run.runq; rq--)
+		for(p = rq->head; p; p = p->rnext){
+			/*
+			 * wired processes may only run when their core is available.
+			 */
+			if(p->wired != nil){
+				if(p->wired->proc == nil)
+					goto found;
+				continue;
+			}
+			/*
+			 * find a ready process that did run at an available core
+			 * or one that has not moved for some time.
+			 */
+			if(p->mp == nil || p->mp->proc == nil || n>0)
+				goto found;
+		}
+	/* waste time or halt the CPU */
+	idlehands();
+	/* remember how much time we're here */
+	now = perfticks();
+	m->perf.inidle += now-start;
+	start = now;
+	n++;
+	goto loop;
 
-	start = last;
-	for(i = 0; i < Nsched; i++){
-		last = (start+i)%Nsched;
-		sch = &run[last];
-		if(sch == m->sch || sch->nmach == 0 || !overloaded(sch))
-			continue;
-		for(rq = &sch->runq[Nrq-1]; rq >= sch->runq; rq--){
-			for(p = rq->head; p != nil; p = p->rnext)
-				if(!p->wired && p->priority < PriKproc)
+found:
+	assert(m->machno == 0);
+	splhi();
+	/*
+	 * find a core for this process, but honor wiring.
+	 */
+	mp = p->wired;
+	if(mp != nil){
+		if(mp->proc != nil)
+			goto loop;
+	}else{
+		for(i = 0; i < MACHMAX; i++)
+			if((mp = sys->machptr[i]) != nil && mp->online && mp->nixtype == NIXTC)
+				if(mp != m && mp->proc == nil)
 					break;
-			if(p != nil && dequeueproc(sch, rq, p) != nil)
-				return p;
+		if(i == MACHMAX){
+			preemptfor(p);
+			goto loop;
 		}
 	}
-	return nil;
+
+	p = dequeueproc(&run, rq, p);
+	mp->proc = p;
+	if(p != nil){
+		p->state = Scheding;
+		p->mp = mp;
+	}
+
+	n = 0;
+	goto loop;
 }
 
 /*
- *  pick a process to run
+ * SMP performs better than AMP with few cores.
+ * So, leave this here by now. We should probably
+ * write a unified version of runproc good enough for
+ * both SMP and AMP.
  */
-Proc*
-runproc(void)
+static Proc*
+smprunproc(void)
 {
 	Schedq *rq;
-	Sched *sch;
 	Proc *p;
 	ulong start, now;
 	int i;
 
 	start = perfticks();
-	sch = m->sch;
-	/* cooperative scheduling until the clock ticks */
-	if((p=m->readied) && p->mach==0 && p->state==Ready
-	&& sch->runq[Nrq-1].head == nil && sch->runq[Nrq-2].head == nil
-	&& (!p->wired || p->wired == m)){
-		sch->skipscheds++;
-		rq = &sch->runq[p->priority];
-		goto found;
-	}
-
-	sch->preempts++;
+	run.preempts++;
 
 loop:
 	/*
@@ -694,19 +704,14 @@ loop:
 		 *  processor can run given affinity constraints.
 		 *
 		 */
-		for(rq = &sch->runq[Nrq-1]; rq >= sch->runq; rq--){
+		for(rq = &run.runq[Nrq-1]; rq >= run.runq; rq--){
 			for(p = rq->head; p; p = p->rnext){
-				if(p->mp == nil || p->mp == MACHP(m->machno)
+				if(p->mp == nil || p->mp == sys->machptr[m->machno]
 				|| (!p->wired && i > 0))
 					goto found;
 			}
 		}
 
-		p = steal();
-		if(p != nil){
-			splhi();
-			goto stolen;
-		}
 		/* waste time or halt the CPU */
 		idlehands();
 		/* remember how much time we're here */
@@ -717,20 +722,69 @@ loop:
 
 found:
 	splhi();
-	p = dequeueproc(sch, rq, p);
+	p = dequeueproc(&run, rq, p);
 	if(p == nil)
 		goto loop;
-stolen:
+
 	p->state = Scheding;
-	p->mp = MACHP(m->machno);
+	p->mp = sys->machptr[m->machno];
 
 	if(edflock(p)){
-		edfrun(p, rq == &sch->runq[PriEdf]);	/* start deadline timer and do admin */
+		edfrun(p, rq == &run.runq[PriEdf]);	/* start deadline timer and do admin */
 		edfunlock();
 	}
 	if(p->trace)
 		proctrace(p, SRun, 0);
 	return p;
+}
+
+/*
+ *  pick a process to run.
+ *  most of this is used in AMP sched.
+ *  (on a quad core or less, we use SMP).
+ *  In the case of core 0 we always return nil, but
+ *  schedule the picked process at any other available TC.
+ *  In the case of other cores we wait until a process is given
+ *  by core 0.
+ */
+Proc*
+runproc(void)
+{
+	Schedq *rq;
+	Proc *p;
+	ulong start, now;
+
+	if(sys->nmach <= AMPmincores)
+		return smprunproc();
+
+	start = perfticks();
+	run.preempts++;
+	rq = nil;
+	if(m->machno != 0){
+		do{
+			spllo();
+			while(m->proc == nil)
+				idlehands();
+			now = perfticks();
+			m->perf.inidle += now-start;
+			start = now;
+			splhi();
+			p = m->proc;
+		}while(p == nil);
+		p->state = Scheding;
+		p->mp = sys->machptr[m->machno];
+	
+		if(edflock(p)){
+			edfrun(p, rq == &run.runq[PriEdf]);	/* start deadline timer and do admin */
+			edfunlock();
+		}
+		if(p->trace)
+			proctrace(p, SRun, 0);
+		return p;
+	}
+
+	mach0sched();
+	return nil;	/* not reached */
 }
 
 int
@@ -811,7 +865,7 @@ newproc(void)
 	p->wired = 0;
 	procpriority(p, PriNormal, 0);
 	p->cpu = 0;
-	p->lastupdate = MACHP(0)->ticks*Scaling;
+	p->lastupdate = sys->ticks*Scaling;
 	p->edf = nil;
 
 	p->ntrap = 0;
@@ -850,15 +904,15 @@ procwired(Proc *p, int bm)
 			psdecref(pp);
 		}
 		bm = 0;
-		for(i=0; i<conf.nmach; i++)
+		for(i=0; i<sys->nmach; i++)
 			if(nwired[i] < nwired[bm])
 				bm = i;
 	} else {
 		/* use the virtual machine requested */
-		bm = bm % conf.nmach;
+		bm = bm % sys->nmach;
 	}
 
-	p->wired = MACHP(bm);
+	p->wired = sys->machptr[bm];
 	p->mp = p->wired;
 
 	/*
@@ -1287,7 +1341,7 @@ pexit(char *exitstr, int freemem)
 		stime = up->time[TSys] + up->time[TCSys];
 		wq->w.time[TUser] = tk2ms(utime);
 		wq->w.time[TSys] = tk2ms(stime);
-		wq->w.time[TReal] = tk2ms(MACHP(0)->ticks - up->time[TReal]);
+		wq->w.time[TReal] = tk2ms(sys->ticks - up->time[TReal]);
 		if(exitstr && exitstr[0])
 			snprint(wq->w.msg, sizeof(wq->w.msg), "%s %d: %s",
 				up->text, up->pid, exitstr);
@@ -1465,6 +1519,7 @@ procflushseg(Segment *s)
 {
 	int i, ns, nm, nwait;
 	Proc *p;
+	Mach *mp;
 
 	/*
 	 *  tell all processes with this
@@ -1479,12 +1534,12 @@ procflushseg(Segment *s)
 		for(ns = 0; ns < NSEG; ns++){
 			if(p->seg[ns] == s){
 				p->newtlb = 1;
-				for(nm = 0; nm < conf.nmach; nm++){
-					if(MACHP(nm)->proc == p){
-						MACHP(nm)->mmuflush = 1;
-						nwait++;
-					}
-				}
+				for(nm = 0; nm < MACHMAX; nm++)
+					if((mp = sys->machptr[nm]) != nil && mp->online)
+						if(mp->proc == p){
+							mp->mmuflush = 1;
+							nwait++;
+						}
 				break;
 			}
 		}
@@ -1501,31 +1556,29 @@ procflushseg(Segment *s)
 	 *  In that case we must IPI it, but only if that core is
 	 *  using this segment.
 	 */
-	for(nm = 0; nm < conf.nmach; nm++)
-		if(MACHP(nm) != m)
-			while(MACHP(nm)->mmuflush)
-				sched();
+	for(i = 0; i < MACHMAX; i++)
+		if((mp = sys->machptr[i]) != nil && mp->online)
+			if(mp != m)
+				while(mp->mmuflush)
+					sched();
 }
 
 void
 scheddump(void)
 {
 	Proc *p;
-	Sched *sch;
 	Schedq *rq;
 
-	for(sch = run; sch < &run[Nsched]; sch++){
-		for(rq = &sch->runq[Nrq-1]; rq >= sch->runq; rq--){
-			if(rq->head == 0)
-				continue;
-			print("sch%ld rq%ld:", sch - run, rq-sch->runq);
-			for(p = rq->head; p; p = p->rnext)
-				print(" %d(%lud)", p->pid, m->ticks - p->readytime);
-			print("\n");
-			delay(150);
-		}
-		print("sch%ld: nrdy %d\n", sch - run, sch->nrdy);
+	for(rq = &run.runq[Nrq-1]; rq >= run.runq; rq--){
+		if(rq->head == 0)
+			continue;
+		print("run[%ld]:", rq-run.runq);
+		for(p = rq->head; p; p = p->rnext)
+			print(" %d(%lud)", p->pid, m->ticks - p->readytime);
+		print("\n");
+		delay(150);
 	}
+	print("nrdy %d\n", run.nrdy);
 }
 
 void
@@ -1568,7 +1621,7 @@ kproc(char *name, void (*func)(void *), void *arg)
 	incref(kpgrp);
 
 	memset(p->time, 0, sizeof(p->time));
-	p->time[TReal] = MACHP(0)->ticks;
+	p->time[TReal] = sys->ticks;
 	ready(p);
 	/*
 	 *  since the bss/data segments are now shareable,
@@ -1744,20 +1797,19 @@ renameuser(char *old, char *new)
 
 /*
  *  time accounting called by clock() splhi'd
- *  only cpu0 computes system load average
+ *  only cpu1 computes system load average
+ *  but the system load average is accounted for cpu0.
  */
 void
 accounttime(void)
 {
-	Sched *sch;
 	Proc *p;
 	ulong n, per;
 
-	sch = m->sch;
 	p = m->proc;
 	if(p) {
-		if(m->machno == 0)
-			sch->nrun++;
+		if(m->machno == 1)
+			run.nrun++;
 		p->time[p->insyscall]++;
 	}
 
@@ -1775,8 +1827,10 @@ accounttime(void)
 	m->perf.avg_inintr = (m->perf.avg_inintr*(HZ-1)+m->perf.inintr)/HZ;
 	m->perf.inintr = 0;
 
-	/* only one processor gets to compute system load averages */
-	if(m->machno != 0)
+	/* only one processor gets to compute system load averages.
+	 * it has to be mach 1 when we use AMP.
+	 */
+	if(sys->nmach > 1 && m->machno != 1)
 		return;
 
 	/*
@@ -1788,16 +1842,16 @@ accounttime(void)
 	 * approximately the load over the last second,
 	 * with a tail lasting about 5 seconds.
 	 */
-	n = sch->nrun;
-	sch->nrun = 0;
-	n = (sch->nrdy+n)*1000;
-	m->load = (m->load*(HZ-1)+n)/HZ;
+	n = run.nrun;
+	run.nrun = 0;
+	n = (run.nrdy+n)*1000;
+	sys->load = (sys->load*(HZ-1)+n)/HZ;
 }
 
 void
 halt(void)
 {
-	if(m->sch->nrdy != 0)
+	if(run.nrdy != 0)
 		return;
 	hardhalt();
 }

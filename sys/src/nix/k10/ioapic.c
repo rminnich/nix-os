@@ -180,10 +180,14 @@ ioapiconline(void)
 		ioapicdump();
 }
 
+static int dfpolicy = 0;
+
 static void
 ioapicintrdd(u32int* hi, u32int* lo)
 {
-	static int i;
+	int i;
+	static int df;
+	static Lock dflock;
 
 	/*
 	 * Set delivery mode (lo) and destination field (hi),
@@ -200,21 +204,35 @@ ioapicintrdd(u32int* hi, u32int* lo)
 	 * generations, both AMD and Intel, using the APIC and xAPIC.
 	 *
 	 * Interrupt routing policy can be set here.
-	 * Currently, just assign each interrupt to a different CPU on
-	 * a round-robin basis. Some idea of the packages/cores/thread
-	 * topology would be useful here, e.g. to not assign interrupts
-	 * to more than one thread in a core, or to use a "noise" core.
-	 * But, as usual, Intel make that an onerous task. 
 	 */
-	for(;; i = (i+1) % nelem(xlapic)){
-		if(!xlapic[i].useable)
-			continue;
-		if(sys->machptr[xlapic[i].machno] == nil)
-			continue;
-		if(sys->machptr[xlapic[i].machno]->online != 0)
-			break;
+	switch(dfpolicy){
+	default:				/* noise core 0 */
+		*hi = sys->machptr[0]->apicno<<24;
+		break;
+	case 1:					/* round-robin */
+		/*
+		 * Assign each interrupt to a different CPU on a round-robin
+		 * Some idea of the packages/cores/thread topology would be
+		 * useful here, e.g. to not assign interrupts to more than one
+		 * thread in a core. But, as usual, Intel make that an onerous
+		 * task.
+		 */
+		lock(&dflock);
+		for(;;){
+			i = df++;
+			if(df >= sys->nmach+1)
+				df = 0;
+			if(sys->machptr[i] == nil || !sys->machptr[i]->online)
+				continue;
+			i = sys->machptr[i]->apicno;
+			if(xlapic[i].useable && xlapic[i].addr == 0)
+				break;
+		}
+		unlock(&dflock);
+	
+		*hi = i<<24;
+		break;
 	}
-	*hi = i<<24;
 	*lo |= Pm|MTf;
 }
 

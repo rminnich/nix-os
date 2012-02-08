@@ -143,7 +143,7 @@ lock(Lock *l)
 		lockstats.inglare++;
 		i = 0;
 		while(l->key){
-			if(conf.nmach < 2 && up && up->edf && (up->edf->flags & Admitted)){
+			if(sys->nmach < 2 && up && up->edf && (up->edf->flags & Admitted)){
 				/*
 				 * Priority inversion, yield on a uniprocessor; on a
 				 * multiprocessor, the other processor will unlock
@@ -216,7 +216,7 @@ acquire:
 	l->pc = pc;
 	l->p = up;
 	l->isilock = 1;
-	l->m = MACHP(m->machno);
+	l->m = m;
 	if(LOCKCYCLES)
 		cycles(&l->lockcycles);
 }
@@ -236,7 +236,7 @@ canlock(Lock *l)
 		up->lastlock = l;
 	l->pc = getcallerpc(&l);
 	l->p = up;
-	l->m = MACHP(m->machno);
+	l->m = m;
 	l->isilock = 0;
 	if(LOCKCYCLES)
 		cycles(&l->lockcycles);

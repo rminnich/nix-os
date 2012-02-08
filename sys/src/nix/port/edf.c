@@ -132,6 +132,7 @@ deadlineintr(Ureg*, Timer *t)
 {
 	/* Proc reached deadline */
 	extern int panicking;
+	Sched *sch;
 	Proc *p;
 
 	if(panicking || active.exiting)
@@ -151,8 +152,8 @@ deadlineintr(Ureg*, Timer *t)
 		if(up->trace)
 			proctrace(up, SInts, 0);
 		up->delaysched++;
-		assert(m->sch);
- 		m->sch->delayedscheds++;
+		sch = procsched(up);
+ 		sch->delayedscheds++;
 	}
 }
 
@@ -296,8 +297,10 @@ edfrun(Proc *p, int edfpri)
 {
 	Edf *e;
 	long tns;
+	Sched *sch;
 
 	e = p->edf;
+	sch = procsched(p);
 	/* Called with edflock held */
 	if(edfpri){
 		tns = e->d - now;
@@ -306,8 +309,7 @@ edfrun(Proc *p, int edfpri)
 			 * deschedule forthwith
 			 */
 			p->delaysched++;
- 			assert(m->sch);
-			m->sch->delayedscheds++;
+			sch->delayedscheds++;
 			e->s = now;
 			return;
 		}

@@ -347,6 +347,7 @@ physalloc(u64int size, int *colorp, void *tag)
 	uintmem m;
 
 	m = 0;
+
 	color = *colorp;
 	if(color >= 0){
 		color %= ndoms;

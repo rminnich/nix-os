@@ -283,7 +283,7 @@ newpage(int clear, Segment **s, uintptr va, usize size, int color)
 	p->ref++;
 	p->va = va;
 	p->modref = 0;
-	for(i = 0; i < MACHMAX; i++)
+	for(i = 0; i < nelem(p->cachectl); i++)
 		p->cachectl[i] = ct;
 	unlock(p);
 	unlock(&pga);

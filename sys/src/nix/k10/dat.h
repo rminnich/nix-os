@@ -110,7 +110,6 @@ struct Confmem
 
 struct Conf
 {
-	ulong	nmach;		/* processors */
 	ulong	nproc;		/* processes */
 	Confmem	mem[4];		/* physical memory */
 	uvlong	npage;		/* total physical pages of memory */
@@ -266,15 +265,14 @@ struct Mach
 	void*	alarm;			/* alarms bound to this clock */
 	int	inclockintr;
 
-	Proc*	readied;		/* for runproc */
-	ulong	schedticks;		/* next forced context switch */
+	ulong	qstart;			/* time when up started running */
+	int	qexpired;		/* quantum expired */
 
 	int	tlbfault;
 	int	tlbpurge;
 	int	pfault;
 	int	cs;
 	int	syscall;
-	int	load;
 	int	intr;
 	int	mmuflush;		/* make current proc flush it's mmu state */
 	int	ilockdepth;
@@ -287,8 +285,6 @@ struct Mach
 	vlong	cpuhz;
 	int	cpumhz;
 	u64int	rdtsc;
-
-	Sched*	sch;			/* scheduler used */
 
 	Lock	pmclock;
 	PmcCtr	pmc[PmcMaxCtrs];
@@ -337,6 +333,11 @@ struct Sys {
 			uintptr	vmunmapped;	/* 1st unmapped va */
 			uintptr	vmend;		/* 1st unusable va */
 			u64int	epoch;		/* crude time synchronisation */
+
+			int		nc[NIXROLES];		/* number of online processors */
+			int		nmach;
+			int		load;
+			ulong	ticks;			/* of the clock since boot time */
 		};
 		uchar	syspage[4*KiB];
 	};
@@ -393,12 +394,13 @@ struct ISAConf {
  * MMU information array machptr, mainly for disambiguation and access to
  * the clock which is only maintained by the bootstrap processor (0).
  */
-#define MACHP(n)	(sys->machptr[n])
-
 extern register Mach* m;			/* R15 */
 extern register Proc* up;			/* R14 */
 
 extern uintptr kseg0;
+
+extern char*rolename[];
+
 
 #pragma	varargck	type	"P"	uintmem
 
@@ -416,3 +418,4 @@ extern uintptr kseg0;
 extern char dbgflg[256];
 
 #define dbgprint	print		/* for now */
+

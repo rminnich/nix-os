@@ -44,7 +44,7 @@ Dirtab pipedir[] =
 
 enum
 {
-	/* Plan 9 default for conf.nmach > 1 */
+	/* Plan 9 default for nmach > 1 */
 	Pipeqsize = 256*1024
 };
 

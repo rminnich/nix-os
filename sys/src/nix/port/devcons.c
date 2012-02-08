@@ -366,7 +366,7 @@ iprintcanlock(Lock *l)
 	for(i=0; i<1000; i++){
 		if(canlock(l))
 			return 1;
-		if(l->m == MACHP(m->machno))
+		if(l->m == m)
 			return 0;
 		microdelay(100);
 	}
@@ -820,11 +820,10 @@ consread(Chan *c, void *buf, long n, vlong off)
 {
 	ulong l;
 	Mach *mp;
-	char *b, *bp, ch, *s;
+	char *b, *bp, ch, *s, *e;
 	char tmp[512];		/* Qswap is 381 bytes at clu */
 	int i, k, id, send;
 	long offset;
-	extern int schedsteals, scheddonates;
 
 
 	if(n <= 0)
@@ -890,7 +889,7 @@ consread(Chan *c, void *buf, long n, vlong off)
 		for(i=0; i<6 && NUMSIZE*i<k+n; i++){
 			l = up->time[i];
 			if(i == TReal)
-				l = MACHP(0)->ticks - l;
+				l = sys->ticks - l;
 			l = TK2MS(l);
 			readnum(0, tmp+NUMSIZE*i, NUMSIZE, l, NUMSIZE);
 		}
@@ -944,11 +943,12 @@ consread(Chan *c, void *buf, long n, vlong off)
 		return 0;
 
 	case Qsysstat:
-		b = smalloc(MACHMAX*(NUMSIZE*11+2+1) + 1);	/* +1 for NUL */
+		n = MACHMAX*(NUMSIZE*11+2+1);
+		b = smalloc(n + 1);	/* +1 for NUL */
 		bp = b;
-		for(id = 0; id < MACHMAX; id++) {
-			mp = sys->machptr[id];
-			if(mp != nil && mp->online) {
+		e = bp + n;
+		for(id = 0; id < MACHMAX; id++)
+			if((mp = sys->machptr[id]) != nil && mp->online){
 				readnum(0, bp, NUMSIZE, mp->machno, NUMSIZE);
 				bp += NUMSIZE;
 				readnum(0, bp, NUMSIZE, mp->cs, NUMSIZE);
@@ -963,7 +963,7 @@ consread(Chan *c, void *buf, long n, vlong off)
 				bp += NUMSIZE;
 				readnum(0, bp, NUMSIZE, mp->tlbpurge, NUMSIZE);
 				bp += NUMSIZE;
-				readnum(0, bp, NUMSIZE, mp->load, NUMSIZE);
+				readnum(0, bp, NUMSIZE, sys->load, NUMSIZE);
 				bp += NUMSIZE;
 				readnum(0, bp, NUMSIZE,
 					(mp->perf.avg_inidle*100)/mp->perf.period,
@@ -973,22 +973,11 @@ consread(Chan *c, void *buf, long n, vlong off)
 					(mp->perf.avg_inintr*100)/mp->perf.period,
 					NUMSIZE);
 				bp += NUMSIZE;
-				readnum(0, bp, NUMSIZE, (mp->sch - run), NUMSIZE);
+				readnum(0, bp, NUMSIZE, 0, NUMSIZE); /* sched # */
 				bp += NUMSIZE;
-				switch(mp->nixtype){
-				case NIXAC:
-					strcpy(bp, "AC");
-					break;
-				case NIXKC:
-					strcpy(bp, "KC");
-					break;
-				default:
-					strcpy(bp, "TC");
-				}
-				bp += 2;
+				bp = strecpy(bp, e, rolename[mp->nixtype]);
 				*bp++ = '\n';
 			}
-		}
 		if(waserror()){
 			free(b);
 			nexterror();
@@ -1035,9 +1024,7 @@ consread(Chan *c, void *buf, long n, vlong off)
 		return n;
 
 	case Qdebug:
-		s = seprint(tmp, tmp + sizeof tmp, "steal %d\n", schedsteals);
-		s = seprint(s, tmp + sizeof tmp, "donate %d\n", scheddonates);
-		s = seprint(s, tmp + sizeof tmp, "locks %uld\n", lockstats.locks);
+		s = seprint(tmp, tmp + sizeof tmp, "locks %uld\n", lockstats.locks);
 		s = seprint(s, tmp + sizeof tmp, "glare %uld\n", lockstats.glare);
 		s = seprint(s, tmp + sizeof tmp, "inglare %uld\n", lockstats.inglare);
 		s = seprint(s, tmp + sizeof tmp, "qlock %uld\n", qlockstats.qlock);
@@ -1062,7 +1049,6 @@ conswrite(Chan *c, void *va, long n, vlong off)
 	ulong offset;
 	Cmdbuf *cb;
 	Cmdtab *ct;
-	extern int schedsteals, scheddonates;
 	a = va;
 	offset = off;
 
@@ -1155,8 +1141,8 @@ conswrite(Chan *c, void *va, long n, vlong off)
 
 	case Qsysstat:
 		for(i = 0; i < MACHMAX; i++)
-			if((mp = sys->machptr[i]) != nil && mp->online != 0){
-				mp = MACHP(i);
+			if((mp = sys->machptr[i]) != nil && mp->online){
+				mp = sys->machptr[i];
 				mp->cs = 0;
 				mp->intr = 0;
 				mp->syscall = 0;
@@ -1200,16 +1186,7 @@ conswrite(Chan *c, void *va, long n, vlong off)
 		buf[n] = 0;
 		if(n > 0 && buf[n-1] == '\n')
 			buf[n-1] = 0;
-		if(strcmp(buf, "steal") == 0)
-			schedsteals = 1;
-		else if(strcmp(buf, "nosteal") == 0)
-			schedsteals = 0;
-		else if(strcmp(buf, "donate") == 0)
-			scheddonates = 1;
-		else if(strcmp(buf, "nodonate") == 0)
-			scheddonates = 0;
-		else
-			error(Ebadctl);
+		error(Ebadctl);
 		break;
 	default:
 		print("conswrite: %#llux\n", c->qid.path);
@@ -1255,7 +1232,7 @@ nrand(int n)
 {
 	if(randn == 0)
 		seedrand();
-	randn = randn*1103515245 + 12345 + MACHP(0)->ticks;
+	randn = randn*1103515245 + 12345 + sys->ticks;
 	return (randn>>16) % n;
 }
 

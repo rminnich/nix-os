@@ -260,7 +260,7 @@ srballoc(ulong sz)
 
 	srb = malloc(sizeof *srb+sz);
 	srb->dp = srb->data = srb+1;
-	srb->ticksent = MACHP(0)->ticks;
+	srb->ticksent = sys->ticks;
 	return srb;
 }
 
@@ -271,7 +271,7 @@ srbkalloc(void *db, ulong)
 
 	srb = malloc(sizeof *srb);
 	srb->dp = srb->data = db;
-	srb->ticksent = MACHP(0)->ticks;
+	srb->ticksent = sys->ticks;
 	return srb;
 }
 
@@ -396,7 +396,7 @@ tsince(int tag)
 {
 	int n;
 
-	n = MACHP(0)->ticks & 0xffff;
+	n = sys->ticks & 0xffff;
 	n -= tag & 0xffff;
 	if(n < 0)
 		n += 1<<16;
@@ -410,7 +410,7 @@ newtag(Aoedev *d)
 
 	do {
 		t = ++d->lasttag << 16;
-		t |= MACHP(0)->ticks & 0xffff;
+		t |= sys->ticks & 0xffff;
 	} while (t == Tfree || t == Tmgmt);
 	return t;
 }
@@ -497,7 +497,7 @@ hset(Aoedev *d, Frame *f, Aoehdr *h, int cmd)
 		downdev(d, "resend fails; no netlink/ea");
 		return -1;
 	}
-	if(f->srb && MACHP(0)->ticks - f->srb->ticksent > Srbtimeout){
+	if(f->srb && sys->ticks - f->srb->ticksent > Srbtimeout){
 		eventlog("%æ: srb timeout\n", d);
 		frameerror(d, f, Etimedout);
 		return -1;
@@ -515,7 +515,7 @@ hset(Aoedev *d, Frame *f, Aoehdr *h, int cmd)
 	f->dl = l;
 	f->nl = l->nl;
 	f->eaidx = i;
-	f->ticksent = MACHP(0)->ticks;
+	f->ticksent = sys->ticks;
 
 	return f->tag;
 }
@@ -603,7 +603,7 @@ loop:
 		}
 		nbc = Nbcms/Nms;
 	}
-	starttick = MACHP(0)->ticks;
+	starttick = sys->ticks;
 	rlock(&devs);
 	for(d = devs.d; d; d = d->next){
 		if(!canqlock(d))
@@ -626,7 +626,7 @@ loop:
 			if(d->nout == d->maxout){
 				if(d->maxout > 1)
 					d->maxout--;
-				d->lastwadj = MACHP(0)->ticks;
+				d->lastwadj = sys->ticks;
 			}
 			a = (Aoeata*)f->hdr;
 			if(a->scnt > Dbcnt / Aoesectsz &&
@@ -645,14 +645,14 @@ loop:
 			}
 		}
 		if(d->nout == d->maxout && d->maxout < d->nframes &&
-		   TK2MS(MACHP(0)->ticks - d->lastwadj) > 10*1000){
+		   TK2MS(sys->ticks - d->lastwadj) > 10*1000){
 			d->maxout++;
-			d->lastwadj = MACHP(0)->ticks;
+			d->lastwadj = sys->ticks;
 		}
 		qunlock(d);
 	}
 	runlock(&devs);
-	i = Nms - TK2MS(MACHP(0)->ticks - starttick);
+	i = Nms - TK2MS(sys->ticks - starttick);
 	if(i > 0)
 		tsleep(&up->sleep, return0, 0, i);
 	goto loop;

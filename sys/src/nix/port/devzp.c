@@ -164,7 +164,6 @@ static long
 zqwrite(Zq *q, Kzio io[], int nio)
 {
 	int i, ei, ri, wi, awake;
-	Proc *p;
 
 	lock(q);
 	if(waserror()){
@@ -208,13 +207,8 @@ zqwrite(Zq *q, Kzio io[], int nio)
 	zqdump(q);
 	poperror();
 	unlock(q);
-	if(awake){
-		p = wakeup(&q->rr);
-
-		/* if we just wokeup a higher priority process, let it run */
-		if(p != nil && p->priority > up->priority)
-			sched();
-	}
+	if(awake)
+		wakeup(&q->rr);
 	return nio;
 }
 

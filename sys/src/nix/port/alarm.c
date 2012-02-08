@@ -14,7 +14,7 @@ alarmkproc(void*)
 	ulong now;
 
 	for(;;){
-		now = MACHP(0)->ticks;
+		now = sys->ticks;
 		qlock(&alarms);
 		while((rp = alarms.head) && rp->alarm <= now){
 			if(rp->alarm != 0L){
@@ -46,7 +46,7 @@ checkalarms(void)
 	ulong now;
 
 	p = alarms.head;
-	now = MACHP(0)->ticks;
+	now = sys->ticks;
 
 	if(p && p->alarm <= now)
 		wakeup(&alarmr);
@@ -59,14 +59,14 @@ procalarm(ulong time)
 	ulong when, old;
 
 	if(up->alarm)
-		old = tk2ms(up->alarm - MACHP(0)->ticks);
+		old = tk2ms(up->alarm - sys->ticks);
 	else
 		old = 0;
 	if(time == 0) {
 		up->alarm = 0;
 		return old;
 	}
-	when = ms2tk(time)+MACHP(0)->ticks;
+	when = ms2tk(time)+sys->ticks;
 
 	qlock(&alarms);
 	l = &alarms.head;

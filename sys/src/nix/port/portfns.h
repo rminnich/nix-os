@@ -256,6 +256,7 @@ void		procpriority(Proc*, int, int);
 void		procrestore(Proc*);
 void		procsave(Proc*);
 void		(*proctrace)(Proc*, int, vlong);
+void		proctracepid(Proc*);
 void		procwired(Proc*, int);
 void		psdecref(Proc*);
 Proc*		psincref(int);
