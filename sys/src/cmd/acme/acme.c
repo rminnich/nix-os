@@ -37,7 +37,7 @@ Rune	snarfrune[NSnarf+1];
 
 char		*fontnames[2] =
 {
-	"/lib/font/bit/lucidasans/euro.8.font",
+	"/lib/font/bit/anonpro/anon.14.font",
 	"/lib/font/bit/lucm/unicode.9.font"
 };
 
