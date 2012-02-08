@@ -123,59 +123,6 @@ pciclose(Chan*)
 {
 }
 
-static uchar *pcibase;
-
-static void
-pcireset0(void)
-{
-	pcibase = vmap(0xff00000000000000llu, 256*1024*1024);
-print("***** PCIBASE %#p\n", pcibase);
-	if(pcibase == nil)
-		pcibase = vmap(0xe0000000, 32*1024*1024);
-print("***** PCIBASE %#p\n", pcibase);
-}
-
-static long
-xread(int tbdf, void *va, long n, vlong offset)
-{
-	uchar *a, *o;
-	int i, r;
-	ulong x;
-	static int once;
-	static uchar *p;
-
-	if(once == 0){
-		once = 1;
-		p = pcibase; // vmap(0xe0000000, 256*1024*1024);
-	}
-
-	if(p == nil)
-		error("can't vmap");
-	a = va;
-	o = p + (BUSBNO(tbdf)<<20 + BUSDNO(tbdf)<<15 | BUSFNO(tbdf)<<12);
-
-	if(n+offset > 4096)
-		n = 4096-offset;
-	r = offset;
-	if(!(r & 3) && n == 4){
-		x = *(u32int*)(o+r);
-		PBIT32(a, x);
-		return 4;
-	}
-	if(!(r & 1) && n == 2){
-		x = *(u16int*)(o+r);
-		PBIT16(a, x);
-		return 2;
-	}
-	for(i = 0; i <  n; i++){
-		x = *(u8int*)(o+r);
-		PBIT8(a, x);
-		a++;
-		r++;
-	}
-	return i;
-}
-
 static long
 pciread(Chan *c, void *va, long n, vlong offset)
 {
@@ -211,12 +158,9 @@ pciread(Chan *c, void *va, long n, vlong offset)
 		if(p == nil)
 			error(Egreg);
 		if(n+offset > 256)
-{
-return xread(tbdf, va, n, offset);
-			return 0;
-}
-		if(n+offset > 256)
 			n = 256-offset;
+		if(n < 0)
+			return 0;
 		r = offset;
 		if(!(r & 3) && n == 4){
 			x = pcicfgr32(p, r);
@@ -294,7 +238,7 @@ Dev pcidevtab = {
 	'$',
 	"pci",
 
-	pcireset0,	/* arrg ... bad planning */
+	devreset,
 	devinit,
 	devshutdown,
 	pciattach,
