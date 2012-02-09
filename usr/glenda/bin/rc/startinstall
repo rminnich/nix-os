@@ -1,0 +1,18 @@
+#!/bin/rc
+
+echo -n Binding in appropriate directories...
+bind -a /sys/lib/dist/bin/386 /bin
+aux/stub -d /rc/bin/inst
+bind /sys/lib/dist/pc/inst /rc/bin/inst
+aux/stub -d /bin/inst
+bind /sys/lib/dist/pc/inst /bin/inst
+echo done.
+dossrv
+inst/gui
+# gotta make them scroll
+for (i in /dev/wsys/*) {
+	if (~ `{cat $i/label} mainloop || ~ `{cat $i/label} tailfsrv) {
+		echo scroll > $i/wctl
+	}
+}
+

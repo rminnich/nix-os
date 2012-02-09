@@ -1,10 +1,16 @@
 #!/bin/rc
 # setup - prep for the mkfile
-9fs sources
-9fs other
-9fs outfsother
-if (test -e /cfg/$sysname/config)
-	. /cfg/$sysname/config
-if not
-	outip=204.178.31.2
-import -c tcp!$outip!666 $dist/web.protect
+#9fs sources
+#9fs other
+#9fs outfsother
+#if (test -e /cfg/$sysname/config)
+#	. /cfg/$sysname/config
+#if not
+#	outip=204.178.31.2
+#import -c tcp!$outip!666 $dist/web.protect
+
+# we want to build a kernel from the NIX repo eventually, but
+# for right now just use the stock one in your root. 
+# But don't make a mess.
+mkdir -p /tmp/dist/pc
+bind -bc /tmp/dist/pc /sys/src/9/pc
