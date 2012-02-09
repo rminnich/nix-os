@@ -259,7 +259,7 @@ class CL(object):
 			s += 'URL: ' + cl.url + '	# cannot edit\n\n'
 		if cl.private:
 			s += "Private: True\n"
-		s += "Reviewer: " + "nix-dev@googlegroups.com" +  JoinComma(cl.reviewer) + "\n"
+		s += "Reviewer: " + "nixiedev@gmail.com" +  JoinComma(cl.reviewer) + "\n"
 		s += "CC: " + JoinComma(cl.cc) + "\n"
 		s += "\n"
 		s += "Description:\n"
