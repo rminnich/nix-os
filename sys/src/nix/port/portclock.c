@@ -147,6 +147,9 @@ hzclock(Ureg *ur)
 	uintptr pc;
 
 	m->ticks++;
+	if(m->machno == 0)
+		sys->ticks = m->ticks;
+
 	pc = userpc(ur);
 	if(m->proc)
 		m->proc->pc = pc;
