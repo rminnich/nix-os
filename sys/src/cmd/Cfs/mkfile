@@ -1,0 +1,29 @@
+</$objtype/mkfile
+
+
+TARG=\
+	fscmd\
+	fsfmt\
+	main\
+
+OFILES=\
+	dbg.$O\
+	mblk.$O\
+	dblk.$O\
+	fblk.$O\
+	file.$O\
+	attr.$O\
+	fsys.$O\
+	file.$O\
+
+HFILES=\
+	dbg.h\
+	conf.h\
+	dk.h\
+	fns.h\
+
+# not ready for install
+BIN=.
+
+</sys/src/cmd/mkmany
+
