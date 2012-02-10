@@ -239,18 +239,45 @@ notstale(void *x)
  *	it now just in case it is idle or not being updated
  *	NB: this function releases the ilock
  */
+
+
+static PmcWait*
+newpmcw(void)
+{
+	PmcWait *w;
+
+	w = malloc(sizeof (PmcWait));
+	w->ref = 1;
+	return w;
+}
+
+static void
+pmcwclose(PmcWait *w)
+{
+	if(decref(w))
+		return;
+
+	free(w);
+}
+
 static void
 waitnotstale(Mach *mp, PmcCtr *p)
 {
 	PmcWait *w;
 
-	w = malloc(sizeof (PmcWait));
+	w = newpmcw();
 	w->next = p->wq;
 	p->wq = w;
+	incref(w);
 	iunlock(&mp->pmclock);
 	apicipi(mp->apicno);
+	if(waserror()){
+		pmcwclose(w);
+		nexterror();
+	}
 	sleep(&w->r, notstale, p);
-	free(w);
+	poperror();
+	pmcwclose(w);
 }
 
 u64int
@@ -400,6 +427,7 @@ pmcupdate(Mach *m)
 			for(w = p->wq; w != nil; w = w->next){
 				p->wq = w->next;
 				wakeup(&w->r);
+				pmcwclose(w);
 			}
 		}
 		iunlock(&m->pmclock);

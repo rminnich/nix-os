@@ -202,6 +202,7 @@ struct ICC
  * hw perf counters
  */
 struct PmcCtl {
+	Ref;
 	u32int coreno;
 	int enab;
 	int user;
