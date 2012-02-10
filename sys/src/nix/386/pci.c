@@ -58,7 +58,7 @@ enum
 static Lock pcicfglock;
 static Lock pcicfginitlock;
 static int pcicfgmode = -1;
-static int pcimaxbno = 7;
+static int pcimaxbno = 255;
 static int pcimaxdno;
 static Pcidev* pciroot;
 static Pcidev* pcilist;
@@ -632,20 +632,7 @@ struct Bridge
 };
 
 static Bridge southbridges[] = {
-	{ 0x8086, 0x122e, pIIxget, pIIxset },	// Intel 82371FB
-	{ 0x8086, 0x1234, pIIxget, pIIxset },	// Intel 82371MX
-	{ 0x8086, 0x7000, pIIxget, pIIxset },	// Intel 82371SB
-	{ 0x8086, 0x7110, pIIxget, pIIxset },	// Intel 82371AB
-	{ 0x8086, 0x7198, pIIxget, pIIxset },	// Intel 82443MX (fn 1)
-	{ 0x8086, 0x2410, pIIxget, pIIxset },	// Intel 82801AA
-	{ 0x8086, 0x2420, pIIxget, pIIxset },	// Intel 82801AB
-	{ 0x8086, 0x2440, pIIxget, pIIxset },	// Intel 82801BA
-	{ 0x8086, 0x244c, pIIxget, pIIxset },	// Intel 82801BAM
-	{ 0x8086, 0x248c, pIIxget, pIIxset },	// Intel 82801CAM
-	{ 0x8086, 0x24cc, pIIxget, pIIxset },	// Intel 82801DBM
-	{ 0x8086, 0x24d0, pIIxget, pIIxset },	// Intel 82801EB
-	{ 0x8086, 0x2640, pIIxget, pIIxset },	// Intel 82801FB
-	{ 0x8086, 0x2916, pIIxget, pIIxset },	// Intel 82801IR
+	{ 0x8086, 0xffff, pIIxget, pIIxset },	// Intel *
 	{ 0x1106, 0x0586, viaget, viaset },	// Viatech 82C586
 	{ 0x1106, 0x0596, viaget, viaset },	// Viatech 82C596
 	{ 0x1106, 0x0686, viaget, viaset },	// Viatech 82C686
@@ -718,7 +705,8 @@ pcirouting(void)
 	}
 
 	for(i = 0; i != nelem(southbridges); i++)
-		if(sbpci->vid == southbridges[i].vid && sbpci->did == southbridges[i].did)
+		if(sbpci->vid == southbridges[i].vid
+		&& (sbpci->did == southbridges[i].did || southbridges[i].did == 0xffff))
 			break;
 
 	if(i == nelem(southbridges)) {
@@ -804,7 +792,7 @@ pcicfginit(void)
 		 * according to the spec.
 		 */
 		n = inl(PciADDR);
-		if(!(n & 0x7FF00000)){
+		if(!(n & 0x7F000000)){
 			outl(PciADDR, 0x80000000);
 			outb(PciADDR+3, 0);
 			if(inl(PciADDR) & 0x80000000){
@@ -861,8 +849,7 @@ pcicfginit(void)
 			  * If we have found a PCI-to-Cardbus bridge, make sure
 			  * it has no valid mappings anymore.  
 			  */
-			pci = pciroot;
-			while (pci) {
+			for(pci = pciroot; pci != nil; pci = pci->link){
 				if (pci->ccrb == 6 && pci->ccru == 7) {
 					ushort bcr;
 
@@ -871,7 +858,6 @@ pcicfginit(void)
 					pcicfgw16(pci, PciBCR, 0x40 | bcr);
 					delay(50);
 				}
-				pci = pci->link;
 			}
 		}
 	}
@@ -1262,53 +1248,46 @@ pciclrmwi(Pcidev* p)
 	pcicfgw16(p, PciPCR, p->pcr);
 }
 
+int
+pcicap(Pcidev *p, int cap)
+{
+	int i, c, off;
+
+	/* status register bit 4 has capabilities */
+	if((pcicfgr16(p, PciPSR) & 1<<4) == 0)
+		return -1;	
+	switch(pcicfgr8(p, PciHDT) & 0x7f){
+	default:
+		return -1;
+	case 0:				/* etc */
+	case 1:				/* pci to pci bridge */
+		off = 0x34;
+		break;
+	case 2:				/* cardbus bridge */
+		off = 0x14;
+		break;
+	}
+	for(i = 48; i--;){
+		off = pcicfgr8(p, off);
+		if(off < 0x40 || (off & 3))
+			break;
+		off &= ~3;
+		c = pcicfgr8(p, off);
+		if(c == 0xff)
+			break;
+		if(c == cap)
+			return off;
+		off++;
+	}
+	return -1;
+}
+
 static int
 pcigetpmrb(Pcidev* p)
 {
-	int ptr;
-
 	if(p->pmrb != 0)
 		return p->pmrb;
-	p->pmrb = -1;
-
-	/*
-	 * If there are no extended capabilities implemented,
-	 * (bit 4 in the status register) assume there's no standard
-	 * power management method.
-	 * Find the capabilities pointer based on PCI header type.
-	 */
-	if(!(pcicfgr16(p, PciPSR) & 0x0010))
-		return -1;
-	switch(pcicfgr8(p, PciHDT)){
-	default:
-		return -1;
-	case 0:					/* all other */
-	case 1:					/* PCI to PCI bridge */
-		ptr = PciCP;
-		break;
-	case 2:					/* CardBus bridge */
-		ptr = 0x14;
-		break;
-	}
-	ptr = pcicfgr32(p, ptr);
-
-	while(ptr != 0){
-		/*
-		 * Check for validity.
-		 * Can't be in standard header and must be double
-		 * word aligned.
-		 */
-		if(ptr < 0x40 || (ptr & ~0xFC))
-			return -1;
-		if(pcicfgr8(p, ptr) == 0x01){
-			p->pmrb = ptr;
-			return ptr;
-		}
-
-		ptr = pcicfgr8(p, ptr+1);
-	}
-
-	return -1;
+	return p->pmrb = pcicap(p, PciCapPMG);
 }
 
 int
