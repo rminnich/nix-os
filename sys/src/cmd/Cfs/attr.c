@@ -19,12 +19,12 @@ typedef struct Adef Adef;
 struct Adef
 {
 	char*	name;
-	long	(*wattr)(Fsys*, Memblk*, void*, long);
-	long	(*rattr)(Fsys*, Memblk*, void*, long);
+	long	(*wattr)(Memblk*, void*, long);
+	long	(*rattr)(Memblk*, void*, long);
 };
 
-static long wname(Fsys*, Memblk*, void*, long);
-static long rname(Fsys*, Memblk*, void*, long);
+static long wname(Memblk*, void*, long);
+static long rname(Memblk*, void*, long);
 
 static Adef adef[] =
 {
@@ -149,7 +149,7 @@ pmeta(void *buf, ulong nbuf, Fmeta *meta)
 }
 
 static long 
-wname(Fsys *, Memblk *f, void *buf, long len)
+wname(Memblk *f, void *buf, long len)
 {
 	char *p, *old;
 	ulong maxsz;
@@ -172,7 +172,7 @@ wname(Fsys *, Memblk *f, void *buf, long len)
 }
 
 static long 
-rname(Fsys *, Memblk *f, void *buf, long len)
+rname(Memblk *f, void *buf, long len)
 {
 	long l;
 
@@ -184,7 +184,7 @@ rname(Fsys *, Memblk *f, void *buf, long len)
 }
 
 long
-dfwattr(Fsys *fs, Memblk *f, char *name, void *val, long nval)
+dfwattr(Memblk *f, char *name, void *val, long nval)
 {
 	int i;
 
@@ -192,13 +192,13 @@ dfwattr(Fsys *fs, Memblk *f, char *name, void *val, long nval)
 	iswlocked(f);
 	for(i = 0; i < nelem(adef); i++)
 		if(strcmp(adef[i].name, name) == 0)
-			return adef[i].wattr(fs, f, val, nval);
+			return adef[i].wattr(f, val, nval);
 	error("user defined attributes not yet implemented");
 	return -1;
 }
 
 long
-dfrattr(Fsys *fs, Memblk *f, char *name, void *val, long count)
+dfrattr(Memblk *f, char *name, void *val, long count)
 {
 	int i;
 
@@ -206,7 +206,7 @@ dfrattr(Fsys *fs, Memblk *f, char *name, void *val, long count)
 	isrlocked(f);
 	for(i = 0; i < nelem(adef); i++)
 		if(strcmp(adef[i].name, name) == 0)
-			return adef[i].rattr(fs, f, val, count);
+			return adef[i].rattr(f, val, count);
 	error("user defined attributes not yet implemented");
 	return -1;
 }

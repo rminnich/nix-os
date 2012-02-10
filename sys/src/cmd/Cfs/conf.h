@@ -15,11 +15,10 @@ enum
 	Dminfree = 100000,	/* min nb. of free blocks in disk */
 
 	/* disk parameters; don't change */
-	Dblksz = 1*KiB,		/* disk block size */
+	Dblksz = 512UL,		/* disk block size */
 	Dblkhdrsz = 2*BIT64SZ,
 	Ndptr = 2,		/* # of direct data pointers */
 	Niptr = 2,		/* # of indirect data pointers */
-
 #else
 	Incr = 16,
 	Fmemsz  = 64 * MiB,	/* max size of in-memory file data */
@@ -31,7 +30,6 @@ enum
 	Dblkhdrsz = 2*BIT64SZ,
 	Ndptr = 8,		/* # of direct data pointers */
 	Niptr = 4,		/* # of indirect data pointers */
-
 #endif
 
 	Dminattrsz = Dblksz/2,	/* min size for attributes */
@@ -57,3 +55,4 @@ enum
 	Fhashsz = 7919,		/* size of file hash (plan9 has 35454 files). */
 
 };
+

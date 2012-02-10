@@ -73,24 +73,26 @@ isrlocked(Memblk *b)
 
 
 static Memblk*
-getmelted(Fsys *fs, uint type, u64int *addrp)
+getmelted(uint type, u64int *addrp)
 {
 	Memblk *b, *nb;
 
 	if(*addrp == 0){
-		b = dballoc(fs, type);
+		b = dballoc(type);
 		*addrp = b->addr;
+		incref(b);
 		return b;
 	}
 
-	b = dbget(fs, type, *addrp);
+	b = dbget(type, *addrp);
 	if(b->frozen == 0)
 		return b;
 
-	nb = dbdup(fs, b);
-	dbdecref(fs, b->addr);
-	mbput(fs, b);
+	nb = dbdup(b);
+	dbdecref(b->addr);
+	mbput(b);
 	*addrp = nb->addr;
+	incref(nb);
 	return nb;
 }
 
@@ -99,7 +101,7 @@ getmelted(Fsys *fs, uint type, u64int *addrp)
  * if mkit. The file must be r/wlocked and melted if mkit.
  */
 static Memblk*
-dfblk(Fsys *fs, Memblk *f, ulong bno, int mkit)
+dfblk(Memblk *f, ulong bno, int mkit)
 {
 	ulong prev, nblks;
 	int i, idx, nindir, type;
@@ -107,6 +109,7 @@ dfblk(Fsys *fs, Memblk *f, ulong bno, int mkit)
 	u64int *addrp;
 	Mfile *m;
 
+	if(0)dDprint("DF0 %H", f);
 	m = f->mf;
 	if(mkit){
 		iswlocked(f);
@@ -124,7 +127,7 @@ dfblk(Fsys *fs, Memblk *f, ulong bno, int mkit)
 			 /* BUG: read ahead */
 		}
 		if(m->lastb != nil)
-			mbput(fs, m->lastb);
+			mbput(m->lastb);
 		m->lastb = nil;
 	}
 	m->lastbno = bno;
@@ -140,9 +143,9 @@ dfblk(Fsys *fs, Memblk *f, ulong bno, int mkit)
 	 */
 	if(bno < nelem(f->d.dptr)){
 		if(mkit)
-			b = getmelted(fs, DBdata, &f->d.dptr[bno]);
+			b = getmelted(DBdata, &f->d.dptr[bno]);
 		else
-			b = dbget(fs, DBdata, f->d.dptr[bno]);
+			b = dbget(DBdata, f->d.dptr[bno]);
 		goto Found;
 	}
 
@@ -163,56 +166,68 @@ dfblk(Fsys *fs, Memblk *f, ulong bno, int mkit)
 	}
 	if(i == nelem(f->d.iptr))
 		sysfatal("fblkaddr");
+
+	type = DBptr0+i;
+	dDprint("dfblk indirect DB%s nblks %uld (ppb %ud) bno %uld\n",
+		tname[type], nblks, Dptrperblk, bno);
 	pb = f;
 	incref(pb);
-	addrp = &f->d.iptr[bno];
+	addrp = &f->d.iptr[i];
 	if(mkit)
-		b = getmelted(fs, DBptr, addrp);
+		b = getmelted(type, addrp);
 	else
-		b = dbget(fs, DBptr, *addrp);
+		b = dbget(type, *addrp);
 
 	/* invariant at the loop header:
-	 * b: ptr block we are looking at.
+	 * b: DBptr block we are looking at.
 	 * nblks: # of data blocks addressed by b
 	 * pb: parent of b
 	 * addrp: ptr to b within fb.
 	 */
 	if(catcherror()){
-		mbput(fs, pb);
-		mbput(fs, b);
+		mbput(pb);
+		mbput(b);
 		error(nil);
 	}
-	for(nindir = i; nindir >= 0; nindir--){
-		nblks /= Dptrperblk;
-		idx = bno/nblks;
+	for(nindir = i+1; nindir >= 0; nindir--){
+		dDprint("indir DB%s d%#ullx nblks %uld ptrperblk %d bno %uld\n",
+			tname[DBdata+nindir], *addrp, nblks, Dptrperblk, bno);
+		dDprint("  in %H", b);
+		idx = 0;
+		if(nindir > 0){
+			nblks /= Dptrperblk;
+			idx = bno/nblks;
+		}
 		if(*addrp == 0 && !mkit){
 			/* hole */
 			b = nil;
 		}else{
-			type = DBptr;
-			if(nindir == 0)
-				type = DBdata;
+			assert(type >= DBdata);
 			if(mkit)
-				b = getmelted(fs, type, addrp);
+				b = getmelted(type, addrp);
 			else
-				b = dbget(fs, type, *addrp);
+				b = dbget(type, *addrp);
 			addrp = &b->d.ptr[idx];
-			mbput(fs, pb);
+			mbput(pb);
 			pb = b;
 		}
 		USED(&b);	/* force to memory in case of error */
 		USED(&pb);	/* force to memory in case of error */
 		bno -= idx * nblks;
 		prev +=  idx * nblks;
+		type--;
 	}
-	mbput(fs, pb);
 	noerror();
 
 Found:
-//	if(b != nil)
-//		incref(b);
-//	m->lastb = b;	/* memo the last search; beware of holes vs. memos */
+	if(0){
+		if(b != nil)
+			incref(b);
+		m->lastb = b;	/* memo the last search */
+	}else
+		m->lastb = nil;
 
+	if(0)dDprint("DF1 %H%H", f,b);
 	return b;
 }
 
@@ -241,15 +256,14 @@ fresize(Memblk *f, uvlong nsize)
  * The block is returned unlocked, but still protected by the file lock.
  */
 Blksl
-dfslice(Fsys *fs, Memblk *f, ulong len, uvlong off, int iswr)
+dfslice(Memblk *f, ulong len, uvlong off, int iswr)
 {
 	Blksl sl;
-	ulong doff, dlen, bno, nsize;
+	ulong boff, doff, dlen, bno;
 
-	dDprint("slice off %#ullx len %#ulx wr=%d at m%#p\n", off, len, iswr, f);
+	dDprint("slice off %#ullx len %#ulx wr=%d at m%#p\n%H", off, len, iswr, f,f);
 	memset(&sl, 0, sizeof sl);
 
-	nsize = off + 0;
 	if(iswr){
 		iswlocked(f);
 		ismelted(f);
@@ -266,36 +280,36 @@ dfslice(Fsys *fs, Memblk *f, ulong len, uvlong off, int iswr)
 		sl.data = f->d.embed + doff + off;
 		sl.len = dlen - off;
 	}else{
-		off -= dlen;
-		bno = off / Dblkdatasz;
-		off %= Dblkdatasz;
+		bno = (off-dlen) / Dblkdatasz;
+		boff = (off-dlen) % Dblkdatasz;
 
-		sl.b = dfblk(fs, f, bno, iswr);
-
-		dDprint("dfblk %H%uld -> %H", f, bno, sl.b);
+		sl.b = dfblk(f, bno, iswr);
 		if(iswr)
 			ismelted(sl.b);
 		if(sl.b != nil)
-			sl.data = sl.b->d.data + off;
-	
-		sl.len = Dblkdatasz - off;
-		if(doff + bno*Dblkdatasz + off + sl.len > f->mf->length)
-			sl.len = f->mf->length - (doff + bno*Dblkdatasz + off);
+			sl.data = sl.b->d.data + boff;
+		sl.len = Dblkdatasz - boff;
 	}
+
 	if(sl.len > len)
 		sl.len = len;
-	nsize += sl.len;
+	if(off + sl.len > f->mf->length)
+		if(iswr)
+			fresize(f, off + sl.len);
+		else
+			sl.len = f->mf->length - off;
 Done:
-	if(iswr && nsize > f->mf->length)
-		fresize(f, nsize);
-	if(sl.b == nil)
+	if(sl.b == nil){
 		dDprint("slice-> null with len %#ulx\n", sl.len);
-	else if(TAGTYPE(sl.b->d.tag) == DBfile)
-		dDprint("slice-> off %#ulx len %#ulx at m%#p\n",
-			(uchar*)sl.data - sl.b->d.embed, sl.len, sl.b);
+		return sl;
+	}
+	assert(sl.b->ref > 1);
+	if(TAGTYPE(sl.b->d.tag) == DBfile)
+		dDprint("slice -> off %#ulx len %#ulx at m%#p fsz %#ullx\n",
+			(uchar*)sl.data - sl.b->d.embed, sl.len, sl.b, f->mf->length);
 	else
-		dDprint("slice-> off %#ulx len %#ulx at m%#p\n",
-			(uchar*)sl.data - sl.b->d.data, sl.len, sl.b);
+		dDprint("slice-> off %#ulx len %#ulx at m%#p fsz %#ullx\n",
+			(uchar*)sl.data - sl.b->d.data, sl.len, sl.b, f->mf->length);
 	return sl;
 }
 
@@ -366,7 +380,7 @@ getchild(Memblk *d, Memblk *f)
  * as its child entry is alive.
  */
 void
-dflink(Fsys *fs, Memblk *d, Memblk *f)
+dflink(Memblk *d, Memblk *f)
 {
 	Blksl sl;
 	Dentry *de;
@@ -378,7 +392,7 @@ dflink(Fsys *fs, Memblk *d, Memblk *f)
 	ismelted(d);
 	isdir(d);
 	if(d->mf->length > 0 && d->mf->child == nil)
-		dfloaddir(fs, d, 1);
+		dfloaddir(d, 1);
 
 	c = addchild(d, f);
 	if(catcherror()){
@@ -387,13 +401,13 @@ dflink(Fsys *fs, Memblk *d, Memblk *f)
 	}
 	off = 0;
 	for(;;){
-		sl = dfslice(fs, d, sizeof(Dentry), off, 1);
+		sl = dfslice(d, sizeof(Dentry), off, 1);
 		if(sl.len == 0)
 			break;
 		ismelted(sl.b);
 		off += sl.len;
 		if(sl.len < sizeof(Dentry)){	/* trailing part in block */
-			mbput(fs, sl.b);
+			mbput(sl.b);
 			continue;
 		}
 		de = sl.data;
@@ -402,10 +416,10 @@ dflink(Fsys *fs, Memblk *d, Memblk *f)
 			c->b = sl.b;
 			de->file = f->addr;
 			changed(sl.b);
-			mbput(fs, sl.b);
+			mbput(sl.b);
 			break;
 		}
-		mbput(fs, sl.b);
+		mbput(sl.b);
 	}
 	changed(d);
 	noerror();
@@ -416,7 +430,7 @@ dflink(Fsys *fs, Memblk *d, Memblk *f)
  * caller locks both d and f
  */
 void
-dfunlink(Fsys *fs, Memblk *d, Memblk *f)
+dfunlink(Memblk *d, Memblk *f)
 {
 	Dentry *de;
 	Child *c;
@@ -426,20 +440,20 @@ dfunlink(Fsys *fs, Memblk *d, Memblk *f)
 	ismelted(d);
 	isdir(d);
 	if(d->mf->length > 0 && d->mf->child == nil)
-		dfloaddir(fs, d, 1);
+		dfloaddir(d, 1);
 
 	c = getchild(d, f);
 	ismelted(c->b);
 	de = c->d;
 	de->file = 0;
 	changed(c->b);
-	mbput(fs, c->b);
+	mbput(c->b);
 	delchild(d, c);
 	changed(d);
 }
 
 void
-dfloaddir(Fsys *fs, Memblk *d, int locked)
+dfloaddir(Memblk *d, int locked)
 {
 	Blksl sl;
 	Dentry *de;
@@ -460,26 +474,26 @@ dfloaddir(Fsys *fs, Memblk *d, int locked)
 	}
 	off = 0;
 	for(;;){
-		sl = dfslice(fs, d, sizeof(Dentry), off, 0);
+		sl = dfslice(d, sizeof(Dentry), off, 0);
 		if(sl.len == 0)
 			break;
 		off += sl.len;
 		if(sl.len < sizeof(Dentry)){	/* trailing part in block */
-			mbput(fs, sl.b);
+			mbput(sl.b);
 			continue;
 		}
 		if(catcherror()){
-			mbput(fs, sl.b);
+			mbput(sl.b);
 			error(nil);
 		}
 		de = sl.data;
 		if(de->file == 0)
 			continue;
-		f = dbget(fs, DBfile, de->file);
+		f = dbget(DBfile, de->file);
 		c = addchild(d, f);
 		c->d = de;
 		c->b = sl.b;
-		mbput(fs, f);
+		mbput(f);
 		noerror();
 	}
 	if(!locked)
@@ -494,7 +508,7 @@ dfloaddir(Fsys *fs, Memblk *d, int locked)
  * dir must be already loaded.
  */
 Memblk*
-dfwalk(Fsys *fs, Memblk *d, char *name, int iswr)
+dfwalk(Memblk *d, char *name, int iswr)
 {
 	Memblk *f, *nf;
 	int i;
@@ -524,11 +538,11 @@ dfwalk(Fsys *fs, Memblk *d, char *name, int iswr)
 				return(f);
 			}
 			/* hard: it's frozen and iswr; must melt it */
-			nf = dbdup(fs, f);
+			nf = dbdup(f);
 			wunlock(f->mf);
 			wlock(nf->mf);
-			dbdecref(fs, f->addr);
-			mbput(fs, f);
+			dbdecref(f->addr);
+			mbput(f);
 			c->f = nf;
 			incref(nf);
 			c->d->file = nf->addr;
@@ -548,7 +562,7 @@ dfwalk(Fsys *fs, Memblk *d, char *name, int iswr)
  * Return it wlocked, so nobody can freeze it again before we use it.
  */
 Memblk*
-dfmelt(Fsys *fs, Memblk *f)
+dfmelt(Memblk *f)
 {
 	char **names;
 	int nnames;
@@ -591,18 +605,18 @@ dfmelt(Fsys *fs, Memblk *f)
 			free(names[nnames]);
 		free(names);
 		wunlock(b->mf);
-		mbput(fs, b);
+		mbput(b);
 		error("can't melt: %r");
 	}
 
 	while(nnames-- > 0){
 		if(b->mf->length > 0 && b->mf->child == nil)
-			dfloaddir(fs, b, 1);
-		nb = dfwalk(fs, b, names[--nnames], 1);
+			dfloaddir(b, 1);
+		nb = dfwalk(b, names[--nnames], 1);
 		free(names[nnames]);
 		names[nnames] = nil;
 		wunlock(b->mf);
-		mbput(fs, b);
+		mbput(b);
 		b = nb;
 		USED(&b);	/* flush b to memory for error()s */
 	}

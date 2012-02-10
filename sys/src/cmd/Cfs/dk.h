@@ -1,4 +1,3 @@
-typedef struct Fattr Fattr;
 typedef struct Fmeta Fmeta;
 typedef struct Child Child;
 typedef struct Ddatablk Ddatablk;
@@ -29,13 +28,12 @@ typedef struct Mfile Mfile;
  *	- Disk refs count only references within the tree on disk.
  *	(perhaps loaded in memory waiting for a further sync)
  *	- Children do not imply new refs to the parents.
- * Locking:
  *
- *   Assumptions:
+ * Locking & Assumptions:
  *	- /active is *never* found on disk, it's memory-only.
  *	- b->addr is worm.
  *	- b->next is locked by the hash bucked lock
- *	- blocks added to the end of the hash chain.
+ *	- blocks are added to the end of the hash chain.
  *	- blocks are locked by the file responsible for them, when not frozen.
  *	- super, disk refs, block allocation, free list, ... protected by fs lock
  *	- We try not to hold more than one lock, using the
@@ -47,21 +45,27 @@ typedef struct Mfile Mfile;
  *	  in which case db*ref functions write the block in place and melt it.
  *	- the block epoch number for a on-disk block is the time when it
  *	  was written (thus it's archived "/" has a newer epoch).
- *   Order:
- *	fs & super: while locked can't acquire fs or blocks.
- *	blocks: parent -> child; block -> ref block
+ *
+ * Lock order:
+ *	- fs & super: while locked can't acquire fs or blocks.
+ *	- parent block -> child
+ *	  (but a DBfile protects all ptr and data blocks under it).
+ *	- block -> ref block
  */
 
 enum
 {
 	/* block types */
 	DBfree = 0,
-	DBdata,
-	DBptr,
 	DBref,
 	DBattr,
 	DBfile,
 	DBsuper,
+	DBdata,			/* direct block */
+	DBptr0 = DBdata+1,	/* simple-indirect block */
+				/* double */
+				/* triple */
+				/*...*/
 };
 
 /*
@@ -71,9 +75,9 @@ enum
  *
  * blk 0: unused
  * blk 1: super
- * ref blk + Nblkgrpsz blocks
+ * ref blk + Nblkgrpsz-1 blocks
  * ...
- * ref blk + Nblkgrpsz blocks
+ * ref blk + Nblkgrpsz-1 blocks
  *
  * The code assumes these structures are packed.
  * Be careful if they are changed to make things easy for the
@@ -92,7 +96,7 @@ struct Dptrblk
 
 struct Drefblk
 {
-	u64int	ref[1];		/* RC or next in free list */
+	u64int	ref[1];		/* disk RC or next block in free list */
 };
 
 struct Dattrblk
@@ -107,7 +111,7 @@ struct Dattrblk
  */
 struct Dentry
 {
-	u64int	file;		/* file address or 0 when archived */
+	u64int	file;		/* file address or 0 when unused */
 };
 
 /*
@@ -135,14 +139,14 @@ struct Dfileblk
 
 enum
 {
-	FMuid = 0,
+	FMuid = 0,	/* strings in mandatory attributes */
 	FMgid,
 	FMmuid,
 	FMname,
 	FMnstr,
 };
 
-struct Dmeta
+struct Dmeta			/* mandatory metadata */
 {
 	u64int	id;		/* ctime, actually */
 	u64int	mode;
@@ -155,14 +159,11 @@ struct Dmeta
 /*
  * Superblock.
  * The stored tree is:
- *	/
- *		active/		root of the current or active tree
  *		archive/		root of the archived tree
  *			<epoch>
  *			...
- *		<epoch1>/	old root of active as of epoch#1
- *		...
- *		<epochn>/	old root of active as of epoch#n
+ * (/ and /active are only memory and never on disk, parts
+ * under /active that are on disk are shared with entries in /archive)
  */
 struct Dsuperblk
 {
@@ -179,7 +180,7 @@ struct Dsuperblk
 
 enum
 {
-	Noaddr = ~0UL
+	Noaddr = ~0UL		/* null address, for / */
 };
 
 #define	TAG(addr,type)		((addr)<<8|((type)&0x7F))
@@ -187,13 +188,17 @@ enum
 #define	TAGADDROK(t,addr)	(((t)&~0xFF) == ((addr)<<8))
 
 /*
- * disk block
+ * disk blocks
+ */
+
+/*
+ * header for all disk blocks.
+ * Those using on-disk references keep them at a DBref block
  */
 struct Diskblkhdr
 {
 	u64int	tag;		/* block tag */
 	u64int	epoch;		/* block epoch */
-	/*	ref is kept on Dref blocks */
 };
 
 union Diskblk
@@ -212,27 +217,31 @@ union Diskblk
 	uchar	ddata[Dblksz];
 };
 
+/*
+ * These are derived.
+ * Artificially lowered for testing to exercise indirect blocks and lists.
+ */
 enum
 {
 	Dblkdatasz = sizeof(Diskblk) - sizeof(Diskblkhdr),
-	Embedsz = Dblkdatasz - sizeof(Dfileblk),
+	Embedsz	= Dblkdatasz - sizeof(Dfileblk),
+
+#ifdef TESTING
+	Dentryperblk = 4,
+	Dptrperblk = 4,
+	Drefperblk = 4,
+#else
 	Dentryperblk = Dblkdatasz / sizeof(Dentry),
 	Dptrperblk = Dblkdatasz / sizeof(u64int),
 	Drefperblk = Dblkdatasz / sizeof(u64int),
+#endif
 };
+
 
 /*
  * File attributes are name/value pairs.
- * A few ones have the name implied by their position.
- * All integer values are always kept LE.
- * addr	u64int
- * mode	u32int
- * mtime u64int
- * length u64int
- * uid  [n] + UTF8 + '\0'
- * gid  [n] + UTF8 + '\0'
- * muid  [n] + UTF8 + '\0'
- * name  [n] + UTF8 + '\0'
+ * By now, only mandatory attributes are implemented, and
+ * have names implied by their position in the Dmeta structure.
  */
 
 /*
@@ -240,16 +249,9 @@ enum
  */
 
 /*
- * unpacked file attributes point into the Bfile embedded data.
+ * The first time a directory data is used, it is fully loaded and
+ * a Child list refers to the data blocks, to simplify navigation.
  */
-struct Fattr
-{
-	Fattr *next;
-	char *name;
-	uchar *val;
-	long nval;
-};
-
 struct Child
 {
 	Memblk	*f;		/* actual child */
@@ -257,6 +259,9 @@ struct Child
 	Dentry	*d;		/* loaded dentry */
 };
 
+/*
+ * File metadata
+ */
 struct Fmeta
 {
 	Dmeta;
@@ -266,6 +271,9 @@ struct Fmeta
 	char	*name;
 };
 
+/*
+ * On memory file information.
+ */
 struct Mfile
 {
 	RWLock;
@@ -275,7 +283,7 @@ struct Mfile
 		Mfile	*next;		/* in free Mfile list */
 	};
 
-	Memblk*	lastb;		/* last returned data block */
+	Memblk*	lastb;		/* memo: last returned data block */
 	ulong	lastbno;	/*   for the last asked block # */
 
 	Child	*child;		/* direct references to loaded children */
@@ -289,23 +297,23 @@ struct Mfile
 struct Memblk
 {
 	Ref;
-	u64int	addr;		/* block address */
-	Memblk	*next;		/* in hash or free list */
+	u64int	addr;			/* block address */
+	Memblk	*next;			/* in hash or free list */
 
-	/* for DBref only */
 	union{
-		Memblk	*rnext;		/* in list of ref blocks */
-		Mfile	*mf;		/* per file mem info */
+		Memblk	*rnext;		/* in list of DBref blocks */
+		Mfile	*mf;		/* DBfile on memory info. */
 	};
 
-	int	dirty;		/* must be written */
-	int	frozen;		/* is frozen */
-	int	written;		/* no need to scan this for dirties */
+	int	dirty;			/* must be written */
+	int	frozen;			/* is frozen */
+	int	written;			/* no need to scan this for dirties */
+
 	Diskblk	d;
 };
 
 /*
- * Slice into a block
+ * Slice into a block, used to read/write file blocks.
  */
 struct Blksl
 {
@@ -320,33 +328,33 @@ struct Fsys
 	struct{
 		RWLock;
 		Memblk	*b;
-	}	fhash[Fhashsz];
+	} fhash[Fhashsz];	/* hash of blocks by address */
 
-	Memblk	*blk;
-	usize	nblk;
-	usize	nablk;
-	usize	nused;
-	usize	nfree;
-	Memblk	*free;
-	Mfile	*mfree;
+	Memblk	*blk;		/* static global array of memory blocks */
+	usize	nblk;		/* # of entries used */
+	usize	nablk;		/* # of entries allocated */
+	usize	nused;		/* blocks in use */
+	usize	nfree;		/* free blocks */
 
-	Memblk	*refs;
+	Memblk	*free;		/* free list of unused blocks in blk */
+	Mfile	*mfree;		/* unused list */
 
-	usize	limit;
+	Memblk	*refs;		/* list of DBref blocks (also hashed) */
+
 	Memblk	*super;		/* locked by blklk */
 	Memblk	*root;		/* only in memory */
 	Memblk	*active;		/* /active */
 	Memblk	*archive;	/* /archive */
 
 	Memblk	*fzsuper;	/* frozen super */
-	Memblk	*fzactive;	/* frozen active */
-	Memblk	*fzarchive;	/* frozen archive */
 
-	char	*dev;
-	int	fd;
+	char	*dev;		/* name for disk */
+	int	fd;		/* of disk */
+	usize	limit;		/* address for end of disk */
 };
 
 #pragma	varargck	type	"H"	Memblk*
 
 
 extern char*tname[];
+extern Fsys*fs;

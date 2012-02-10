@@ -27,3 +27,5 @@ BIN=.
 
 </sys/src/cmd/mkmany
 
+fns:V:
+	c/f2p *.c >fns.h

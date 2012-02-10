@@ -19,7 +19,7 @@
  * Ok if nelems is 0.
  */
 Memblk*
-walkpath(Fsys *fs, Memblk *f, char *elems[], int nelems)
+walkpath(Memblk *f, char *elems[], int nelems)
 {
 	int i;
 	Memblk *nf;
@@ -28,7 +28,7 @@ walkpath(Fsys *fs, Memblk *f, char *elems[], int nelems)
 	rlock(f->mf);
 	if(f->mf->length > 0 && f->mf->child == nil){
 		runlock(f->mf);
-		dfloaddir(fs, f, 0);
+		dfloaddir(f, 0);
 		rlock(f->mf);
 	}
 	if(catcherror()){
@@ -38,7 +38,7 @@ walkpath(Fsys *fs, Memblk *f, char *elems[], int nelems)
 	for(i = 0; i < nelems; i++){
 		if((f->mf->mode&DMDIR) == 0)
 			error("not a directory");
-		nf = dfwalk(fs, f, elems[i], 0);
+		nf = dfwalk(f, elems[i], 0);
 		runlock(f->mf);
 		f = nf;
 		USED(&f);	/* in case of error() */
@@ -50,7 +50,7 @@ walkpath(Fsys *fs, Memblk *f, char *elems[], int nelems)
 }
 
 Memblk*
-dfcreate(Fsys *fs, Memblk *parent, char *name, char *uid, ulong mode)
+dfcreate(Memblk *parent, char *name, char *uid, ulong mode)
 {
 	Memblk *b;
 	Mfile *m;
@@ -61,19 +61,19 @@ dfcreate(Fsys *fs, Memblk *parent, char *name, char *uid, ulong mode)
 		wlock(parent->mf);
 		if(parent->frozen){
 			wunlock(parent->mf);
-			parent = dfmelt(fs, parent);
+			parent = dfmelt(parent);
 		}else
 			incref(parent);
-		b = dballoc(fs, DBfile);
+		b = dballoc(DBfile);
 	}else
-		b = dballoc(fs, Noaddr);	/* root */
+		b = dballoc(Noaddr);	/* root */
 
 	if(catcherror()){
 		wunlock(b->mf);
-		mbput(fs, b);
+		mbput(b);
 		if(parent != nil){
 			wunlock(parent->mf);
-			mbput(fs, parent);
+			mbput(parent);
 		}
 		error("create: %r");
 	}
@@ -90,9 +90,9 @@ dfcreate(Fsys *fs, Memblk *parent, char *name, char *uid, ulong mode)
 
 	if(parent != nil){
 		m->gid = parent->mf->uid;
-		dflink(fs, parent, b);
+		dflink(parent, b);
 		wunlock(parent->mf);
-		mbput(fs, parent);
+		mbput(parent);
 	}
 	noerror();
 	changed(b);
@@ -104,17 +104,18 @@ dfcreate(Fsys *fs, Memblk *parent, char *name, char *uid, ulong mode)
  * returns a slice into a block for reading.
  */
 Blksl
-dfreadblk(Fsys *fs, Memblk *f, ulong len, uvlong off)
+dfreadblk(Memblk *f, ulong len, uvlong off)
 {
 	Blksl sl;
 
+	dDprint("dfreadblk m%#p len %#ulx off %#ullx\n", f, len, off);
 	isfile(f);
 	rlock(f->mf);
 	if(catcherror()){
 		runlock(f->mf);
 		error("read: %r");
 	}
-	sl = dfslice(fs, f, len, off, 0);
+	sl = dfslice(f, len, off, 0);
 	noerror();
 	runlock(f->mf);
 	return sl;
@@ -125,30 +126,31 @@ dfreadblk(Fsys *fs, Memblk *f, ulong len, uvlong off)
  * the block is returned unlocked.
  */
 Blksl
-dfwriteblk(Fsys *fs, Memblk *f, uvlong off)
+dfwriteblk(Memblk *f, ulong count, uvlong off)
 {
 	Blksl sl;
 
+	dDprint("dfwriteblk m%#p off %#ullx\n", f, off);
 	isnotdir(f);
 	wlock(f->mf);
 	if(f->frozen){
 		wunlock(f->mf);
-		f = dfmelt(fs, f);
+		f = dfmelt(f);
 	}else
 		incref(f);
 	if(catcherror()){
 		wunlock(f->mf);
 		error(nil);
 	}
-	sl = dfslice(fs, f, 0, off, 1);
+	sl = dfslice(f, count, off, 1);
 	noerror();
 	wunlock(f->mf);
-	mbput(fs, f);
+	mbput(f);
 	return sl;
 }
 
 ulong
-dfpread(Fsys *fs, Memblk *f, void *a, ulong count, uvlong off)
+dfpread(Memblk *f, void *a, ulong count, uvlong off)
 {
 	Blksl sl;
 	ulong tot;
@@ -156,7 +158,7 @@ dfpread(Fsys *fs, Memblk *f, void *a, ulong count, uvlong off)
 
 	p = a;
 	for(tot = 0; tot < count; tot += sl.len){
-		sl = dfreadblk(fs, f, count, off);
+		sl = dfreadblk(f, count-tot, off+tot);
 		if(sl.len == 0)
 			break;
 		if(sl.data == nil){
@@ -164,13 +166,13 @@ dfpread(Fsys *fs, Memblk *f, void *a, ulong count, uvlong off)
 			continue;
 		}
 		memmove(p+tot, sl.data, sl.len);
-		mbput(fs, sl.b);
+		mbput(sl.b);
 	}
 	return tot;
 }
 
 ulong
-dfpwrite(Fsys *fs, Memblk *f, void *a, ulong count, uvlong off)
+dfpwrite(Memblk *f, void *a, ulong count, uvlong off)
 {
 	Blksl sl;
 	ulong tot;
@@ -178,12 +180,12 @@ dfpwrite(Fsys *fs, Memblk *f, void *a, ulong count, uvlong off)
 
 	p = a;
 	for(tot = 0; tot < count; tot += sl.len){
-		sl = dfwriteblk(fs, f, off);
+		sl = dfwriteblk(f, count-tot, off+tot);
 		if(sl.len == 0 || sl.data == nil)
 			sysfatal("dfpwrite: bug");
 		memmove(sl.data, p+tot, sl.len);
 		changed(sl.b);
-		mbput(fs, sl.b);
+		mbput(sl.b);
 	}
 	return tot;
 }
@@ -200,23 +202,23 @@ dfpwrite(Fsys *fs, Memblk *f, void *a, ulong count, uvlong off)
  * freeze a direct or indirect pointer and everything below it.
  */
 static void
-ptrfreeze(Fsys *fs, u64int addr, int nind)
+ptrfreeze(u64int addr, int nind)
 {
 	int i;
 	Memblk *b;
 
 	if(addr == 0)
 		return;
-	b = mbget(fs, addr);
+	b = mbget(addr);
 	if(b == nil)
 		return;	/* on disk: frozen */
 	if(!b->frozen){
 		b->frozen = 1;
 		if(nind > 0)
 			for(i = 0; i < Dptrperblk; i++)
-				ptrfreeze(fs, b->d.ptr[i], nind-1);
+				ptrfreeze(b->d.ptr[i], nind-1);
 	}
-	mbput(fs, b);
+	mbput(b);
 }
 
 /*
@@ -224,7 +226,7 @@ ptrfreeze(Fsys *fs, u64int addr, int nind)
  * Do not recur if children is found frozen.
  */
 void
-dffreeze(Fsys *fs, Memblk *f)
+dffreeze(Memblk *f)
 {
 	int i;
 	Memblk *b;
@@ -234,16 +236,16 @@ dffreeze(Fsys *fs, Memblk *f)
 	dDprint("dffrezee m%#p\n", f);
 	f->frozen = 1;
 	for(i = 0; i < nelem(f->d.dptr); i++)
-		ptrfreeze(fs, f->d.dptr[i], 0);
+		ptrfreeze(f->d.dptr[i], 0);
 	for(i = 0; i < nelem(f->d.iptr); i++)
-		ptrfreeze(fs, f->d.dptr[i], i+1);
+		ptrfreeze(f->d.dptr[i], i+1);
 	if((f->mf->mode&DMDIR) == 0)
 		return;
 	for(i = 0; i < f->mf->nchild; i++){
 		b = f->mf->child[i].f;
 		if(!b->frozen){
 			wlock(b->mf);
-			dffreeze(fs, b);
+			dffreeze(b);
 			wunlock(b->mf);
 		}
 	}
@@ -253,32 +255,32 @@ dffreeze(Fsys *fs, Memblk *f)
  * freeze a direct or indirect pointer and everything below it.
  */
 static void
-ptrsync(Fsys *fs, u64int addr, int nind)
+ptrsync(u64int addr, int nind)
 {
 	int i;
 	Memblk *b;
 
 	if(addr == 0)
 		return;
-	b = mbget(fs, addr);
+	b = mbget(addr);
 	if(b == nil)
 		return;	/* on disk */
 	if(!b->frozen)
 		sysfatal("ptrsync: not frozen\n\t%H", b);
 	if(b->dirty)
-		dbwrite(fs, b);
+		dbwrite(b);
 	b->dirty = 0;
-	mbput(fs, b);
+	mbput(b);
 	if(nind > 0)
 		for(i = 0; i < Dptrperblk; i++)
-			ptrsync(fs, b->d.ptr[i], nind-1);
+			ptrsync(b->d.ptr[i], nind-1);
 }
 
 /*
  * Ensure all frozen but dirty blocks are in disk.
  */
 void
-dfsync(Fsys *fs, Memblk *f)
+dfsync(Memblk *f)
 {
 	int i;
 
@@ -289,15 +291,15 @@ dfsync(Fsys *fs, Memblk *f)
 		sysfatal("dfsync: not frozen\n\t%H", f);
 
 	for(i = 0; i < nelem(f->d.dptr); i++)
-		ptrsync(fs, f->d.dptr[i], 0);
+		ptrsync(f->d.dptr[i], 0);
 	for(i = 0; i < nelem(f->d.iptr); i++)
-		ptrsync(fs, f->d.dptr[i], i+1);
+		ptrsync(f->d.dptr[i], i+1);
 	for(i = 0; i < f->mf->nchild; i++)
-		dfsync(fs, f->mf->child[i].f);
+		dfsync(f->mf->child[i].f);
 
 	rlock(f->mf);
 	if(f->dirty)
-		dbwrite(fs, f);
+		dbwrite(f);
 	f->dirty = 0;
 	f->written = 1;
 	runlock(f->mf);
@@ -307,25 +309,25 @@ dfsync(Fsys *fs, Memblk *f)
  * release a direct or indirect pointer and everything below it.
  */
 static int
-ptrreclaim(Fsys *fs, u64int addr, int nind)
+ptrreclaim(u64int addr, int nind)
 {
 	int i;
 	Memblk *b;
 
 	if(addr == 0)
 		return 0;
-	if(dbdecref(fs, addr) != 0)
+	if(dbdecref(addr) != 0)
 		return 0;
-	b = dbget(fs, nind == 0? DBdata: DBptr, addr);
+	b = dbget(DBdata+nind, addr);
 	if(!b->frozen)
 		sysfatal("ptrreclaim: not frozen\n\t%H", b);
-	mbunhash(fs, b);
+	mbunhash(b);
 	if(b->ref != 1)
 		sysfatal("dfreclaim: bug?");
 	if(nind > 0)
 		for(i = 0; i < Dptrperblk; i++)
-			ptrreclaim(fs, b->d.ptr[i], nind-1);
-	mbput(fs, b);
+			ptrreclaim(b->d.ptr[i], nind-1);
+	mbput(b);
 	return 1;
 }
 
@@ -340,31 +342,31 @@ ptrreclaim(Fsys *fs, u64int addr, int nind)
  * TODO: do this using an external cleaner program?
  */
 int
-dfreclaim(Fsys *fs, Memblk *f)
+dfreclaim(Memblk *f)
 {
 	int i, tot;
 
 	tot = 0;
 	dDprint("dfreclaim %H", f);
-	if(dbdecref(fs, f->addr) != 0)
+	if(dbdecref(f->addr) != 0)
 		return 0;
 	tot++;
 	if(!f->frozen)
 		sysfatal("dfsync: not frozen\n\t%H", f);
 	incref(f);
-	mbunhash(fs, f);
+	mbunhash(f);
 	if(f->ref != 1)
 		sysfatal("dfreclaim: ref is %d", f->ref);
 	for(i = 0; i < nelem(f->d.dptr); i++)
-		tot += ptrreclaim(fs, f->d.dptr[i], 0);
+		tot += ptrreclaim(f->d.dptr[i], 0);
 	for(i = 0; i < nelem(f->d.iptr); i++)
-		tot += ptrreclaim(fs, f->d.dptr[i], i+1);
+		tot += ptrreclaim(f->d.dptr[i], i+1);
 	if(f->mf->mode&DMDIR){
 		isloaded(f);
 		for(i = 0; i < f->mf->nchild; i++)
-			tot += dfreclaim(fs, f->mf->child[i].f);
+			tot += dfreclaim(f->mf->child[i].f);
 	}
-	mbput(fs, f);
+	mbput(f);
 	return tot;
 }
 

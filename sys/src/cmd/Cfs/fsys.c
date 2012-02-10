@@ -10,6 +10,8 @@
 #include "dk.h"
 #include "fns.h"
 
+Fsys *fs;
+
 /*
  * All the code assumes outofmemoryexits = 1.
  */
@@ -30,7 +32,7 @@ now(void)
 }
 
 void
-okaddr(Fsys *fs, u64int addr)
+okaddr(u64int addr)
 {
 	if(addr < Dblksz || addr >= fs->limit)
 		error("okaddr %#ullx", addr);
@@ -40,7 +42,7 @@ okaddr(Fsys *fs, u64int addr)
  * NO LOCKS. debug only
  */
 void
-fsdump(Fsys *fs)
+fsdump(void)
 {
 	int i, flg;
 	Memblk *b;
@@ -60,7 +62,7 @@ fsdump(Fsys *fs)
 		print("free:");
 		flg = dbg['D'];
 		dbg['D'] = 0;
-		for(a = b->d.free; a != 0; a = dbgetref(fs, a))
+		for(a = b->d.free; a != 0; a = dbgetref(a))
 			print(" d%#ullx", a);
 		dbg['D'] = flg;
 		print("\n");
@@ -91,7 +93,7 @@ disksize(int fd)
 }
 
 static void
-freezerefs(Fsys *fs)
+freezerefs(void)
 {
 	Memblk *rb;
 
@@ -102,22 +104,22 @@ freezerefs(Fsys *fs)
 }
 
 static void
-writerefs(Fsys *fs)
+writerefs(void)
 {
 	Memblk *rb;
 
 	qlock(fs);
 	for(rb = fs->refs; rb != nil; rb = rb->next)
-		meltedref(fs, rb);
+		meltedref(rb);
 	qunlock(fs);
 }
 
 static void
-freezesuper(Fsys *fs)
+freezesuper(void)
 {
 	Memblk *b;
 
-	b = mbdup(fs, fs->super);
+	b = mbdup(fs->super);
 	qlock(fs);
 	b->d = fs->super->d;
 	assert(fs->fzsuper == nil);
@@ -127,14 +129,14 @@ freezesuper(Fsys *fs)
 }
 
 static void
-writesuper(Fsys *fs)
+writesuper(void)
 {
 	qlock(fs);
 	assert(fs->fzsuper != nil);
 	qunlock(fs);
-	dbwrite(fs, fs->fzsuper);
+	dbwrite(fs->fzsuper);
 	dDprint("fswrite: %H", fs->fzsuper);
-	mbput(fs, fs->fzsuper);
+	mbput(fs->fzsuper);
 	fs->fzsuper = nil;
 }
 
@@ -144,13 +146,13 @@ writesuper(Fsys *fs)
  * blocks may write to the disk.
  */
 static void
-fswrite(Fsys *fs)
+fswrite(void)
 {
 	if(fs->fzsuper == nil)
 		sysfatal("can't fswrite if we didn't fsfreeze");
-	writerefs(fs);
-	dfsync(fs, fs->archive);
-	writesuper(fs);
+	writerefs();
+	dfsync(fs->archive);
+	writesuper();
 }
 
 /*
@@ -159,7 +161,7 @@ fswrite(Fsys *fs)
  * returns the just frozen tree.
  */
 Memblk*
-fsfreeze(Fsys *fs)
+fsfreeze(void)
 {
 	Memblk *na, *oa, *arch, *super;
 	Child *ac;
@@ -173,8 +175,8 @@ fsfreeze(Fsys *fs)
 		wunlock(fs->active->mf);
 		error("freeze already in progress");
 	}
-	dfloaddir(fs, fs->active, 1);
-	dfloaddir(fs, fs->archive, 1);
+	dfloaddir(fs->active, 1);
+	dfloaddir(fs->archive, 1);
 	super = fs->super;
 	if(catcherror()){
 		/*
@@ -193,42 +195,42 @@ fsfreeze(Fsys *fs)
 	 * active.
 	 */
 	oa = fs->active;
-	na = dbdup(fs, oa);
+	na = dbdup(oa);
 	wlock(na->mf);
 	seprint(name, name+sizeof(name), "%ulld", oa->d.epoch);
-	dfwattr(fs, oa, "name", name, strlen(name)+1);
+	dfwattr(oa, "name", name, strlen(name)+1);
 	ac = fs->root->mf->child;
 	assert(ac->f == oa);
 	ac->f = na;		/* keeps the ref we have */
 	ac->d->file = na->addr;
 	if(fs->archive->frozen){
-		arch = dbdup(fs, fs->archive);
+		arch = dbdup(fs->archive);
 		wlock(arch->mf);
 		wunlock(fs->archive->mf);
-		mbput(fs, fs->archive);
+		mbput(fs->archive);
 		fs->archive = arch;
 		for(i = nelem(super->d.root)-1; i > 0; i--)
 			super->d.root[i] = super->d.root[i-1];
 		super->d.root[0] = fs->archive->addr;
 	}
-	dflink(fs, fs->archive, oa);
+	dflink(fs->archive, oa);
 	fs->active = na;
 	fs->archive->frozen = 1;		/* for fsfmt */
 
 	/* 1. Free the entire previously active
 	 */
-	dffreeze(fs, oa);
+	dffreeze(oa);
 	wunlock(oa->mf);
 
 	/* 2. Freeze whatever new blocks are found in archive
 	 */
-	dffreeze(fs, fs->archive);
+	dffreeze(fs->archive);
 
 	/* 3. Freeze the on-disk reference counters
 	 * and the state of the super-block.
 	 */
-	freezerefs(fs);
-	freezesuper(fs);
+	freezerefs();
+	freezesuper();
 
 	/*
 	/* 4. release locks, all done.
@@ -239,11 +241,9 @@ fsfreeze(Fsys *fs)
 	return na;
 }
 
-static Fsys*
+static void
 fsinit(char *dev, int nblk)
 {
-	Fsys *fs;
-
 	fs = mallocz(sizeof *fs, 1);
 	fs->dev = strdup(dev);
 	fs->fd = open(dev, ORDWR);
@@ -260,8 +260,7 @@ fsinit(char *dev, int nblk)
 	if(fs->limit < 10*Dblksz)
 		sysfatal("disk is ridiculous");
 	fs->blk = malloc(fs->nablk * sizeof fs->blk[0]);
-	dDprint("fsys '%s' open\n", fs->dev);
-	return fs;
+	dDprint("fsys '%s' init\n", fs->dev);
 }
 
 /*
@@ -271,53 +270,51 @@ fsinit(char *dev, int nblk)
  * /active is allocated on disk, but not on disk. It will be linked into
  * /archive as a child in the future.
  */
-Fsys*
+void
 fsfmt(char *dev)
 {
-	Fsys *fs;
 	Memblk *super;
 
 	if(catcherror())
 		sysfatal("fsfmt: error: %r");
 
-	fs = fsinit(dev, 16);	/* enough # of blocks for fmt */
+	fsinit(dev, 16);	/* enough # of blocks for fmt */
 
-	fs->super = dballoc(fs, DBsuper);
+	fs->super = dballoc(DBsuper);
 	super = fs->super;
 	super->d.eaddr = fs->super->addr + Dblksz;
 	super->d.dblksz = Dblksz;
 	super->d.nblkgrpsz = Nblkgrpsz;
 	super->d.dminattrsz = Dminattrsz;
 
-	fs->root = dfcreate(fs, nil, "", getuser(), DMDIR|0555);
-	fs->active = dfcreate(fs, fs->root, "active", getuser(), DMDIR|0775);
-	fs->archive = dfcreate(fs, fs->root, "archive", getuser(), DMDIR|0555);
+	fs->root = dfcreate(nil, "", getuser(), DMDIR|0555);
+	fs->active = dfcreate(fs->root, "active", getuser(), DMDIR|0775);
+	fs->archive = dfcreate(fs->root, "archive", getuser(), DMDIR|0555);
 	super->d.root[0] = fs->archive->addr;
 
-	fsfreeze(fs);
-	fswrite(fs);
+	fsfreeze();
+	fswrite();
 
 	noerror();
-	return fs;
 }
 
 void
-fssync(Fsys *fs)
+fssync(void)
 {
 	/*
 	 * TODO: If active has not changed and we are just going
 	 * to dump a new archive for no change, do nothing.
 	 */
-	fsfreeze(fs);
-	fswrite(fs);
+	fsfreeze();
+	fswrite();
 }
 
 static Memblk*
-readsuper(Fsys *fs)
+readsuper(void)
 {
 	Memblk *super;
 
-	fs->super = dbget(fs, DBsuper, Dblksz);
+	fs->super = dbget(DBsuper, Dblksz);
 	super = fs->super;
 	if(super->d.dblksz != Dblksz)
 		error("bad Dblksz");
@@ -334,28 +331,25 @@ readsuper(Fsys *fs)
  * To open more file systems, use more processes!
  */
 
-Fsys*
+void
 fsopen(char *dev)
 {
-	Fsys *fs;
-
 	if(catcherror())
 		sysfatal("fsopen: error: %r");
 
-	fs = fsinit(dev, 0);
+	fsinit(dev, 0);
 
-	readsuper(fs);
+	readsuper();
 
-	fs->root = dfcreate(fs, nil, "", getuser(), DMDIR|0555);
-	fs->active = dfcreate(fs, fs->root, "active", getuser(), DMDIR|0775);
-	fs->archive = dbget(fs, DBfile, fs->super->d.root[0]);
+	fs->root = dfcreate(nil, "", getuser(), DMDIR|0555);
+	fs->active = dfcreate(fs->root, "active", getuser(), DMDIR|0775);
+	fs->archive = dbget(DBfile, fs->super->d.root[0]);
 	wlock(fs->root->mf);
 	wlock(fs->archive->mf);
-	dflink(fs, fs->root, fs->archive);
+	dflink(fs->root, fs->archive);
 	wunlock(fs->archive->mf);
 	wunlock(fs->root->mf);
 	noerror();
-	return fs;
 }
 
 /*
@@ -381,7 +375,7 @@ fsopen(char *dev)
  * This should be called if fs->super->d.nfree < some number.
  */
 void
-fsreclaim(Fsys *fs)
+fsreclaim(void)
 {
 	uvlong nfree;
 	Child *c, *victim;
@@ -401,7 +395,7 @@ fsreclaim(Fsys *fs)
 		dDprint("fsreclaim: reclaiming: %ulld free\n", nfree);
 		arch = fs->archive;
 		wlock(arch->mf);
-		dfloaddir(fs, arch, 1);
+		dfloaddir(arch, 1);
 		if(arch->mf->nchild < 2){
 			wunlock(arch->mf);
 			dDprint("nothing to reclaim\n");
@@ -425,14 +419,14 @@ fsreclaim(Fsys *fs)
 		 * value they should have (the reference is gone from disk).
 		 */
 		victim->d->file = 0;
-		dbwrite(fs, victim->b);
+		dbwrite(victim->b);
 		delchild(arch, victim);
 		wunlock(arch->mf);
 	
-		n = dbgetref(fs, gone->addr);
+		n = dbgetref(gone->addr);
 		if(n != 1)
 			sysfatal("reclaim: gone ref is %d != 1", n);
-		n = dfreclaim(fs, gone);
+		n = dfreclaim(gone);
 		dDprint("%d block%s reclaimed\n", n, n?"s":"");
 		tot += n;
 
@@ -445,11 +439,11 @@ fsreclaim(Fsys *fs)
 		 * We don't snap here because that is likely to allocate more
 		 * blocks.
 		 */
-		freezerefs(fs);
-		writerefs(fs);
-		freezesuper(fs);
+		freezerefs();
+		writerefs();
+		freezesuper();
 		dDprint("fsreclaim: %H", fs->fzsuper);
-		writesuper(fs);
+		writesuper();
 	}
 	if(tot > 0)
 		fprint(2, "%s: %d block%s reclaimed\n", argv0, tot, tot?"s":"");

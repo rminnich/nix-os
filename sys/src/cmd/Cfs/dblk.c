@@ -16,12 +16,12 @@
  */
 
 void
-dbclear(Fsys *fs, u64int addr, int type)
+dbclear(u64int addr, int type)
 {
 	static Diskblk d;
 	static QLock lk;
 
-	dDprint("dbclear d%#ullx\n", addr);
+	dDprint("dbclear d%#ullx type DB%s\n", addr, tname[type]);
 	qlock(&lk);
 	d.tag = TAG(addr, type);
 	d.epoch = now();
@@ -33,12 +33,12 @@ dbclear(Fsys *fs, u64int addr, int type)
 }
 
 void
-meltedref(Fsys *fs, Memblk *rb)
+meltedref(Memblk *rb)
 {
 	if(rb->frozen && rb->dirty){
 		if(catcherror())
 			sysfatal("writing ref: %r");
-		dbwrite(fs, rb);
+		dbwrite(rb);
 		noerror();
 	}
 	rb->frozen = rb->dirty = 0;
@@ -55,7 +55,7 @@ meltedref(Fsys *fs, Memblk *rb)
  */
 
 u64int
-newblkaddr(Fsys *fs)
+newblkaddr(void)
 {
 	u64int addr, naddr;
 
@@ -73,11 +73,28 @@ Again:
 		addr = fs->super->d.eaddr;
 		fs->super->d.eaddr += Dblksz;
 		changed(fs->super);
+		/*
+		 * ref blocks are allocated and initialized on demand,
+		 * and they must be zeroed before used.
+		 * do this holding the lock so others find everything
+		 * initialized.
+		 */
+		if(((addr-Dblk0addr)/Dblksz)%Nblkgrpsz == 0){
+			dDprint("new ref blk addr = d%#ullx\n", addr);
+			if(catcherror()){
+				qunlock(fs);
+				error(nil);
+			}
+			dbclear(addr, DBref);	/* fs initialization */
+			noerror();
+			addr += Dblksz;
+			fs->super->d.eaddr += Dblksz;
+		}
 	}else if(fs->super->d.free != 0){
 		addr = fs->super->d.free;
 
 		qunlock(fs);
-		naddr = dbgetref(fs, addr);	/* acquires locks */
+		naddr = dbgetref(addr);	/* acquires locks */
 		qlock(fs);
 		if(addr != fs->super->d.free){
 			/* had a race */
@@ -86,30 +103,12 @@ Again:
 		fs->super->d.free = naddr;
 		fs->super->d.nfree -= 1;
 		changed(fs->super);
-		goto found;
 	}else{
 		/* backward compatible with fossil */
 		error("disk is full");
 	}
-	/*
-	 * ref blocks are allocated and initialized on demand,
-	 * and they must be zeroed before used.
-	 * do this holding the lock so others find everything
-	 * initialized.
-	 */
-	if(((addr-Dblk0addr)/Dblksz)%Nblkgrpsz == 0){
-		if(catcherror()){
-			qunlock(fs);
-			error(nil);
-		}
-		dbclear(fs, addr-Dblksz, DBref);	/* fs initialization */
-		noerror();
-		addr += Dblksz;
-		fs->super->d.eaddr += Dblksz;
-	}
-found:
 	qunlock(fs);
-	okaddr(fs, addr);
+	okaddr(addr);
 
 	dDprint("newblkaddr = d%#ullx\n", addr);
 	return addr;
@@ -147,7 +146,7 @@ refaddr(u64int addr, int *idx)
  */
 
 u64int
-dbgetref(Fsys *fs, u64int addr)
+dbgetref(u64int addr)
 {
 	Memblk *rb;
 	u64int raddr, ref;
@@ -160,17 +159,17 @@ dbgetref(Fsys *fs, u64int addr)
 		return 1;
 
 	raddr = refaddr(addr, &i);
-	rb = dbget(fs, DBref, raddr);
+	rb = dbget(DBref, raddr);
 	qlock(fs);
-	meltedref(fs, rb);
+	meltedref(rb);
 	ref = rb->d.ref[i];
 	qunlock(fs);
-	mbput(fs, rb);
+	mbput(rb);
 	return ref;
 }
 
 void
-dbsetref(Fsys *fs, u64int addr, u64int ref)
+dbsetref(u64int addr, u64int ref)
 {
 	Memblk *rb;
 	u64int raddr;
@@ -180,17 +179,17 @@ dbsetref(Fsys *fs, u64int addr, u64int ref)
 	if(addr < Dblk0addr)
 		sysfatal("dbsetref");
 	raddr = refaddr(addr, &i);
-	rb = dbget(fs, DBref, raddr);
+	rb = dbget(DBref, raddr);
 	qlock(fs);
-	meltedref(fs, rb);
+	meltedref(rb);
 	rb->d.ref[i] = ref;
 	changed(rb);
 	qunlock(fs);
-	mbput(fs, rb);
+	mbput(rb);
 }
 
 void
-dbincref(Fsys *fs, u64int addr)
+dbincref(u64int addr)
 {
 	Memblk *rb;
 	u64int raddr;
@@ -198,17 +197,17 @@ dbincref(Fsys *fs, u64int addr)
 
 	dDprint("dbincref %#ullx\n", addr);
 	raddr = refaddr(addr, &i);
-	rb = dbget(fs, DBref, raddr);
+	rb = dbget(DBref, raddr);
 	qlock(fs);
-	meltedref(fs, rb);
+	meltedref(rb);
 	rb->d.ref[i]++;
 	changed(rb);
 	qunlock(fs);
-	mbput(fs, rb);
+	mbput(rb);
 }
 
 u64int
-dbdecref(Fsys *fs, u64int addr)
+dbdecref(u64int addr)
 {
 	Memblk *rb;
 	u64int raddr, ref;
@@ -218,8 +217,8 @@ dbdecref(Fsys *fs, u64int addr)
 		sysfatal("dbdecref");
 	dDprint("dbdecref %#ullx\n", addr);
 	raddr = refaddr(addr, &i);
-	rb = dbget(fs, DBref, raddr);
-	meltedref(fs, rb);
+	rb = dbget(DBref, raddr);
+	meltedref(rb);
 	qlock(fs);
 	rb->d.ref[i]--;
 	ref = rb->d.ref[i];
@@ -232,12 +231,12 @@ dbdecref(Fsys *fs, u64int addr)
 		changed(rb);
 	}
 	qunlock(fs);
-	mbput(fs, rb);
+	mbput(rb);
 	return ref;
 }
 
 static Mfile*
-mfalloc(Fsys *fs)
+mfalloc(void)
 {
 	Mfile *mf;
 
@@ -254,7 +253,7 @@ mfalloc(Fsys *fs)
 }
 
 Memblk*
-dballoc(Fsys *fs, uint type)
+dballoc(uint type)
 {
 	Memblk *b;
 	u64int addr;
@@ -265,20 +264,20 @@ dballoc(Fsys *fs, uint type)
 	if(root)
 		type = DBfile;
 	else
-		addr = newblkaddr(fs);
+		addr = newblkaddr();
 	dDprint("dballoc DB%s\n", tname[type]);
-	b = mballoc(fs, addr);
+	b = mballoc(addr);
 	b->d.tag = TAG(b->addr,type);
 	changed(b);
 	if(catcherror()){
-		mbput(fs, b);
+		mbput(b);
 		error(nil);
 	}
 	if(addr != Noaddr && addr >= Dblk0addr)
-		dbsetref(fs, addr, 1);
+		dbsetref(addr, 1);
 	if(type == DBfile)
-		b->mf = mfalloc(fs);
-	mbhash(fs, b);
+		b->mf = mfalloc();
+	mbhash(b);
 	dDprint("dballoc DB%s -> %H\n", tname[type], b);
 	noerror();
 	return b;
@@ -311,12 +310,14 @@ disktohost(Memblk *b)
 	if(u.m[0] != 0x88)
 		sysfatal("fix hosttodisk/disktohost for big endian");
 
-	if(!TAGADDROK(b->d.tag, b->addr))
+	if(!TAGADDROK(b->d.tag, b->addr)){
+print("disktohost: %H", b);
 		error("disktohost: bad tag");
+}
 }
 
 long
-dbwrite(Fsys *fs, Memblk *b)
+dbwrite(Memblk *b)
 {
 	Memblk *nb;
 
@@ -325,15 +326,15 @@ dbwrite(Fsys *fs, Memblk *b)
 	nb = hosttodisk(b);
 	nb->d.epoch = now();
 	if(pwrite(fs->fd, &nb->d, sizeof nb->d, nb->addr) != Dblksz){
-		mbput(fs, nb);
+		mbput(nb);
 		error("dbwrite: %r");
 	}
-	mbput(fs, nb);
+	mbput(nb);
 	return Dblksz;
 }
 
 long
-dbread(Fsys *fs, Memblk *b)
+dbread(Memblk *b)
 {
 	long tot, nr;
 	uchar *p;
@@ -355,7 +356,7 @@ dbread(Fsys *fs, Memblk *b)
 	disktohost(b);
 	if(TAGTYPE(b->d.tag) != DBref)
 		b->frozen = 1;
-	dDprint("dbread %H", b);
+	if(0)dDprint("dbread %H", b);
 
 	return tot;
 }
@@ -366,38 +367,46 @@ dbread(Fsys *fs, Memblk *b)
  * entire directory is removed from memory.
  */
 Memblk*
-dbget(Fsys *fs, uint type, u64int addr)
+dbget(uint type, u64int addr)
 {
 	Memblk *b;
 	u64int tag;
 
-	dDprint("dbget d%#ullx\n",addr);
-	okaddr(fs, addr);
-	b = mbget(fs, addr);
-	if(b != nil)
+	dDprint("dbget DB%s d%#ullx\n", tname[type], addr);
+	okaddr(addr);
+	tag = TAG(addr,type);
+	b = mbget(addr);
+	if(b != nil){
+		if(b->d.tag != tag)
+			sysfatal("dbget: got bad tag");
 		return b;
+	}
 
 	/*
 	 * others might request the same block while we read it.
 	 * the first one hashing it wins; no locks.
 	 */
-	tag = TAG(addr,type);
-	b = mballoc(fs, addr);
+	b = mballoc(addr);
 	if(catcherror()){
-		mbput(fs, b);
+		mbput(b);
 		error(nil);
 	}
-	dbread(fs, b);
-	if(b->d.tag != tag)
-		sysfatal("dbget: wrong tag");
+	dbread(b);
+	if(b->d.tag != tag){
+		dDprint("dbget: wanted DB%s; got DB%s\n",
+			tname[type], tname[TAGTYPE(b->d.tag)]);
+abort();
+		sysfatal("dbget: read bad tag %#ullx %#ullx", b->d.tag, tag);
+	}
 	if(type == DBfile){
 		assert(b->mf == nil);
-		b->mf = mfalloc(fs);
+		b->mf = mfalloc();
 		gmeta(b->mf, b->d.embed, Embedsz);
 		b->written = 1;
 	}
+
 	noerror();
-	b = mbhash(fs, b);
+	b = mbhash(b);
 	return b;
 }
 
@@ -405,7 +414,7 @@ dbget(Fsys *fs, uint type, u64int addr)
  * caller responsible for locking.
  */
 Memblk*
-dbdup(Fsys *fs, Memblk *b)
+dbdup(Memblk *b)
 {
 	Memblk *nb;
 	uint type;
@@ -413,7 +422,7 @@ dbdup(Fsys *fs, Memblk *b)
 	Mfile *nm, *m;
 
 	type = TAGTYPE(b->d.tag);
-	nb = dballoc(fs, type);
+	nb = dballoc(type);
 	switch(type){
 	case DBfree:
 	case DBref:
@@ -423,29 +432,22 @@ dbdup(Fsys *fs, Memblk *b)
 	case DBdata:
 		memmove(nb->d.data, b->d.data, Dblkdatasz);
 		break;
-	case DBptr:
-		for(i = 0; i < Dptrperblk; i++){
-			nb->d.ptr[i] = b->d.ptr[i];
-			if(nb->d.ptr[i] != 0)
-				dbincref(fs, b->d.ptr[i]);
-		}
-		break;
 	case DBfile:
 		isrlocked(b);
 		isloaded(b);
 		nb->d.asize = b->d.asize;
 		nb->d.aptr = b->d.aptr;
 		if(nb->d.aptr != 0)
-			dbincref(fs, b->d.aptr);
+			dbincref(b->d.aptr);
 		for(i = 0; i < nelem(b->d.dptr); i++){
 			nb->d.dptr[i] = b->d.dptr[i];
 			if(nb->d.dptr[i] != 0)
-				dbincref(fs, b->d.dptr[i]);
+				dbincref(b->d.dptr[i]);
 		}
 		for(i = 0; i < nelem(b->d.iptr); i++){
 			nb->d.iptr[i] = b->d.iptr[i];
 			if(nb->d.iptr[i] != 0)
-				dbincref(fs, b->d.iptr[i]);
+				dbincref(b->d.iptr[i]);
 		}
 		memmove(nb->d.embed, b->d.embed, Embedsz);
 		nm = nb->mf;
@@ -466,7 +468,13 @@ dbdup(Fsys *fs, Memblk *b)
 		}
 		break;
 	default:
-		sysfatal("dbdup: type");
+		if(type < DBptr0 || type >= DBptr0 + Niptr)
+			sysfatal("dbdup: type %d", type);
+		for(i = 0; i < Dptrperblk; i++){
+			nb->d.ptr[i] = b->d.ptr[i];
+			if(nb->d.ptr[i] != 0)
+				dbincref(b->d.ptr[i]);
+		}
 	}
 	changed(nb);
 	return nb;

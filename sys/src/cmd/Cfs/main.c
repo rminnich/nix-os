@@ -13,19 +13,17 @@
 void
 main(int, char *argv[])
 {
-	Fsys *fs;
-
 	argv0 = argv[0];
 	fmtinstall('H', mbfmt);
 	fmtinstall('M', dirmodefmt);
 	errinit(Errstack);
 	if(catcherror())
 		sysfatal("error: %r");
-	fs = fsopen("disk");
-	fsdump(fs);
+	fsopen("disk");
+	fsdump();
 	dbg['D'] = 1;
-	fsreclaim(fs);
-	fsdump(fs);
+	fsreclaim();
+	fsdump();
 	noerror();
 	exits(nil);
 }

@@ -20,7 +20,6 @@ usage(void)
 void
 main(int argc, char *argv[])
 {
-	Fsys *fs;
 	int verb;
 	char *dev;
 
@@ -46,9 +45,9 @@ main(int argc, char *argv[])
 	errinit(Errstack);
 	if(catcherror())
 		sysfatal("error: %r");
-	fs = fsfmt(dev);
+	fsfmt(dev);
 	if(verb)
-		fsdump(fs);
+		fsdump();
 	noerror();
 	exits(nil);
 }

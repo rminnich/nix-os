@@ -29,7 +29,7 @@ fsname(char *p)
 }
 
 static Memblk*
-walkto(Fsys *fs, char *a, char **lastp)
+walkto(char *a, char **lastp)
 {
 	char *els[Nels], *path;
 	int nels;
@@ -46,10 +46,10 @@ walkto(Fsys *fs, char *a, char **lastp)
 		error("walkpath: %r");
 	}
 	if(lastp != nil){
-		f = walkpath(fs, fs->root, els, nels-1);
+		f = walkpath(fs->root, els, nels-1);
 		*lastp = a + strlen(a) - strlen(els[nels-1]);
 	}else
-		f = walkpath(fs, fs->root, els, nels);
+		f = walkpath(fs->root, els, nels);
 	free(path);
 	noerror();
 	if(verb)
@@ -58,14 +58,14 @@ walkto(Fsys *fs, char *a, char **lastp)
 }
 
 static void
-fscd(Fsys*, int, char *argv[])
+fscd(int, char *argv[])
 {
 	free(fsdir);
 	fsdir = strdup(argv[1]);
 }
 
 static void
-fsput(Fsys *fs, int, char *argv[])
+fsput(int, char *argv[])
 {
 	int fd;
 	char *fn;
@@ -89,23 +89,23 @@ fsput(Fsys *fs, int, char *argv[])
 		fprint(2, "%s: error: %r\n", argv[0]);
 		goto done;
 	}
-	m = walkto(fs, argv[2], &fn);
-	f = dfcreate(fs, m, fn, d->uid, d->mode&(DMDIR|0777));
+	m = walkto(argv[2], &fn);
+	f = dfcreate(m, fn, d->uid, d->mode&(DMDIR|0777));
 	if((d->mode&DMDIR) == 0){
 		off = 0;
 		for(;;){
 			nr = read(fd, buf, sizeof buf);
 			if(nr <= 0)
 				break;
-			nw = dfpwrite(fs, f, buf, nr, off);
+			nw = dfpwrite(f, buf, nr, off);
 			dDprint("wrote %ld of %ld bytes\n", nw, nr);
 			off += nr;
 		}
 	}
-	mbput(fs, m);
+	mbput(m);
 	if(verb)
 		print("created %H", f);
-	mbput(fs, f);
+	mbput(f);
 	noerror();
 done:
 	close(fd);
@@ -113,7 +113,7 @@ done:
 }
 
 static void
-fscat(Fsys *fs, int, char *argv[])
+fscat(int, char *argv[])
 {
 	Memblk *f;
 	Mfile *m;
@@ -125,19 +125,19 @@ fscat(Fsys *fs, int, char *argv[])
 		fprint(2, "%s: error: %r\n", argv[0]);
 		return;
 	}
-	f = walkto(fs, argv[2], nil);
+	f = walkto(argv[2], nil);
 	if(catcherror()){
 		fprint(2, "%s: error: %r\n", argv[0]);
-		mbput(fs, f);
+		mbput(f);
 		return;
 	}
 	m = f->mf;
-	print("%-30s\t%M\t%5ulld\t%s %ulld refs\n",
-		m->name, (ulong)m->mode, m->length, m->uid, dbgetref(fs, f->addr));
+	print("cat %-30s\t%M\t%5ulld\t%s %ulld refs\n",
+		m->name, (ulong)m->mode, m->length, m->uid, dbgetref(f->addr));
 	if((m->mode&DMDIR) == 0){
 		off = 0;
 		for(;;){
-			nr = dfpread(fs, f, buf, sizeof buf, off);
+			nr = dfpread(f, buf, sizeof buf, off);
 			if(nr <= 0)
 				break;
 			write(1, buf, nr);
@@ -146,11 +146,59 @@ fscat(Fsys *fs, int, char *argv[])
 	}
 	noerror();
 	noerror();
-	mbput(fs, f);
+	mbput(f);
 }
 
 static void
-flist(Fsys *fs, Memblk *f, char *ppath)
+fsget(int, char *argv[])
+{
+	Memblk *f;
+	Mfile *m;
+	char buf[4096];
+	uvlong off;
+	long nr;
+	int fd;
+
+	fd = create(argv[1], OWRITE, 0664);
+	if(fd < 0){
+		fprint(2, "%s: error: %r\n", argv[0]);
+		return;
+	}
+	if(catcherror()){
+		close(fd);
+		fprint(2, "%s: error: %r\n", argv[0]);
+		return;
+	}
+	f = walkto(argv[2], nil);
+	if(catcherror()){
+		mbput(f);
+		error(nil);
+	}
+	m = f->mf;
+	print("get %-30s\t%M\t%5ulld\t%s %ulld refs\n",
+		m->name, (ulong)m->mode, m->length, m->uid, dbgetref(f->addr));
+print("%H", f);
+	if((m->mode&DMDIR) == 0){
+		off = 0;
+		for(;;){
+			nr = dfpread(f, buf, sizeof buf, off);
+			if(nr <= 0)
+				break;
+			if(write(fd, buf, nr) != nr){
+				fprint(2, "%s: error: %r\n", argv[0]);
+				break;
+			}
+			off += nr;
+		}
+	}
+	close(fd);
+	noerror();
+	noerror();
+	mbput(f);
+}
+
+static void
+flist(Memblk *f, char *ppath)
 {
 	char *path;
 	Mfile *m;
@@ -158,7 +206,7 @@ flist(Fsys *fs, Memblk *f, char *ppath)
 
 	m = f->mf;
 	if(m->mode&DMDIR)
-		dfloaddir(fs, f, 0);
+		dfloaddir(f, 0);
 	rlock(m);
 	if(ppath == nil){
 		print("/");
@@ -166,35 +214,45 @@ flist(Fsys *fs, Memblk *f, char *ppath)
 	}else
 		path = smprint("%s/%s", ppath, m->name);
 	print("%-30s\t%M\t%5ulld\t%s %ulld refs\n",
-		path, (ulong)m->mode, m->length, m->uid, dbgetref(fs, f->addr));
+		path, (ulong)m->mode, m->length, m->uid, dbgetref(f->addr));
 	if(m->mode&DMDIR)
 		for(i = 0; i < m->nchild; i++)
-			flist(fs, m->child[i].f, path);
+			flist(m->child[i].f, path);
 	runlock(m);
 	free(path);
 }
 
 static void
-fslist(Fsys *fs, int, char**)
+fslist(int, char**)
 {
-	print("fsys '%s' blksz %ulld:\n", fs->dev, fs->super->d.dblksz);
+	u64int msz, fact;
+	int i;
+
+	msz = Embedsz - Dminattrsz + Ndptr*Dblkdatasz;
+	fact = Dblkdatasz;
+	for(i = 0; i < Niptr; i++){
+		msz += Dptrperblk * fact;
+		fact *= Dptrperblk;
+	}
+	print("fsys '%s' blksz %ulld maxdfsz %ulld:\n",
+		fs->dev, fs->super->d.dblksz, msz);
 	if(verb)
-		fsdump(fs);
+		fsdump();
 	else
-		flist(fs, fs->root, nil);
+		flist(fs->root, nil);
 	print("\n");
 }
 
 static void
-fssnap(Fsys *fs, int, char**)
+fssnap(int, char**)
 {
-	fssync(fs);
+	fssync();
 }
 
 static void
-fsrcl(Fsys *fs, int, char**)
+fsrcl(int, char**)
 {
-	fsreclaim(fs);
+	fsreclaim();
 }
 
 static void
@@ -207,23 +265,26 @@ usage(void)
 static struct
 {
 	char *name;
-	void (*f)(Fsys*, int, char**);
+	void (*f)(int, char**);
 	int nargs;
 	char *usage;
 } cmds[] =
 {
 	{"cd",	fscd,	2, "cd!where"},
 	{"put",	fsput,	3, "put!src!dst"},
+	{"get",	fsget,	3, "get!dst!src"},
 	{"cat",	fscat,	3, "cat!what"},
 	{"ls",	fslist,	1, "ls"},
 	{"snap", fssnap, 1, "snap"},
 	{"rcl",	fsrcl,	1, "rcl"},
 };
 
+static char xdbg[256];
+static char zdbg[256];
+
 void
 main(int argc, char *argv[])
 {
-	Fsys *fs;
 	char *dev;
 	char *args[Nels];
 	int i, j, nargs;
@@ -238,8 +299,8 @@ main(int argc, char *argv[])
 		break;
 	default:
 		if(ARGC() >= 'A' && ARGC() <= 'Z'){
-			dbg['d'] = 1;
-			dbg[ARGC()] = 1;
+			xdbg['d'] = 1;
+			xdbg[ARGC()] = 1;
 		}else
 			usage();
 	}ARGEND;
@@ -250,14 +311,14 @@ main(int argc, char *argv[])
 	errinit(Errstack);
 	if(catcherror())
 		sysfatal("error: %r");
-	fs = fsopen(dev);
+	fsopen(dev);
 	for(i = 0; i < argc; i++){
 		if(catcherror())
 			sysfatal("cmd %s: %r", argv[i]);
 		if(verb>1)
-			fsdump(fs);
+			fsdump();
 		else if(verb)
-			flist(fs, fs->root, nil);
+			flist(fs->root, nil);
 		print("%% %s\n", argv[i]);
 		nargs = gettokens(argv[i], args, Nels, "!");
 		for(j = 0; j < nelem(cmds); j++){
@@ -265,8 +326,11 @@ main(int argc, char *argv[])
 				continue;
 			if(cmds[j].nargs != 0 && cmds[j].nargs != nargs)
 				print("usage: %s\n", cmds[j].usage);
-			else
-				cmds[j].f(fs, nargs, args);
+			else{
+				memmove(dbg, xdbg, sizeof xdbg);
+				cmds[j].f(nargs, args);
+				memmove(dbg, zdbg, sizeof zdbg);
+			}
 			break;
 		}
 		noerror();
@@ -278,9 +342,9 @@ main(int argc, char *argv[])
 		}
 	}
 	if(verb>1)
-		fsdump(fs);
+		fsdump();
 	else if(verb)
-		flist(fs, fs->root, nil);
+		flist(fs->root, nil);
 	noerror();
 	exits(nil);
 }

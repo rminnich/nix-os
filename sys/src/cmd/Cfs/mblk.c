@@ -22,28 +22,64 @@
 
 char*tname[] = {
 [DBfree]	"free",
-[DBdata]	"data",
-[DBptr]		"ptr",
+[DBsuper]	"super",
 [DBref]		"ref",
+[DBdata]	"data",
 [DBattr]	"attr",
 [DBfile]		"file",
-[DBsuper]	"super"
+[DBptr0]	"ptr0",
+[DBptr0+1]	"ptr1",
+[DBptr0+2]	"ptr2",
+[DBptr0+3]	"ptr3",
+[DBptr0+4]	"ptr4",
+[DBptr0+5]	"ptr5",
+[DBptr0+6]	"ptr6",
 };
 
 #define EP(e)	((e)&0xFFFFFFFFUL)
 /*
  * NO LOCKS. debug only
  */
+static void
+fmttab(Fmt *fmt, int t)
+{
+	if(t-- > 0)
+		fmtprint(fmt, "\t");
+	while(t-- > 0)
+		fmtprint(fmt, "  ");
+}
+static int mbtab;
+static void
+fmtptr(Fmt *fmt, u64int addr, char *tag, int n)
+{
+	Memblk *b;
+
+	if(addr == 0)
+		return;
+	b = mbget(addr);
+	if(b == nil){
+		fmttab(fmt, mbtab);
+		fmtprint(fmt, "%s[%d] = d%#ullx <unloaded>\n", tag, n, addr);
+	}else{
+		decref(b);
+		fmtprint(fmt, "%H", b);
+	}
+}
+
 int
 mbfmt(Fmt *fmt)
 {
 	Memblk *b;
-	int type, i, n, once;
+	int type, i, n, once, xdbg;
 
 	b = va_arg(fmt->args, Memblk*);
 	if(b == nil)
 		return fmtprint(fmt, "<nil>\n");
 	type = TAGTYPE(b->d.tag);
+	fmttab(fmt, mbtab);
+	mbtab++;
+	xdbg = dbg['D'];
+	dbg['D'] = 0;
 	fmtprint(fmt, "m%#p d%#ullx", b, b->addr);
 	if(b->frozen)
 		fmtprint(fmt, " FZ");
@@ -59,58 +95,53 @@ mbfmt(Fmt *fmt)
 	case DBattr:
 		fmtprint(fmt, "\n");
 		break;
-	case DBptr:
-		fmtprint(fmt, "\n");
-		for(i = n = 0; i < Dptrperblk; i++)
-			if(b->d.ptr[i]){
-				fmtprint(fmt, "\t[%d]=d%#ullx", i, b->d.ptr[i]);
-				if(++n%4 == 0)
-					fmtprint(fmt, "\n");
-			}
-		if(n%4 != 0)
-			fmtprint(fmt, "\n");
-		break;
 	case DBref:
 		fmtprint(fmt, " rnext m%#p\n", b->rnext);
 		for(i = n = 0; i < Drefperblk; i++)
 			if(b->d.ref[i]){
 				fmtprint(fmt, "\t[%d]d%#ullx=%#ullx",
 					i, addrofref(b->addr, i), b->d.ref[i]);
-				if(++n%5 == 0)
+				if(++n%5 == 0){
 					fmtprint(fmt, "\n");
+					if(i < Dptrperblk-1)
+						fmttab(fmt, mbtab);
+				}
 			}
 		if(n%5 != 0)
 			fmtprint(fmt, "\n");
 		break;
 	case DBfile:
-		fmtprint(fmt, "\n\tasz %#ullx aptr %#ullx\n", b->d.asize, b->d.aptr);
+		fmtprint(fmt, "\n");
+		fmttab(fmt, mbtab);
+		fmtprint(fmt, "asz %#ullx aptr %#ullx\n", b->d.asize,b->d.aptr);
 		if(b->mf == nil){
-			fmtprint(fmt, "\tno mfile\n");
+			fmtprint(fmt, "no mfile\n");
 			break;
 		}
-		fmtprint(fmt, "\tid %#ullx mode %M mt %#ullx sz %#ullx '%s' '%s'\n",
+		fmttab(fmt, mbtab);
+		fmtprint(fmt, "id %#ullx mode %M mt %#ullx sz %#ullx '%s' '%s'\n",
 			EP(b->mf->id), (ulong)b->mf->mode, EP(b->mf->mtime),
 			b->mf->length, b->mf->uid, b->mf->name);
-		fmtprint(fmt, "\tparent m%#p nr%d nw%d lastb m%#p lastbno %uld\n",
+		fmttab(fmt, mbtab);
+		fmtprint(fmt, "parent m%#p nr%d nw%d lastb m%#p lastbno %uld\n",
 			b->mf->parent, b->mf->readers, b->mf->writer,
 			b->mf->lastb, b->mf->lastbno);
 		if(b->mf->nchild > 0){
-			fmtprint(fmt, "\tchild:");
+			fmttab(fmt, mbtab);
+			fmtprint(fmt, "child:");
 			for(i = 0; i < b->mf->nchild; i++)
 				fmtprint(fmt, " m%#p", b->mf->child[i].f);
 			fmtprint(fmt, "\n");
 		}
-		fmtprint(fmt, "\tdptr:");
 		for(i = 0; i < nelem(b->d.dptr); i++)
-			fmtprint(fmt, " d%#ullx", b->d.dptr[i]);
-		fmtprint(fmt, "\n");
-		fmtprint(fmt, "\tiptr:");
+			fmtptr(fmt, b->d.dptr[i], "d", i);
 		for(i = 0; i < nelem(b->d.iptr); i++)
-			fmtprint(fmt, " d%#ullx", b->d.iptr[i]);
-		fmtprint(fmt, "\n");
+			fmtptr(fmt, b->d.iptr[i], "i", i);
 		break;
 	case DBsuper:
-		fmtprint(fmt, "\n\tfree d%#ullx eaddr %#ullx root [", b->d.free, b->d.eaddr);
+		fmttab(fmt, mbtab);
+		fmtprint(fmt, "free d%#ullx eaddr %#ullx root [",
+			b->d.free, b->d.eaddr);
 		once = 0;
 		for(i = 0; i < nelem(b->d.root); i++)
 			if(b->d.root[i] != 0){
@@ -120,7 +151,18 @@ mbfmt(Fmt *fmt)
 			}
 		fmtprint(fmt, "]\n");
 		break;
+	default:
+		if(type < DBptr0 || type >= DBptr0+Niptr){
+			fmtprint(fmt, "<bad type %d>", type);
+			break;
+		}
+		fmtprint(fmt, "\n");
+		for(i = 0; i < Dptrperblk; i++)
+			fmtptr(fmt, b->d.ptr[i], "p", i);
+		break;
 	}
+	dbg['D'] = xdbg;
+	mbtab--;
 	return 0;
 }
 
@@ -147,7 +189,7 @@ changed(Memblk *b)
 }
 
 Memblk*
-mbhash(Fsys *fs, Memblk *b)
+mbhash(Memblk *b)
 {
 	Memblk **h;
 	uint hv;
@@ -158,7 +200,7 @@ mbhash(Fsys *fs, Memblk *b)
 	for(h = &fs->fhash[hv].b; *h != nil; h = &(*h)->next)
 		if((*h)->addr == b->addr){
 			/* concurrent reads, use the first one */
-			mbput(fs, b);
+			mbput(b);
 			b = *h;
 			goto Found;
 		}
@@ -178,7 +220,7 @@ Found:
 }
 
 static void
-mbfree(Fsys *fs, Memblk *b)
+mbfree(Memblk *b)
 {
 	Mfile *mf;
 
@@ -197,7 +239,7 @@ mbfree(Fsys *fs, Memblk *b)
 		b->mf = nil;
 		mf->nchild = 0;
 		if(mf->lastb != nil)
-			mbput(fs, mf->lastb);
+			mbput(mf->lastb);
 		mf->lastb = nil;
 		mf->lastbno = 0;
 		mf->parent = nil;
@@ -220,7 +262,7 @@ mbfree(Fsys *fs, Memblk *b)
 }
 
 void
-mbunhash(Fsys *fs, Memblk *b)
+mbunhash(Memblk *b)
 {
 	Memblk **h;
 	uint hv;
@@ -238,14 +280,14 @@ mbunhash(Fsys *fs, Memblk *b)
 			b->next = nil;
 			fs->nused--;
 			wunlock(&fs->fhash[hv]);
-			mbput(fs, b);
+			mbput(b);
 			return;
 		}
 	sysfatal("mbunhash: not found");
 }
 
 Memblk*
-mballoc(Fsys *fs, u64int addr)
+mballoc(u64int addr)
 {
 	Memblk *b;
 
@@ -270,7 +312,7 @@ mballoc(Fsys *fs, u64int addr)
 }
 
 Memblk*
-mbget(Fsys *fs, u64int addr)
+mbget(u64int addr)
 {
 	Memblk *b;
 	uint hv;
@@ -278,29 +320,29 @@ mbget(Fsys *fs, u64int addr)
 	hv = addr%nelem(fs->fhash);
 	rlock(&fs->fhash[hv]);
 	for(b = fs->fhash[hv].b; b != nil; b = b->next)
-		if(b->addr == b->addr){
+		if(b->addr == addr){
 			incref(b);
 			break;
 		}
 	runlock(&fs->fhash[hv]);
-	dDprint("mbget %#ullx -> %H", addr, b);
+	dDprint("mbget %#ullx -> m%#p\n", addr, b);
 	return b;
 }
 
 void
-mbput(Fsys *fs, Memblk *b)
+mbput(Memblk *b)
 {
-	dDprint("mbput m%#p pc=%#p\n", b, getcallerpc(&fs));
+	dDprint("mbput m%#p pc=%#p\n", b, getcallerpc(&b));
 	if(decref(b) == 0)
-		mbfree(fs, b);
+		mbfree(b);
 }
 
 Memblk*
-mbdup(Fsys *fs, Memblk *b)
+mbdup(Memblk *b)
 {
 	Memblk *nb;
 
-	nb = mballoc(fs, b->addr);
+	nb = mballoc(b->addr);
 	memmove(&nb->d, &b->d, sizeof b->d);
 	return nb;
 }
