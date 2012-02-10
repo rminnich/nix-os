@@ -172,7 +172,7 @@ main(int argc, char **argv)
 		/* ignored but accepted for compatibility */
 		break;
 	case 'R':				/* From listen */
-		remoteside(0);
+		remoteside();
 		break;
 	case 'h':
 		system = EARGF(usage());
