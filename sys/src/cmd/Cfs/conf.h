@@ -53,7 +53,7 @@ enum
 	 * because of recursive routines (in the worst case).
 	 */
 	Stack = 32*KiB,		/* stack size for threads */
-	Errstack = 512,		/* max # of nested error labels */
+	Errstack = 64,		/* max # of nested error labels */
 	Fhashsz = 7919,		/* size of file hash (plan9 has 35454 files). */
 
 };

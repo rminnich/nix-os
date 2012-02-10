@@ -104,7 +104,7 @@ dfcreate(Fsys *fs, Memblk *parent, char *name, char *uid, ulong mode)
  * returns a slice into a block for reading.
  */
 Blksl
-dfread(Fsys *fs, Memblk *f, ulong len, uvlong off)
+dfreadblk(Fsys *fs, Memblk *f, ulong len, uvlong off)
 {
 	Blksl sl;
 
@@ -125,7 +125,7 @@ dfread(Fsys *fs, Memblk *f, ulong len, uvlong off)
  * the block is returned unlocked.
  */
 Blksl
-dfwrite(Fsys *fs, Memblk *f, uvlong off)
+dfwriteblk(Fsys *fs, Memblk *f, uvlong off)
 {
 	Blksl sl;
 
@@ -145,6 +145,47 @@ dfwrite(Fsys *fs, Memblk *f, uvlong off)
 	wunlock(f->mf);
 	mbput(fs, f);
 	return sl;
+}
+
+ulong
+dfpread(Fsys *fs, Memblk *f, void *a, ulong count, uvlong off)
+{
+	Blksl sl;
+	ulong tot;
+	char *p;
+
+	p = a;
+	for(tot = 0; tot < count; tot += sl.len){
+		sl = dfreadblk(fs, f, count, off);
+		if(sl.len == 0)
+			break;
+		if(sl.data == nil){
+			memset(p+tot, 0, sl.len);
+			continue;
+		}
+		memmove(p+tot, sl.data, sl.len);
+		mbput(fs, sl.b);
+	}
+	return tot;
+}
+
+ulong
+dfpwrite(Fsys *fs, Memblk *f, void *a, ulong count, uvlong off)
+{
+	Blksl sl;
+	ulong tot;
+	char *p;
+
+	p = a;
+	for(tot = 0; tot < count; tot += sl.len){
+		sl = dfwriteblk(fs, f, off);
+		if(sl.len == 0 || sl.data == nil)
+			sysfatal("dfpwrite: bug");
+		memmove(sl.data, p+tot, sl.len);
+		changed(sl.b);
+		mbput(fs, sl.b);
+	}
+	return tot;
 }
 
 /*
