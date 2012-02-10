@@ -1,0 +1,70 @@
+.TH ERROR 2
+.SH NAME
+errinit, noerror, error, catcherror \- local error handling utilities
+.SH SYNOPSIS
+.B #include <u.h>
+.br
+.B #include <libc.h>
+.br
+.B #include <error.h>
+.PP
+.B
+void	errinit(int stack)
+.br
+.B
+void	noerror(void)
+.br
+.B
+void	error(char* msg, ...)
+.br
+.B
+void	catcherror(void)
+.SH DESCRIPTION
+These routiles are tools for error handling.
+.IR catcherror ,
+.IR noerror ,
+.IR error ,
+and
+.IR errinit
+provide exeption handling for C, in the same style of the similar routines used in
+the kernel.
+They can be used both with and without
+the
+.IR thread (2)
+library.
+.PP
+.I Errinit
+should be called before using any other. It should be called by each thread/process
+using the error handling mechanism. Its argument,
+indicaties the desired depth of the error stack for the calling process.
+.PP
+.I Catcherror
+install an exception handling point.
+.I Noerror
+declares that there was no error catched, similar to the
+.I poperror
+function in the kernel.
+.I Error
+raises an error. If the argument is nil, the error string is unaltered. See the example.
+.SH SOURCE
+.B /sys/src/liberror
+.SH EXAMPLE
+Catch an error, and raise one.
+.PP
+.EX
+void f(void)
+{
+	error("catch this!");
+}
+
+void
+main(int argc, char **argv)
+{
+	errinit(32);
+	if (catcherror()){
+		sysfatal("catched: %r");
+	}
+	f();
+	noerror();
+}
+.EE
