@@ -1,0 +1,32 @@
+</$objtype/mkfile
+
+
+TARG=\
+	fscmd\
+	fsfmt\
+	9pix\
+
+OFILES=\
+	dbg.$O\
+	mblk.$O\
+	dblk.$O\
+	fblk.$O\
+	file.$O\
+	attr.$O\
+	fsys.$O\
+	file.$O\
+	9p.$O\
+
+HFILES=\
+	dbg.h\
+	conf.h\
+	dk.h\
+	fns.h\
+
+# not ready for install
+BIN=.
+
+</sys/src/cmd/mkmany
+
+fns:V:
+	c/f2p *.c >fns.h
