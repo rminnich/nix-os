@@ -1,0 +1,44 @@
+.TH GETBE 2
+getbe, setbe, getle, setle \- integer marshalling
+.SH SYNOPSIS
+.ta +\w'\fLuvlong 'u
+.PP
+.nf
+.B
+uvlong	getbe(uchar *buf, int nbytes)
+.PP
+.nf
+.B
+void	putbe(uchar *buf, uvlong v, int nbytes)
+.PP
+.nf
+.B
+uvlong	getle(uchar *buf, int nbytes)
+.PP
+.nf
+.B
+void	putle(uchar *buf, uvlong v, int nbytes)
+.SH DESCRIPTION
+These functions marshal a 1- to 8-byte integer to
+or from little- or big-endian formats.  The size
+of the integer is specified in bytes, and is not restricted
+to a power of two.
+.SH SOURCE
+.B /sys/src/libc/port/getbe.c
+.SH "SEE ALSO"
+.IR fcall (2),
+.IR ip (2)
+.SH BUGS
+.IR GBIT *
+and 
+.IR PBIT *
+(from
+.IR fcall (2))
+provide similar functionality for little-endian integers.
+The
+.IR nhget *
+and
+.IR nhput *
+functions from
+.IR ip (2)
+provide similar functionality  for big-endian integers.

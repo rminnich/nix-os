@@ -333,6 +333,14 @@ extern	vlong	nsec(void);
 extern	void	cycles(uvlong*);	/* 64-bit value of the cycle counter if there is one, 0 if there isn't */
 
 /*
+ * endian conversion
+ */
+extern	uvlong	getbe(uchar*, int);
+extern	void	putbe(uchar*, uvlong, int);
+extern	uvlong	getle(uchar*, int);
+extern	void	putle(uchar*, uvlong, int);
+
+/*
  * one-of-a-kind
  */
 enum
