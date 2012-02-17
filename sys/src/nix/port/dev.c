@@ -131,7 +131,7 @@ devattach(int dc, char *spec)
 	c->dev = devtabget(dc, 0);
 	if(spec == nil)
 		spec = "";
-	buf = smalloc(4+strlen(spec)+1);
+	buf = smalloc(1+UTFmax+strlen(spec)+1);
 	sprint(buf, "#%C%s", dc, spec);
 	c->path = newpath(buf);
 	free(buf);
