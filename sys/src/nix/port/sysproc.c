@@ -1182,12 +1182,11 @@ semacquire(Segment* s, int* addr, int block)
 
 /* Acquire semaphore or time-out */
 static int
-tsemacquire(Segment* s, int* addr, ulong ms)
+tsemacquire(Segment* s, int* addr, long ms)
 {
 	int acquired;
-	Sema phore;
-	int timedout;
 	ulong t;
+	Sema phore;
 
 	if(canacquire(addr))
 		return 1;
@@ -1195,7 +1194,6 @@ tsemacquire(Segment* s, int* addr, ulong ms)
 		return 0;
 
 	acquired = 0;
-	timedout = 0;
 	semqueue(s, addr, &phore);
 	for(;;){
 		phore.waiting = 1;
@@ -1206,21 +1204,18 @@ tsemacquire(Segment* s, int* addr, ulong ms)
 		}
 		if(waserror())
 			break;
-		t = m->ticks;
+		t = sys->ticks;
 		tsleep(&phore, semawoke, &phore, ms);
-		if(TK2MS(m->ticks-t) >= ms) {
-			timedout = 1;
-			poperror();
-			break;
-		}
-		ms -= TK2MS(m->ticks-t);
+		ms -= TK2MS(sys->ticks-t);
 		poperror();
+		if(ms <= 0)
+			break;
 	}
 	semdequeue(s, &phore);
 	coherence();	/* not strictly necessary due to lock in semdequeue */
 	if(!phore.waiting)
 		semwakeup(s, addr, 1);
-	if(timedout)
+	if(ms <= 0)
 		return 0;
 	if(!acquired)
 		nexterror();
