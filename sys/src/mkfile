@@ -37,7 +37,7 @@ LIBS=\
 	libthread\
 	libtube\
 	libventi\
-
+	libworker\
 
 CMDS=cmd\
 	games\
