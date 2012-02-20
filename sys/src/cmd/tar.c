@@ -523,27 +523,6 @@ eotar(Hdr *hp)
 }
 
 /*
-static uvlong
-getbe(uchar *src, int size)
-{
-	uvlong vl = 0;
-
-	while (size-- > 0) {
-		vl <<= 8;
-		vl |= *src++;
-	}
-	return vl;
-}
- */
-
-static void
-putbe(uchar *dest, uvlong vl, int size)
-{
-	for (dest += size; size-- > 0; vl >>= 8)
-		*--dest = vl;
-}
-
-/*
  * cautious parsing of octal numbers as ascii strings in
  * a tar header block.  this is particularly important for
  * trusting the checksum when trying to resync.
