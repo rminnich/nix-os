@@ -3,8 +3,8 @@
 #include "mem.h"
 #include "dat.h"
 #include "fns.h"
+#include "io.h"
 #include "../port/error.h"
-
 #include "../port/netif.h"
 
 #include "etherif.h"
@@ -14,16 +14,14 @@ static Ether *etherxx[MaxEther];
 Chan*
 etherattach(char* spec)
 {
-	int ctlrno;
+	ulong ctlrno;
 	char *p;
 	Chan *chan;
 
 	ctlrno = 0;
 	if(spec && *spec){
 		ctlrno = strtoul(spec, &p, 0);
-		if((ctlrno == 0 && p == spec) || *p != 0)
-			error(Ebadarg);
-		if(ctlrno < 0 || ctlrno >= MaxEther)
+		if((ctlrno == 0 && p == spec) || *p || (ctlrno >= MaxEther))
 			error(Ebadarg);
 	}
 	if(etherxx[ctlrno] == 0)
@@ -148,7 +146,7 @@ etheriq(Ether* ether, Block* bp, int fromwire)
 	ep = &ether->f[Ntypes];
 
 	multi = pkt->d[0] & 1;
-	/* check for valid multcast addresses */
+	/* check for valid multicast addresses */
 	if(multi && memcmp(pkt->d, ether->bcast, sizeof(pkt->d)) != 0 && ether->prom == 0){
 		if(!activemulti(ether, pkt->d, sizeof(pkt->d))){
 			if(fromwire){
@@ -172,7 +170,7 @@ etheriq(Ether* ether, Block* bp, int fromwire)
 	for(fp = ether->f; fp < ep; fp++){
 		if(f = *fp)
 		if(f->type == type || f->type < 0)
-		if(tome || multi || f->prom){
+		if(tome || multi || f->prom || f->bridge & 2){
 			/* Don't want to hear bridged packets */
 			if(f->bridge && !fromwire && !fromme)
 				continue;
@@ -266,13 +264,13 @@ etherwrite(Chan* chan, void* buf, long n, vlong)
 			return n;
 		}
 		free(cb);
-		if(ether->ctl!=nil)
-			return ether->ctl(ether,buf,n);
+		if(ether->ctl != nil)
+			return ether->ctl(ether, buf, n);
 
 		error(Ebadctl);
 	}
 
-	if(n > ether->maxmtu)
+	if(n > ether->mtu)
 		error(Etoobig);
 	if(n < ether->minmtu)
 		error(Etoosmall);
@@ -283,7 +281,8 @@ etherwrite(Chan* chan, void* buf, long n, vlong)
 		nexterror();
 	}
 	memmove(bp->rp, buf, n);
-	memmove(bp->rp+Eaddrlen, ether->ea, Eaddrlen);
+	if((ether->f[NETID(chan->qid.path)]->bridge & 2) == 0)
+		memmove(bp->rp+Eaddrlen, ether->ea, Eaddrlen);
 	poperror();
 	bp->wp += n;
 
@@ -309,7 +308,7 @@ etherbwrite(Chan* chan, Block* bp, vlong)
 	}
 	ether = etherxx[chan->devno];
 
-	if(n > ether->maxmtu){
+	if(n > ether->mtu){
 		freeb(bp);
 		error(Etoobig);
 	}
@@ -364,16 +363,17 @@ parseether(uchar *to, char *from)
 static Ether*
 etherprobe(int cardno, int ctlrno)
 {
-	int i;
+	int i, j;
 	Ether *ether;
 	char buf[128], name[32];
 
 	ether = malloc(sizeof(Ether));
 	memset(ether, 0, sizeof(Ether));
 	ether->ctlrno = ctlrno;
-	ether->tbdf = -1;
+	ether->tbdf = BUSUNKNOWN;
 	ether->mbps = 10;
 	ether->minmtu = ETHERMINTU;
+	ether->mtu = ETHERMAXTU;
 	ether->maxmtu = ETHERMAXTU;
 
 	if(cardno < 0){
@@ -415,38 +415,31 @@ etherprobe(int cardno, int ctlrno)
 	/*
 	 * If ether->irq is <0, it is a hack to indicate no interrupt
 	 * used by ethersink.
-	 * Or perhaps the driver has some other way to configure
-	 * interrups for intself, e.g. HyperTransport MSI.
 	 */
 	if(ether->irq >= 0)
 		intrenable(ether->irq, ether->interrupt, ether, ether->tbdf, name);
 
-	i = sprint(buf, "#l%d: %s: %dMbps port %#p irq %d",
-		ctlrno, cards[cardno].type, ether->mbps, ether->port, ether->irq);
+	i = sprint(buf, "#l%d: %s: %dMbps port %#p irq %d tu %d",
+		ctlrno, cards[cardno].type, ether->mbps, ether->port, ether->irq, ether->mtu);
 	if(ether->mem)
 		i += sprint(buf+i, " addr %#p", ether->mem);
 	if(ether->size)
-		i += sprint(buf+i, " size %ld", ether->size);
+		i += sprint(buf+i, " size 0x%luX", ether->size);
 	i += sprint(buf+i, ": %2.2ux%2.2ux%2.2ux%2.2ux%2.2ux%2.2ux",
 		ether->ea[0], ether->ea[1], ether->ea[2],
 		ether->ea[3], ether->ea[4], ether->ea[5]);
 	sprint(buf+i, "\n");
 	print(buf);
 
-	if (ether->mbps >= 1000) {
-		netifinit(ether, name, Ntypes, 512*1024);
-		if(ether->oq == 0)
-			ether->oq = qopen(512*1024, Qmsg, 0, 0);
-	} else if(ether->mbps >= 100){
-		netifinit(ether, name, Ntypes, 256*1024);
-		if(ether->oq == 0)
-			ether->oq = qopen(256*1024, Qmsg, 0, 0);
-	}
-	else{
-		netifinit(ether, name, Ntypes, 128*1024);
-		if(ether->oq == 0)
-			ether->oq = qopen(128*1024, Qmsg, 0, 0);
-	}
+	j = ether->mbps;
+	if(j > 1000)
+		j *= 10;
+	for(i = 0; j >= 100; i++)
+		j /= 10;
+	i = (128<<i)*1024;
+	netifinit(ether, name, Ntypes, i);
+	if(ether->oq == 0)
+		ether->oq = qopen(i, Qmsg, 0, 0);
 	if(ether->oq == 0)
 		panic("etherreset %s", name);
 	ether->alen = Eaddrlen;
@@ -489,16 +482,21 @@ etherreset(void)
 static void
 ethershutdown(void)
 {
-	Ether *ether;
+	char name[32];
 	int i;
+	Ether *ether;
 
 	for(i = 0; i < MaxEther; i++){
 		ether = etherxx[i];
 		if(ether == nil)
 			continue;
 		if(ether->shutdown == nil) {
-			print("#l%d: no shutdown fuction\n", i);
+			print("#l%d: no shutdown function\n", i);
 			continue;
+		}
+		snprint(name, sizeof(name), "ether%d", i);
+		if(ether->irq >= 0){
+		//	intrdisable(ether->irq, ether->interrupt, ether, ether->tbdf, name);
 		}
 		(*ether->shutdown)(ether);
 	}

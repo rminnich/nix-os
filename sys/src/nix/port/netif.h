@@ -16,6 +16,7 @@ enum
 	Nstatqid,
 	Ntypeqid,
 	Nifstatqid,
+	Nmtuqid,
 };
 
 /*
@@ -75,6 +76,9 @@ struct Netif
 	int	alen;			/* address length */
 	int	mbps;			/* megabits per sec */
 	int	link;			/* link status */
+	int	minmtu;
+	int 	maxmtu;
+	int	mtu;
 	uchar	addr[Nmaxaddr];
 	uchar	bcast[Nmaxaddr];
 	Netaddr	*maddr;			/* known multicast addresses */
@@ -87,20 +91,21 @@ struct Netif
 	Queue*	oq;			/* output */
 
 	/* statistics */
-	int	misses;
-	int	inpackets;
-	int	outpackets;
-	int	crcs;			/* input crc errors */
-	int	oerrs;			/* output errors */
-	int	frames;			/* framing errors */
-	int	overflows;		/* packet overflows */
-	int	buffs;			/* buffering errors */
-	int	soverflows;		/* software overflow */
+	uvlong	misses;
+	uvlong	inpackets;
+	uvlong	outpackets;
+	uvlong	crcs;			/* input crc errors */
+	uvlong	oerrs;			/* output errors */
+	uvlong	frames;			/* framing errors */
+	uvlong	overflows;		/* packet overflows */
+	uvlong	buffs;			/* buffering errors */
+	uvlong	soverflows;		/* software overflow */
 
 	/* routines for touching the hardware */
 	void	*arg;
 	void	(*promiscuous)(void*, int);
 	void	(*multicast)(void*, uchar*, int);
+	int	(*hwmtu)(void*, int);	/* get/set mtu */
 	void	(*scanbs)(void*, uint);	/* scan for base stations */
 };
 

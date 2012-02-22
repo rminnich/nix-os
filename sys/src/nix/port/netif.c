@@ -67,7 +67,8 @@ netifgen(Chan *c, char*, Dirtab *vp, int, int i, Dir *dp)
 
 	/* second level contains clone plus all the conversations */
 	t = NETTYPE(c->qid.path);
-	if(t == N2ndqid || t == Ncloneqid || t == Naddrqid){
+	if(t == N2ndqid || t == Ncloneqid || t == Naddrqid
+	|| t == Nstatqid || t == Nifstatqid || t == Nmtuqid){
 		switch(i) {
 		case DEVDOTDOT:
 			q.type = QTDIR;
@@ -90,15 +91,19 @@ netifgen(Chan *c, char*, Dirtab *vp, int, int i, Dir *dp)
 			q.path = Nifstatqid;
 			devdir(c, q, "ifstats", 0, eve, 0444, dp);
 			break;
+		case 4:
+			q.path = Nmtuqid;
+			devdir(c, q, "mtu", 0, eve, 0444, dp);
+			break;
 		default:
-			i -= 4;
+			i -= 5;
 			if(i >= nif->nfile)
 				return -1;
 			if(nif->f[i] == 0)
 				return 0;
 			q.type = QTDIR;
 			q.path = NETQID(i, N3rdqid);
-			sprint(up->genbuf, "%d", i);
+			snprint(up->genbuf, sizeof up->genbuf, "%d", i);
 			devdir(c, q, up->genbuf, 0, eve, DMDIR|0555, dp);
 			break;
 		}
@@ -184,8 +189,10 @@ netifopen(Netif *nif, Chan *c, int omode)
 		case Ndataqid:
 		case Nctlqid:
 			f = nif->f[id];
-			if(netown(f, up->user, omode&7) < 0)
+			if(netown(f, up->user, omode&7) < 0){
+				netifclose(nif, c);
 				error(Eperm);
+			}
 			break;
 		}
 	}
@@ -216,15 +223,17 @@ netifread(Netif *nif, Chan *c, void *a, long n, vlong off)
 		return readnum(offset, a, n, NETID(c->qid.path), NUMSIZE);
 	case Nstatqid:
 		p = malloc(READSTR);
-		j = snprint(p, READSTR, "in: %d\n", nif->inpackets);
+		if(p == nil)
+			error(Enomem);
+		j = snprint(p, READSTR, "in: %llud\n", nif->inpackets);
 		j += snprint(p+j, READSTR-j, "link: %d\n", nif->link);
-		j += snprint(p+j, READSTR-j, "out: %d\n", nif->outpackets);
-		j += snprint(p+j, READSTR-j, "crc errs: %d\n", nif->crcs);
-		j += snprint(p+j, READSTR-j, "overflows: %d\n", nif->overflows);
-		j += snprint(p+j, READSTR-j, "soft overflows: %d\n", nif->soverflows);
-		j += snprint(p+j, READSTR-j, "framing errs: %d\n", nif->frames);
-		j += snprint(p+j, READSTR-j, "buffer errs: %d\n", nif->buffs);
-		j += snprint(p+j, READSTR-j, "output errs: %d\n", nif->oerrs);
+		j += snprint(p+j, READSTR-j, "out: %llud\n", nif->outpackets);
+		j += snprint(p+j, READSTR-j, "crc errs: %llud\n", nif->crcs);
+		j += snprint(p+j, READSTR-j, "overflows: %llud\n", nif->overflows);
+		j += snprint(p+j, READSTR-j, "soft overflows: %llud\n", nif->soverflows);
+		j += snprint(p+j, READSTR-j, "framing errs: %llud\n", nif->frames);
+		j += snprint(p+j, READSTR-j, "buffer errs: %llud\n", nif->buffs);
+		j += snprint(p+j, READSTR-j, "output errs: %llud\n", nif->oerrs);
 		j += snprint(p+j, READSTR-j, "prom: %d\n", nif->prom);
 		j += snprint(p+j, READSTR-j, "mbps: %d\n", nif->mbps);
 		j += snprint(p+j, READSTR-j, "addr: ");
@@ -247,6 +256,9 @@ netifread(Netif *nif, Chan *c, void *a, long n, vlong off)
 		return readnum(offset, a, n, f->type, NUMSIZE);
 	case Nifstatqid:
 		return 0;
+	case Nmtuqid:
+		snprint(up->genbuf, sizeof up->genbuf, "%11.ud %11.ud %11.ud\n", nif->minmtu, nif->mtu, nif->maxmtu);
+		return readstr(offset, a, n, up->genbuf);
 	}
 	error(Ebadarg);
 	return -1;	/* not reached */
@@ -290,7 +302,7 @@ long
 netifwrite(Netif *nif, Chan *c, void *a, long n)
 {
 	Netfile *f;
-	int type;
+	int type, mtu;
 	char *p, buf[64];
 	uchar binaddr[Nmaxaddr];
 
@@ -310,12 +322,14 @@ netifwrite(Netif *nif, Chan *c, void *a, long n)
 	qlock(nif);
 	f = nif->f[NETID(c->qid.path)];
 	if((p = matchtoken(buf, "connect")) != 0){
+		qclose(f->iq);
 		type = atoi(p);
 		if(typeinuse(nif, type))
 			error(Einuse);
 		f->type = type;
 		if(f->type < 0)
 			nif->all++;
+		qreopen(f->iq);
 	} else if(matchtoken(buf, "promiscuous")){
 		if(f->prom == 0){
 			if(nif->prom == 0 && nif->promiscuous != nil)
@@ -334,8 +348,23 @@ netifwrite(Netif *nif, Chan *c, void *a, long n)
 			f->scan = type;
 			nif->scan++;
 		}
+	} else if((p = matchtoken(buf, "mtu")) != 0){
+		/* poor planning. */
+		if(!iseve())
+			error(Eperm);
+		mtu = atoi(p);
+		/* zero resets default. */
+		if(mtu != 0)
+		if(mtu < nif->minmtu || mtu > nif->maxmtu)
+			error(Ebadarg);
+		if(nif->hwmtu)
+			nif->mtu = nif->hwmtu(nif->arg, mtu);
+		else
+			nif->mtu = mtu;
+	} else if(matchtoken(buf, "l2bridge")){
+		f->bridge |= 2;
 	} else if(matchtoken(buf, "bridge")){
-		f->bridge = 1;
+		f->bridge |= 1;
 	} else if(matchtoken(buf, "headersonly")){
 		f->headersonly = 1;
 	} else if((p = matchtoken(buf, "addmulti")) != 0){
@@ -558,65 +587,6 @@ matchtoken(char *p, char *token)
 	while(*p == ' ' || *p == '\t' || *p == '\n')
 		p++;
 	return p;
-}
-
-void
-hnputv(void *p, uvlong v)
-{
-	uchar *a;
-
-	a = p;
-	hnputl(a, v>>32);
-	hnputl(a+4, v);
-}
-
-void
-hnputl(void *p, uint v)
-{
-	uchar *a;
-
-	a = p;
-	a[0] = v>>24;
-	a[1] = v>>16;
-	a[2] = v>>8;
-	a[3] = v;
-}
-
-void
-hnputs(void *p, ushort v)
-{
-	uchar *a;
-
-	a = p;
-	a[0] = v>>8;
-	a[1] = v;
-}
-
-uvlong
-nhgetv(void *p)
-{
-	uchar *a;
-
-	a = p;
-	return ((vlong)nhgetl(a) << 32) | nhgetl(a+4);
-}
-
-uint
-nhgetl(void *p)
-{
-	uchar *a;
-
-	a = p;
-	return (a[0]<<24)|(a[1]<<16)|(a[2]<<8)|(a[3]<<0);
-}
-
-ushort
-nhgets(void *p)
-{
-	uchar *a;
-
-	a = p;
-	return (a[0]<<8)|(a[1]<<0);
 }
 
 static ulong

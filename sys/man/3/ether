@@ -7,6 +7,7 @@ ether \- Ethernet device
 
 .BI /net/ether n /clone
 .BI /net/ether n /addr
+.BI /net/ether n /mtu
 .BI /net/ether n /ifstats
 .BI /net/ether n /stats
 .BI /net/ether n /[0-7]
@@ -24,6 +25,7 @@ containing subdirectories, one for each distinct Ethernet packet type,
 and
 .BR clone ,
 .BR addr ,
+.BR mtu ,
 .BR ifstats ,
 and
 .B stats
@@ -35,7 +37,16 @@ are the same as in the subdirectories (see below).
 Reading
 .B addr
 returns the MAC address of this interface in hex with no punctuation
-and no trailing newline.
+and no trailing newline.  Reading
+.B mtu
+returns 3 12-byte numbers: the hardware's minimum MTU, the current
+MTU and the maximum MTU supported by the interface.  The MTU
+is set by writing
+.B mtu
+.I n
+into the
+.B ctl
+file.
 The number
 .I n
 (optional in the bind)
@@ -54,7 +65,9 @@ Each write to the
 .B data
 file causes a packet to be sent.
 The Ethernet address of the interface is inserted into
-the packet header as the source address.
+the packet header as the source address unless
+.B l2bridge
+is set.
 .PP
 A connection is assigned to a packet type by opening its
 .B ctl
@@ -79,6 +92,26 @@ file; see the description of
 .I wavelan
 in
 .IR plan9.ini (8).
+The control messages described in
+.IR ip (3)
+under
+.B "Configuring interfaces"
+from
+.L bridge
+to
+.L headersonly
+are understood.
+The additional control message
+.L nonblocking
+makes
+.I write
+systems calls to this interface non-blocking iff
+followed by nothing or a non-zero integer;
+a following
+.L 0
+makes
+.I writes
+block on a full output queue.
 .PP
 Reading the
 .B ctl
@@ -92,11 +125,39 @@ file returns status information such as the Ethernet address of the
 card and general statistics, independent of the interface;
 .B ifstats
 contains device-specific data and statistics about the card.
+The format of the
+.B stats
+file is
+.IB stat : value ...\fR.
+In particular, 
+if
+.B link
+is non-zero,
+.B mbps
+is the current speed of the interface in
+megabits-per-second.  While
+.B in
+and
+.B out
+are the total number of packets input or output
+and do differ (in the case of dropped packets or
+loop back) from hardware counters.
 .PP
 An interface normally receives only those packets whose 
-destination address is that of the interface or is the
+destination address is that of the interface, the
 broadcast address,
-.BR ff:ff:ff:ff:ff:ff .
+.BR ff:ff:ff:ff:ff:ff ,
+or a a multicast address assigned to the interface.
+Multicast addresses are added by writing
+.B addmulti
+.I ea
+and remove by writing
+.B remmulti
+.I ea
+to the
+.B ctl
+file.  Multicast addresses are automatically dropped when
+the connection is closed.
 The interface can be made to receive all packets on the
 network by writing the string 
 .B promiscuous
@@ -104,8 +165,49 @@ to the
 .B ctl
 file. 
 The interface remains promiscuous until the control file is
-closed.
-The extra packets are passed up connections only of types \-1
-and \-2.
+closed by all connections requesting promiscuous mode.
+The extra packets are passed up connections of types \-1
+and \-2 only.
+.PP
+Writing
+.B bridge
+to the
+.B ctl
+file causes loop back packets to be ignored.  This is useful for
+layer 3 bridging.  Writing
+.B l2bridge
+also allows the connection to set the source address and
+receive packets with any destination address.
+Writing
+.B scanbs
+[
+.I secs
+]
+starts a scan for wireless base stations and sets the
+scanning interval to
+.IR secs.
+Scanning is terminated when the connection is closed.
+The default interval is 5s.  
+For wired connections, this command is ignored.
+.PP
+Writing
+.B headersonly
+causes the connection to return only the first
+58 bytes of the packet followed by a two-byte
+length and a four-byte time in machine ticks.
+Both numbers are in big-endian format.
 .SH SOURCE
 .B /sys/src/9/*/devether.c
+.br
+.B /sys/src/9/port/netif.c
+.SH "SEE ALSO"
+.IR ip (3).
+.SH BUGS
+The multicast interface makes removal of multicast
+addresses on that rely on hashing difficult.
+.PP
+Interface MTU settings must be greater than those
+used by
+.IR ip (3);
+this is not enforced.  NB: interface MTU is different
+than IP stack's MTU.
