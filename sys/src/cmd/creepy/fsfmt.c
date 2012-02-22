@@ -8,6 +8,8 @@
 #include "conf.h"
 #include "dbg.h"
 #include "dk.h"
+#include "ix.h"
+#include "net.h"
 #include "fns.h"
 
 static void

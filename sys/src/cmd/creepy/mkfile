@@ -15,6 +15,12 @@ OFILES=\
 	attr.$O\
 	fsys.$O\
 	file.$O\
+	cfg.$O\
+	tools.$O\
+
+IXOFILES=\
+	ixcall.$O\
+	ix.$O\
 	9p.$O\
 
 HFILES=\
@@ -22,11 +28,17 @@ HFILES=\
 	conf.h\
 	dk.h\
 	fns.h\
+	ix.h\
+	net.h\
 
 # not ready for install
 BIN=.
 
 </sys/src/cmd/mkmany
 
+$O.9pix: 9pix.$O $OFILES $IXOFILES $LIB
+	$LD $LDFLAGS -o $target $prereq
+
 fns:V:
 	c/f2p *.c >fns.h
+

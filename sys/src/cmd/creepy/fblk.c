@@ -8,6 +8,8 @@
 #include "conf.h"
 #include "dbg.h"
 #include "dk.h"
+#include "ix.h"
+#include "net.h"
 #include "fns.h"
 
 /*
@@ -83,7 +85,6 @@ getmelted(uint isdir, int isarch, uint type, u64int *addrp)
 	if(*addrp == 0){
 		b = dballoc(type);
 		*addrp = b->addr;
-		incref(b);
 		return b;
 	}
 
@@ -127,7 +128,6 @@ dfblk(Memblk *f, ulong bno, int mkit)
 	Memblk *b, *pb;
 	u64int *addrp;
 
-	isrwlocked(f, mkit);
 	isarch = f == fs->archive;
 	if(isarch)
 		f->frozen = 0;
@@ -170,7 +170,7 @@ dfblk(Memblk *f, ulong bno, int mkit)
 		error("offset exceeds file capacity");
 
 	type = DBptr0+i;
-	dDprint("dfblk: indirect %s nblks %uld (ppb %ud) bno %uld\n",
+	dFprint("dfblk: indirect %s nblks %uld (ppb %ud) bno %uld\n",
 		tname(type), nblks, Dptrperblk, bno);
 
 	addrp = &f->d.iptr[i];
@@ -178,11 +178,9 @@ dfblk(Memblk *f, ulong bno, int mkit)
 		b = getmelted(isdir, isarch, type, addrp);
 	else
 		b = dbget(type, *addrp);
-	pb = f;
-	incref(pb);
+	pb = b;
 	if(catcherror()){
 		mbput(pb);
-		mbput(b);
 		error(nil);
 	}
 
@@ -193,9 +191,8 @@ dfblk(Memblk *f, ulong bno, int mkit)
 	 * 	nblks: # of data blocks addressed by b
 	 */
 	for(nindir = i+1; nindir >= 0; nindir--){
-		dDprint("indir %s d%#ullx nblks %uld ptrperblk %d bno %uld\n",
+		dFprint("indir %s d%#ullx nblks %uld ptrperblk %d bno %uld\n\n",
 			tname(DBdata+nindir), *addrp, nblks, Dptrperblk, bno);
-		dDprint("  in %H\n", b);
 		idx = 0;
 		if(nindir > 0){
 			nblks /= Dptrperblk;
@@ -211,9 +208,9 @@ dfblk(Memblk *f, ulong bno, int mkit)
 			else
 				b = dbget(type, *addrp);
 			addrp = &b->d.ptr[idx];
-			mbput(pb);
-			pb = b;
 		}
+		mbput(pb);
+		pb = b;
 		USED(&b);	/* force to memory in case of error */
 		USED(&pb);	/* force to memory in case of error */
 		bno -= idx * nblks;
@@ -351,16 +348,16 @@ dfslice(Memblk *f, ulong len, uvlong off, int iswr)
 			sl.len = f->mf->length - off;
 done:
 	if(sl.b == nil){
-		dDprint("slice m%#p[%#ullx:+%#ulx]%c -> 0[%#ulx]\n",
+		dFprint("slice m%#p[%#ullx:+%#ulx]%c -> 0[%#ulx]\n",
 			f, off, len, iswr?'w':'r', sl.len);
 		return sl;
 	}
 	if(TAGTYPE(sl.b->d.tag) == DBfile)
-		dDprint("slice m%#p[%#ullx:+%#ulx]%c -> m%#p:e+%#uld[%#ulx]\n",
+		dFprint("slice m%#p[%#ullx:+%#ulx]%c -> m%#p:e+%#uld[%#ulx]\n",
 			f, off, len, iswr?'w':'r',
 			sl.b, (uchar*)sl.data - sl.b->d.embed, sl.len);
 	else
-		dDprint("slice m%#p[%#ullx:+%#ulx]%c -> m%#p:%#uld[%#ulx]\n",
+		dFprint("slice m%#p[%#ullx:+%#ulx]%c -> m%#p:%#uld[%#ulx]\n",
 			f, off, len, iswr?'w':'r',
 			sl.b, (uchar*)sl.data - sl.b->d.data, sl.len);
 
@@ -398,6 +395,7 @@ compact(Memblk *d, Dentry *de, u64int off)
  * naddr. If iswr, the entry is allocated if needed and the blocks
  * melted on demand.
  * Return the offset for the entry in the file or Noaddr
+ * Does not adjust disk refs.
  */
 u64int
 dfchdentry(Memblk *d, u64int addr, u64int naddr, int iswr)
@@ -464,7 +462,7 @@ dfdirnth(Memblk *d, int n)
 		for(i = 0; i < sl.len/sizeof(Dentry); i++)
 			if(de[i].file != 0 && tot++ >= n){
 				mbput(sl.b);
-				dDprint("dfdirnth d%#ullx[%d] = d%#ullx\n",
+				dFprint("dfdirnth d%#ullx[%d] = d%#ullx\n",
 					d->addr, n, de[i].file);
 				return de[i].file;
 			}
@@ -486,11 +484,7 @@ xfchild(Memblk *f, int n, int disktoo)
 	b = mbget(addr, 0);
 	if(b != nil || disktoo == 0)
 		return b;
-	b = dbget(DBfile, addr);
-	b->mf->parent = f;
-	incref(f);
-
-	return b;
+	return dbget(DBfile, addr);
 }
 
 Memblk*
@@ -516,8 +510,6 @@ dflink(Memblk *d, Memblk *f)
 	isdir(d);
 
 	dfchdentry(d, 0, f->addr, Wr);
-	f->mf->parent = d;
-	incref(d);
 	changed(d);
 }
 
@@ -532,10 +524,6 @@ dfunlink(Memblk *d, Memblk *f)
 	isdir(d);
 
 	dfchdentry(d, f->addr, 0, Wr);
-	if(f->mf->parent == d){		/* f may be shared */
-		mbput(f->mf->parent);
-		f->mf->parent = nil;
-	}
 	changed(d);
 }
 
@@ -543,21 +531,24 @@ dfunlink(Memblk *d, Memblk *f)
  * Walk to a child and return it referenced.
  * If iswr, d must not be frozen and the child is returned melted.
  */
-static Memblk*
-xdfwalk(Memblk *d, char *name, int iswr)
+Memblk*
+dfwalk(Memblk *d, char *name, int iswr)
 {
-	Memblk *f, *nf;
+	Memblk *f;
 	Blksl sl;
 	Dentry *de;
 	uvlong off;
 	int i;
 
 	dDprint("dfwalk '%s' at %H\n", name, d);
+	if(strcmp(name, "..") == 0)
+		fatal("dfwalk: '..'");
 	isdir(d);
 	if(iswr)
 		ismelted(d);
 
 	off = 0;
+	f = nil;
 	for(;;){
 		sl = dfslice(d, Dblkdatasz, off, 0);
 		if(sl.len == 0)
@@ -584,29 +575,7 @@ xdfwalk(Memblk *d, char *name, int iswr)
 			mbput(sl.b);
 			if(!iswr || !f->frozen)
 				goto done;
-
-			/* It's for writing, and frozen: melt it and its ref. */
-			if(catcherror()){
-				mbput(f);
-				error(nil);
-			}
-			nf = dbdup(f);
-			if(!catcherror()){
-				dbdecref(f->addr);
-				noerror();
-			}
-			mbput(f);
-			f = nf;
-			USED(&f);
-			sl = dfslice(d, sizeof(Dentry), off+i*sizeof(Dentry), 1);
-			de = sl.data;
-			assert(sl.b);
-			de->file = f->addr;
-			mbput(sl.b);
-			noerror();
-			changed(d);
-			goto done;
-
+			fatal("dfwalk: frozen");
 		}
 		noerror();
 		mbput(sl.b);
@@ -618,154 +587,96 @@ done:
 	return f;
 }
 
-Memblk*
-dfwalk(Memblk *d, char *name, int iswr)
+/*
+ * Return the last version for *fp, wlocked, be it frozen or melted.
+ */
+static void
+followmelted(Memblk **fp)
 {
-	Memblk *x;
+	Memblk *f;
 
-	isrwlocked(d, iswr);
-	if(strcmp(name, "..") == 0){
-		x = d->mf->parent;
-		if(x == nil)
-			x = d;
-		incref(x);
-	}else
-		x = xdfwalk(d, name, iswr);
-	return x;
-}
-
-	
-static char **
-dfrevpath(Memblk *f, int *nnamesp)
-{
-	Memblk *b, *pb;
-	char **names;
-	int nnames;
-
-	isrwlocked(f, Rd);
-	names = nil;
-	nnames = 0;
-	for(b = f; b != nil; b = pb){
-		if(b == fs->active || b == fs->archive)
-			break;
-		if(nnames%Incr == 0)
-			names = realloc(names, (nnames+Incr)*sizeof(char*));
-		rwlock(b, Rd);
-		names[nnames++] = strdup(b->mf->name);
-		pb = b->mf->parent;
-		rwunlock(b, Rd);
+	f = *fp;
+	isfile(f);
+	rwlock(f, Wr);
+	while(f->mf->melted != nil){
+		incref(f->mf->melted);
+		*fp = f->mf->melted;
+		rwunlock(f, Wr);
+		mbput(f);
+		f = *fp;
+		rwlock(f, Wr);
+		if(!f->frozen)
+			return;
 	}
-	*nnamesp = nnames;
-	return names;
-}
-
-static Memblk*
-meltedactive(void)
-{
-	Memblk *b;
-
-	for(;;){
-		b = fs->active;
-		rwlock(b, Wr);
-		if(!b->frozen)
-			break;
-		rwunlock(b, Wr);
-	}
-	ismelted(b);
-	isrwlocked(b, Wr);
-	return b;
 }
 
 /*
- * Want to write on f, make sure it's melted.
- * Return the version of f that we must use, locked for writing and melted.
- * (our reference to f is traded for the one returned).
- *
- * This function exploits that freezing a tree walks from the root down
- * to the leaves, and requires an wlock for each file frozen, including active.
- * Once active is melted and wlocked, no file can't be frozen after we melt it.
+ * Caller walked down p, and now requires the nth element to be
+ * melted, and wlocked for writing. (nth count starts at 1);
+ * 
+ * Return the path with the version of f that we must use,
+ * locked for writing and melted.
+ * References kept in the path are traded for the ones returned.
  */
-Memblk*
-dfmelt(Memblk *f)
+Path*
+dfmelt(Path **pp, int nth)
 {
-	char **names;
-	int nnames, i;
-	Memblk *b, *nb, *f0, *nf;
+	int i;
+	Memblk *f, **fp, *nf;
+	Path *p;
+
+	ownpath(pp);
+	p = *pp;
+	assert(nth >= 1 && p->nf >= nth && p->nf >= 2);
+	assert(p->f[0] == fs->root);
+	fp = &p->f[nth-1];
 
 	/*
-	 * 0. Try to get a melted version for f.
-	 * Preserve f0 so we keep a ref upon errors.
+	 * 1. Optimistic: Try to get a loaded melted version for f.
 	 */
-	isfile(f);
-	f0 = f;
-	incref(f0);
-	rwlock(f0, Wr);
-	while(f->mf->melted != nil){
-		incref(f->mf->melted);
-		nf = f->mf->melted;
-		mbput(f);
-		f = nf;
-	}
-	rwunlock(f0, Wr);
-	rwlock(f, Wr);
-	if(!f->frozen){
-		mbput(f0);
-		return f;
-	}
+	followmelted(fp);
+	f = *fp;
+	if(!f->frozen)
+		return p;
 	rwunlock(f, Wr);
-	if(catcherror()){
-		mbput(f);		/* both if f == f0 or f != f0 */
-		error(nil);
-	}
 
 	/*
-	 * 1. travel up to a melted block or to the root, recording
-	 * the names we will have to walk down to reach f.
-	 * TODO: If we find a melted file we could stop there.
+	 * 2. Realistic:
+	 * walk down the path, melting every frozen thing until we
+	 * reach f. Keep wlocks so melted files are not frozen while we walk.
+	 * /active is special, because it's only frozen temporarily while
+	 * creating a frozen version of the tree. Instead of melting it,
+	 * we should just wait for it.
 	 */
-	dDprint("dfmelt %H\n", f);
-	rwlock(f, Rd);
-	names = dfrevpath(f, &nnames);
-	rwunlock(f, Rd);
-	if(catcherror()){
-		for(i = 0; i < nnames; i++)
-			free(names[i]);
-		free(names);
-		error(nil);
-	}
+	followmelted(&p->f[1]);
 
-	/*
-	 * 2. walk down from active to f, ensuring everything is melted.
-	 * be careful to hold wlocks so that things are not frozen
-	 * again while we walk.
-	 */
-	b = meltedactive();
-	incref(b);
-	if(catcherror()){
-		rwunlock(b, Wr);
-		mbput(b);
-		error(nil);
+	for(i = 2; i < nth; i++){
+		followmelted(&p->f[i]);
+		f = p->f[i];
+		if(!f->frozen){
+			rwunlock(p->f[i-1], Wr);
+			continue;
+		}
+		if(catcherror()){
+			rwunlock(p->f[i-1], Wr);
+			rwunlock(p->f[i], Wr);
+			error(nil);
+		}
+		nf = dbdup(f);
+		rwlock(nf, Wr);
+		if(catcherror()){
+			rwunlock(nf, Wr);
+			mbput(nf);
+			error(nil);
+		}
+		dfchdentry(p->f[i-1], f->addr, nf->addr, 1);
+		/* committed */
+		rwunlock(f, Wr);
+		rwunlock(p->f[i-1], Wr);
+		if(!catcherror()){
+			dbdecref(f->addr);
+			noerror();
+		}
 	}
-	for(i = nnames-1; i >= 0; i--){
-		nb = xdfwalk(b, names[i], 1);
-		rwlock(nb, Wr);
-		rwunlock(b, Wr);
-		ismelted(nb);
-		mbput(b);
-		b = nb;
-		USED(&b);	/* in case of error() */
-	}
-	noerror();
-	noerror();
-	noerror();
-	for(i = 0; i < nnames; i++)
-		free(names[i]);
-	free(names);
-
-	mbput(f0);
-
-	isrwlocked(b, Wr);
-	ismelted(b);
-	return b;
+	return p;
 }
-

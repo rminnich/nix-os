@@ -8,6 +8,8 @@
 #include "conf.h"
 #include "dbg.h"
 #include "dk.h"
+#include "ix.h"
+#include "net.h"
 #include "fns.h"
 
 /*
@@ -19,6 +21,12 @@
  * For simplicity, functions in mblk.c do not raise errors.
  * (debug dump functions may be an exception).
  */
+
+Alloc mfalloc =
+{
+	.elsz = sizeof(Mfile),
+	.zeroing = 1,
+};
 
 char*
 tname(int t)
@@ -70,8 +78,8 @@ fmtptr(Fmt *fmt, u64int addr, char *tag, int n)
 		fmttab(fmt, mbtab);
 		fmtprint(fmt, "  %s[%d] = d%#ullx <unloaded>\n", tag, n, addr);
 	}else{
-		decref(b);
 		fmtprint(fmt, "%H", b);
+		mbput(b);
 	}
 }
 static void
@@ -81,7 +89,7 @@ dumpsomedata(Fmt *fmt, Memblk *b)
 	u64int *p;
 	int i;
 
-	if(b->mf->length == 0)
+	if(b->mf->length == 0 || (b->mf->mode&DMDIR) == 0)
 		return;
 	doff = embedattrsz(b);
 	if(doff < Embedsz){
@@ -97,15 +105,14 @@ int
 mbfmt(Fmt *fmt)
 {
 	Memblk *b;
-	int type, i, n, xdbg;
+	int type, i, n;
 
 	b = va_arg(fmt->args, Memblk*);
 	if(b == nil)
 		return fmtprint(fmt, "<nil>\n");
+	nodebug();
 	type = TAGTYPE(b->d.tag);
 	fmttab(fmt, mbtab);
-	xdbg = dbg['D'];
-	dbg['D'] = 0;
 	fmtprint(fmt, "m%#p d%#ullx", b, b->addr);
 	if(b->frozen)
 		fmtprint(fmt, " FZ");
@@ -114,7 +121,8 @@ mbfmt(Fmt *fmt)
 	if(b->written)
 		fmtprint(fmt, " WR");
 	fmtprint(fmt, " %s r%d", tname(type), b->ref);
-	fmtprint(fmt, " tag %#ullx epoch %#ullx", EP(b->d.tag), EP(b->d.epoch));
+	fmtprint(fmt, " tag %#ullx", EP(b->d.tag));
+	if(0)fmtprint(fmt, " epoch %#ullx", EP(b->d.epoch));
 	switch(type){
 	case DBfree:
 		fmtprint(fmt, "\n");
@@ -152,8 +160,7 @@ mbfmt(Fmt *fmt)
 			EP(b->mf->id), (ulong)b->mf->mode, EP(b->mf->mtime),
 			b->mf->length, b->mf->uid);
 		fmttab(fmt, mbtab);
-		fmtprint(fmt, "  parent m%#p nr%d nw%d\n",
-			b->mf->parent, b->mf->readers, b->mf->writer);
+		fmtprint(fmt, "  nr%d nw%d\n", b->mf->readers, b->mf->writer);
 		dumpsomedata(fmt, b);
 		mbtab++;
 		for(i = 0; i < nelem(b->d.dptr); i++)
@@ -178,7 +185,7 @@ mbfmt(Fmt *fmt)
 		mbtab--;
 		break;
 	}
-	dbg['D'] = xdbg;
+	debug();
 	return 0;
 }
 
@@ -264,7 +271,6 @@ mbhash(Memblk *b)
 
 	hv = b->addr%nelem(fs->fhash);
 	qlock(&fs->fhash[hv]);
-	fs->nused++;
 	ob = nil;
 	for(h = &fs->fhash[hv].b; *h != nil; h = &(*h)->next)
 		if((*h)->addr == b->addr)
@@ -297,7 +303,6 @@ mbunhash(Memblk *b)
 				fatal("mbunhash: dup");
 			*h = b->next;
 			b->next = nil;
-			fs->nused--;
 			qlock(&fs->llk);
 			lruunlink(b);
 			qunlock(&fs->llk);
@@ -330,19 +335,16 @@ mbfree(Memblk *b)
 		mf = b->mf;
 		b->mf = nil;
 		mbput(mf->melted);
-		mf->melted = nil;
-		mbput(mf->parent);
-		mf->parent = nil;
-		mf->next = nil;
 		assert(mf->writer == 0 && mf->readers == 0);
-		mffree(mf);
+		afree(&mfalloc, mf);
 	}
 	b->d.tag = DBfree;
 	b->frozen = b->written = b->dirty = 0;
 	b->addr = 0;
 
 	qlock(fs);
-	fs->nfree++;
+	fs->nmused--;
+	fs->nmfree++;
 	b->next = fs->free;
 	fs->free = b;
 	qunlock(fs);
@@ -360,11 +362,12 @@ mballoc(u64int addr)
 	else if(fs->free != nil){
 		b = fs->free;
 		fs->free = b->next;
-		fs->nfree--;
+		fs->nmfree--;
 	}else{
 		qunlock(fs);
-		fatal("mballoc: evict block not implemented");
+		fatal("mballoc: no free blocks");
 	}
+	fs->nmused++;
 	qunlock(fs);
 	memset(b, 0, sizeof *b);
 	b->addr = addr;
@@ -404,13 +407,13 @@ mbget(u64int addr, int mkit)
 				dDprint("mbget %#ullx -> i/o error\n", addr);
 				return nil;	/* i/o error reading it */
 			}
-			dDprint("mbget %#ullx -> waited for m%#p\n", addr, b);
+			dMprint("mbget %#ullx -> waited for m%#p\n", addr, b);
 			return b;
 		}
 	qunlock(&fs->fhash[hv]);
 	if(b != nil)
 		mbused(b);
-	dDprint("mbget %#ullx -> m%#p\n", addr, b);
+	dMprint("mbget %#ullx -> m%#p\n", addr, b);
 	return b;
 }
 
@@ -419,7 +422,7 @@ mbput(Memblk *b)
 {
 	if(b == nil)
 		return;
-	dDprint("mbput m%#p pc=%#p\n", b, getcallerpc(&b));
+	dMprint("mbput m%#p pc=%#p\n", b, getcallerpc(&b));
 	if(decref(b) == 0)
 		mbfree(b);
 }
@@ -432,33 +435,5 @@ mbdup(Memblk *b)
 	nb = mballoc(b->addr);
 	memmove(&nb->d, &b->d, sizeof b->d);
 	return nb;
-}
-
-Mfile*
-mfalloc(void)
-{
-	Mfile *mf;
-
-	qlock(&fs->mlk);
-	mf = fs->mfree;
-	if(mf != nil){
-		fs->mfree = mf->next;
-		mf->next = nil;
-	}
-	qunlock(&fs->mlk);
-	if(mf == nil)
-		mf = mallocz(sizeof *mf, 1);
-	return mf;
-}
-
-void
-mffree(Mfile *mf)
-{
-	if(mf == nil)
-		return;
-	qlock(&fs->mlk);
-	mf->next = fs->mfree;
-	fs->mfree = mf;
-	qunlock(&fs->mlk);
 }
 

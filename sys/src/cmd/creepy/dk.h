@@ -13,6 +13,10 @@ typedef struct Dentry Dentry;
 typedef struct Dmeta Dmeta;
 typedef struct Blksl Blksl;
 typedef struct Mfile Mfile;
+typedef struct Cmd Cmd;
+typedef struct Path Path;
+typedef struct Alloc Alloc;
+typedef struct Next Next;
 
 /*
  * these are used by several functions that have flags to indicate
@@ -39,16 +43,18 @@ enum{
  *	  loaded in memory while unused.
  *	- The hash ref also accounts for the lru list and list of DBref blocks.
  *	- Disk refs count only references within the tree on disk.
- *	- Children imply new refs to the parents. But not vice-versa.
- *
+ *	- Children do not add refs to parents; parents do not add ref to children.
+ *	- 9p, fscmd, ix, and other top-level shells for the fs are expected to
+ *	  keep Paths for files in use, so that each file in the path
+ *	  is referenced once by the path
  * Assumptions:
  *	- /active is *never* found on disk, it's memory-only.
  *	- b->addr is worm.
- *	- blocks are added to the end of the hash chain.
+ *	- parents of files loaded in memory are also in memory.
+ *	  (but this does not hold for pointer and data blocks).
  *	- We try not to hold more than one lock, using the
  *	  reference counters when we need to be sure that
  *	  an unlocked resource does not vanish.
- *	- parents of file blocks in memory are in memory (because of RCs)
  *	- reference blocks are never removed from memory.
  *	- disk refs are frozen while waiting to go to disk during a fs freeze.
  *	  in which case db*ref functions write the block in place and melt it.
@@ -194,7 +200,7 @@ struct Dsuperblk
 	u64int	free;		/* first free block on list  */
 	u64int	eaddr;		/* end of the assigned disk portion */
 	u64int	root;		/* address of /archive in disk */
-	u64int	nfree;		/* # of blocks in free list */
+	u64int	ndfree;		/* # of blocks in free list */
 	u64int	dblksz;		/* only for checking */
 	u64int	nblkgrpsz;	/* only for checking */
 	u64int	dminattrsz;	/* only for checking */
@@ -285,12 +291,9 @@ struct Fmeta
  */
 struct Mfile
 {
+	Mfile*	next;		/* in free list */
 	RWLock;
 	Fmeta;
-	union{
-		Memblk	*parent;	/* most recent parent */
-		Mfile	*next;		/* in free Mfile list */
-	};
 
 	Memblk*	melted;		/* next version for this one, if frozen */
 	ulong	lastbno;	/* help for RA */
@@ -344,8 +347,8 @@ struct Fsys
 	Memblk	*blk;		/* static global array of memory blocks */
 	usize	nblk;		/* # of entries used */
 	usize	nablk;		/* # of entries allocated */
-	usize	nused;		/* blocks in use */
-	usize	nfree;		/* free blocks */
+	usize	nmused;		/* blocks in use */
+	usize	nmfree;		/* free blocks */
 
 	Memblk	*free;		/* free list of unused blocks in blk */
 
@@ -372,10 +375,53 @@ struct Fsys
 
 	char	*dev;		/* name for disk */
 	int	fd;		/* of disk */
-	usize	limit;		/* address for end of disk */
+	u64int	limit;		/* address for end of disk */
 
 	int	config;		/* config mode enabled */
 };
+
+/*
+ * Misc tools.
+ */
+
+struct Cmd
+{
+	char *name;
+	void (*f)(int, char**);
+	int nargs;
+	char *usage;
+};
+
+struct Next
+{
+	Next *next;
+};
+
+struct Alloc
+{
+	QLock;
+	Next *free;
+	ulong nfree;
+	ulong nalloc;
+	usize elsz;
+	int zeroing;
+};
+
+/*
+ * Used to keep references to parents crossed to
+ * reach files, to be able to build a melted version of the
+ * children. Also to know the parent of a file for things like
+ * removals.
+ */
+struct Path
+{
+	Path* next;	/* in free list */
+	Ref;
+	Memblk** f;
+	int nf;
+	int naf;
+};
+
 
 #pragma	varargck	type	"H"	Memblk*
 
@@ -384,4 +430,5 @@ typedef int(*Blkf)(Memblk*);
 
 extern Fsys*fs;
 extern uvlong maxfsz;
-
+extern char*defaultusers;
+extern Alloc mfalloc;

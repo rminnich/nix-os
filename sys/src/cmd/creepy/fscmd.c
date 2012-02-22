@@ -8,6 +8,8 @@
 #include "conf.h"
 #include "dbg.h"
 #include "dk.h"
+#include "ix.h"
+#include "net.h"
 #include "fns.h"
 
 enum 
@@ -22,35 +24,36 @@ static int verb;
  * Walks elems starting at f.
  * Ok if nelems is 0.
  */
-static Memblk*
+static Path*
 walkpath(Memblk *f, char *elems[], int nelems)
 {
 	int i;
-	Memblk *f0, *nf;
+	Memblk *nf;
+	Path *p;
 
+	p = newpath(f);
+	if(catcherror()){
+		putpath(p);
+		error(nil);
+	}
 	isfile(f);
-	f0 = f;
 	for(i = 0; i < nelems; i++){
 		if((f->mf->mode&DMDIR) == 0)
 			error("not a directory");
 		rwlock(f, Rd);
 		if(catcherror()){
-			if(f != f0)
-				mbput(f);
 			rwunlock(f, Rd);
 			error("walk: %r");
 		}
 		nf = dfwalk(f, elems[i], 0);
 		rwunlock(f, Rd);
-		if(f != f0)
-			mbput(f);
+		addelem(&p, nf);
 		f = nf;
 		USED(&f);	/* in case of error() */
 		noerror();
 	}
-	if(f == f0)
-		incref(f);
-	return f;
+	noerror();
+	return p;
 }
 
 static char*
@@ -63,12 +66,12 @@ fsname(char *p)
 	return strdup(p);
 }
 
-static Memblk*
+static Path*
 walkto(char *a, char **lastp)
 {
 	char *els[Nels], *path;
 	int nels;
-	Memblk *f;
+	Path *p;
 
 	path = fsname(a);
 	nels = gettokens(path, els, Nels, "/");
@@ -81,15 +84,15 @@ walkto(char *a, char **lastp)
 		error("walkpath: %r");
 	}
 	if(lastp != nil){
-		f = walkpath(fs->root, els, nels-1);
+		p = walkpath(fs->root, els, nels-1);
 		*lastp = a + strlen(a) - strlen(els[nels-1]);
 	}else
-		f = walkpath(fs->root, els, nels);
+		p = walkpath(fs->root, els, nels);
 	free(path);
 	noerror();
 	if(verb)
-		print("walked to %H\n", f);
-	return f;
+		print("walked to %H\n", p->f[p->nf-1]);
+	return p;
 }
 
 static void
@@ -99,6 +102,13 @@ fscd(int, char *argv[])
 	fsdir = strdup(argv[1]);
 }
 
+/*
+ * This is unrealistic in that it keeps the file locked
+ * during the entire put. This means that we can only give
+ * fslowmem() a chance before each put, and not before each
+ * write, because everything is going to be in use and dirty if
+ * we run out of memory.
+ */
 static void
 fsput(int, char *argv[])
 {
@@ -109,6 +119,7 @@ fsput(int, char *argv[])
 	char buf[4096];
 	uvlong off;
 	long nw, nr;
+	Path *p;
 
 	fd = open(argv[1], OREAD);
 	if(fd < 0)
@@ -122,27 +133,36 @@ fsput(int, char *argv[])
 		free(d);
 		error(nil);
 	}
-	m = walkto(argv[2], &fn);
-	m = dfmelt(m);
+	p = walkto(argv[2], &fn);
+	if(catcherror()){
+		putpath(p);
+		error(nil);
+	}
+	dfmelt(&p, p->nf);
+	m = p->f[p->nf-1];
 	if(catcherror()){
 		rwunlock(m, Wr);
 		mbput(m);
 		error(nil);
 	}
 	f = dfcreate(m, fn, d->uid, d->mode&(DMDIR|0777));
+	noerror();
+	addelem(&p, f);
+	decref(f);	/* kept now in p */
 	rwlock(f, Wr);
+	rwunlock(m, Wr);
 	if(catcherror()){
 		rwunlock(f, Wr);
-		mbput(f);
 		error(nil);
 	}
 	if((d->mode&DMDIR) == 0){
 		off = 0;
 		for(;;){
+			fslowmem();
 			nr = read(fd, buf, sizeof buf);
 			if(nr <= 0)
 				break;
-			nw = dfpwrite(f, buf, nr, off);
+			nw = dfpwrite(f, buf, nr, &off);
 			dDprint("wrote %ld of %ld bytes\n", nw, nr);
 			off += nr;
 		}
@@ -153,9 +173,7 @@ fsput(int, char *argv[])
 	if(verb)
 		print("created %H\nat %H\n", f, m);
 	rwunlock(f, Wr);
-	rwunlock(m, Wr);
-	mbput(m);
-	mbput(f);
+	putpath(p);
 	close(fd);
 	free(d);
 }
@@ -168,12 +186,14 @@ fscat(int, char *argv[])
 	char buf[4096];
 	uvlong off;
 	long nr;
+	Path *p;
 
-	f = walkto(argv[2], nil);
+	p = walkto(argv[2], nil);
+	f = p->f[p->nf-1];
 	rwlock(f, Rd);
 	if(catcherror()){
 		rwunlock(f, Rd);
-		mbput(f);
+		putpath(p);
 		error(nil);
 	}
 	m = f->mf;
@@ -182,6 +202,7 @@ fscat(int, char *argv[])
 	if((m->mode&DMDIR) == 0){
 		off = 0;
 		for(;;){
+			fslowmem();
 			nr = dfpread(f, buf, sizeof buf, off);
 			if(nr <= 0)
 				break;
@@ -191,7 +212,7 @@ fscat(int, char *argv[])
 	}
 	noerror();
 	rwunlock(f, Rd);
-	mbput(f);
+	putpath(p);
 }
 
 static void
@@ -203,6 +224,7 @@ fsget(int, char *argv[])
 	uvlong off;
 	long nr;
 	int fd;
+	Path *p;
 
 	fd = create(argv[1], OWRITE, 0664);
 	if(fd < 0)
@@ -211,11 +233,12 @@ fsget(int, char *argv[])
 		close(fd);
 		error(nil);
 	}
-	f = walkto(argv[2], nil);
+	p = walkto(argv[2], nil);
+	f = p->f[p->nf-1];
 	rwlock(f, Rd);
 	if(catcherror()){
 		rwunlock(f, Rd);
-		mbput(f);
+		putpath(p);
 		error(nil);
 	}
 	m = f->mf;
@@ -224,6 +247,7 @@ fsget(int, char *argv[])
 	if((m->mode&DMDIR) == 0){
 		off = 0;
 		for(;;){
+			fslowmem();
 			nr = dfpread(f, buf, sizeof buf, off);
 			if(nr <= 0)
 				break;
@@ -235,10 +259,10 @@ fsget(int, char *argv[])
 		}
 	}
 	close(fd);
+	noerror();
+	noerror();
 	rwunlock(f, Rd);
-	noerror();
-	noerror();
-	mbput(f);
+	putpath(p);
 }
 
 static void
@@ -289,25 +313,37 @@ fsout(int, char*[])
 static void
 fsrm(int, char *argv[])
 {
-	Memblk *f, *p;
+	Memblk *f, *pf;
+	Path *p;
 
-	f = walkto(argv[1], nil);
+	p = walkto(argv[1], nil);	
 	if(catcherror()){
-		mbput(f);
+		putpath(p);
 		error(nil);
 	}
-	f->mf->parent = dfmelt(f->mf->parent);
-	p = f->mf->parent;
+	if(p->nf < 2)
+		error("short path for rm");
+	dfmelt(&p, p->nf-1);
+	f = p->f[p->nf-1];
+	pf = p->f[p->nf-2];
 	rwlock(f, Wr);
 	if(catcherror()){
 		rwunlock(f, Wr);
-		rwunlock(p, Wr);
+		rwunlock(pf, Wr);
 		error(nil);
 	}
-	dfremove(p, f);
+	dfremove(pf, f);
+	p->f[p->nf-1] = nil;
 	noerror();
 	noerror();
-	rwunlock(p, Wr);
+	rwunlock(pf, Wr);
+	putpath(p);
+}
+
+static void
+fsst(int, char**)
+{
+	fsstats();
 }
 
 static void
@@ -317,13 +353,7 @@ usage(void)
 	exits("usage");
 }
 
-static struct
-{
-	char *name;
-	void (*f)(int, char**);
-	int nargs;
-	char *usage;
-} cmds[] =
+static Cmd cmds[] =
 {
 	{"cd",	fscd,	2, "cd!where"},
 	{"put",	fsput,	3, "put!src!dst"},
@@ -337,6 +367,7 @@ static struct
 	{"dbg", fsdbg,	2, "dbg!n"},
 	{"out", fsout, 1, "out"},
 	{"rm",	fsrm,	2, "rm!what"},
+	{"stats", fsst, 1, "stats"},
 };
 
 void
@@ -381,9 +412,9 @@ threadmain(int argc, char *argv[])
 				continue;
 			if(cmds[j].nargs != 0 && cmds[j].nargs != nargs)
 				print("usage: %s\n", cmds[j].usage);
-			else{
+			else
 				cmds[j].f(nargs, args);
-			}
+			fspolicy();
 			break;
 		}
 		noerror();

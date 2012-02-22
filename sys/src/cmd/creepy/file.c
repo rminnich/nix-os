@@ -8,6 +8,8 @@
 #include "conf.h"
 #include "dbg.h"
 #include "dk.h"
+#include "ix.h"
+#include "net.h"
 #include "fns.h"
 
 /*
@@ -33,7 +35,6 @@ dfused(Memblk *f)
 	t = now();
 	wmtime(f, &t, sizeof t);
 }
-
 
 Memblk*
 dfcreate(Memblk *parent, char *name, char *uid, ulong mode)
@@ -138,7 +139,7 @@ dfpread(Memblk *f, void *a, ulong count, uvlong off)
 }
 
 ulong
-dfpwrite(Memblk *f, void *a, ulong count, uvlong off)
+dfpwrite(Memblk *f, void *a, ulong count, uvlong *off)
 {
 	Blksl sl;
 	ulong tot;
@@ -150,8 +151,10 @@ dfpwrite(Memblk *f, void *a, ulong count, uvlong off)
 	isrwlocked(f, Wr);
 	ismelted(f);
 	p = a;
+	if(f->mf->mode&DMAPPEND)
+		*off = f->mf->length;
 	for(tot = 0; tot < count; tot += sl.len){
-		sl = dfslice(f, count-tot, off+tot, Wr);
+		sl = dfslice(f, count-tot, *off+tot, Wr);
 		if(sl.len == 0 || sl.data == nil)
 			fatal("dfpwrite: bug");
 		memmove(sl.data, p+tot, sl.len);
@@ -201,6 +204,48 @@ ptrmap(u64int addr, int nind, Blkf f, int isdisk)
 	return tot;
 }
 
+static int
+fdumpf(Memblk *f)
+{
+	extern int mbtab;
+
+	isfile(f);
+	mbtab++;
+	return 0;
+}
+
+static int
+bdumpf(Memblk*)
+{
+	return 0;
+}
+
+static int
+fdumpedf(Memblk *)
+{
+	extern int mbtab;
+
+	mbtab--;
+	return 0;
+}
+
+/*
+ * XXX: We must get rid of dfmap.
+ * There are few uses and they are already too different.
+ * for example, for dfdump, we want to call fslowmem() now and then,
+ * so that if we read the entire disk to dump it, we have no problem.
+ */
+int
+dfdump(Memblk *f, int disktoo)
+{
+	int n;
+
+	incref(f);
+	n = dfmap(f, fdumpf, fdumpedf, bdumpf, disktoo, No);
+	decref(f);
+	return n;
+}
+
 int
 dfmap(Memblk *f, Blkf pre, Blkf post, Blkf bf, int isdisk, int lk)
 {
@@ -208,6 +253,7 @@ dfmap(Memblk *f, Blkf pre, Blkf post, Blkf bf, int isdisk, int lk)
 	Memblk *b;
 	Memblk *(*child)(Memblk*, int);
 	long tot;
+	extern int mbtab;
 
 	isfile(f);
 	rwlock(f, lk);
@@ -225,7 +271,12 @@ dfmap(Memblk *f, Blkf pre, Blkf post, Blkf bf, int isdisk, int lk)
 		for(i = 0; i < nelem(f->d.dptr); i++)
 			tot += ptrmap(f->d.dptr[i], 0, bf, isdisk);
 		for(i = 0; i < nelem(f->d.iptr); i++)
-			tot += ptrmap(f->d.dptr[i], i+1, bf, isdisk);
+			tot += ptrmap(f->d.iptr[i], i+1, bf, isdisk);
+	}
+	if(pre == fdumpf){	/* kludge */
+		mbtab--;
+		print("%H\n", f);
+		mbtab++;
 	}
 	if((f->mf->mode&DMDIR) != 0){
 		child = dfchild;
@@ -277,9 +328,6 @@ dffreeze(Memblk *f)
 static int
 bsyncf(Memblk *b)
 {
-	if(!b->frozen)
-		fatal("bsyncf: not frozen\n%H\n", b);
-	
 	if(b->dirty)
 		dbwrite(b);
 	b->dirty = 0;
@@ -348,37 +396,6 @@ dfreclaim(Memblk *f)
 	return dfmap(f, freclaimf, nil, breclaimf, Disk, Wr);
 }
 
-static int
-fdumpf(Memblk *f)
-{
-	extern int mbtab;
-
-	isfile(f);
-	print("%H\n", f);
-	mbtab++;
-	return 0;
-}
-
-static int
-fdumpedf(Memblk *)
-{
-	extern int mbtab;
-
-	mbtab--;
-	return 0;
-}
-
-int
-dfdump(Memblk *f, int disktoo)
-{
-	int n;
-
-	incref(f);
-	n = dfmap(f, fdumpf, fdumpedf, nil, disktoo, No);
-	decref(f);
-	return n;
-}
-
 /*
  * DEBUG: no locks.
  */
@@ -407,4 +424,3 @@ dflist(Memblk *f, char *ppath)
 	if(ppath == nil)
 		print("\n");
 }
-

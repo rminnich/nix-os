@@ -8,6 +8,8 @@
 #include "conf.h"
 #include "dbg.h"
 #include "dk.h"
+#include "ix.h"
+#include "net.h"
 #include "fns.h"
 
 /*
@@ -21,6 +23,7 @@ checktag(u64int tag, uint type, u64int addr)
 	if(tag != TAG(addr,type)){
 		fprint(2, "%s: bad tag: %#ullx != %#ux d%#ullx pc = %#p\n",
 			argv0, tag, type, addr, getcallerpc(&tag));
+abort();
 		error("bad tag");
 	}
 }
@@ -113,7 +116,7 @@ Again:
 			goto Again;
 		}
 		fs->super->d.free = naddr;
-		fs->super->d.nfree -= 1;
+		fs->super->d.ndfree--;
 		changed(fs->super);
 	}else{
 		addr = 0;
@@ -163,7 +166,7 @@ dbaddref(u64int addr, int delta, int set)
 {
 	Memblk *rb;
 	u64int raddr, ref;
-	int i, flg;
+	int i;
 
 	if(addr == 0)
 		return 0;
@@ -174,14 +177,14 @@ dbaddref(u64int addr, int delta, int set)
 		dDprint("dbsetref %#ullx = %d\n", addr, set);
 	else if(delta != 0)
 		dDprint("dbaddref %#ullx += %d\n", addr, delta);
-	flg = dbgclr('D');
+	nodebug();
 	raddr = refaddr(addr, &i);
 	rb = dbget(DBref, raddr);
 	qlock(&fs->rlk);
 	if(catcherror()){
 		mbput(rb);
 		qunlock(&fs->rlk);
-		dbg['D'] = flg;
+		debug();
 		error(nil);
 	}
 	if(delta != 0 || set != 0){
@@ -191,12 +194,19 @@ dbaddref(u64int addr, int delta, int set)
 		else
 			rb->d.ref[i] += delta;
 		rb->dirty = 1;
+		if(delta < 0 && rb->d.ref[i] == 0){
+			qlock(fs);
+			rb->d.ref[i] = fs->super->d.free;
+			fs->super->d.free = addr;
+			fs->super->d.ndfree++;
+			qunlock(fs);
+		}
 	}
 	ref = rb->d.ref[i];
 	noerror();
 	qunlock(&fs->rlk);
 	mbput(rb);
-	dbg['D'] = flg;
+	debug();
 	return ref;
 }
 
@@ -229,9 +239,9 @@ dballoc(uint type)
 {
 	Memblk *b;
 	u64int addr;
-	int root, flg;
+	int root;
 
-	flg = dbgclr('D');
+	nodebug();
 
 	root = (type == Noaddr);
 	addr = Noaddr;
@@ -243,17 +253,17 @@ dballoc(uint type)
 	b->d.tag = TAG(b->addr,type);
 	if(catcherror()){
 		mbput(b);
-		dbg['D'] = flg;
+		debug();
 		error(nil);
 	}
 	changed(b);
 	if(addr != Noaddr && addr >= Dblk0addr)
 		dbsetref(addr, 1);
 	if(type == DBfile)
-		b->mf = mfalloc();
+		b->mf = anew(&mfalloc);
 	b = mbhash(b);
 	noerror();
-	dbg['D'] = flg;
+	debug();
 	dDprint("dballoc %s -> %H\n", tname(type), b);
 	return b;
 }
@@ -337,14 +347,14 @@ dbget(uint type, u64int addr)
 {
 	Memblk *b;
 
-	dDprint("dbget %s d%#ullx\n", tname(type), addr);
+	dMprint("dbget %s d%#ullx\n", tname(type), addr);
 	okaddr(addr);
 	b = mbget(addr, 1);
 	if(b == nil)
 		error("i/o error");
 	if(TAGTYPE(b->d.tag) != DBnew){
 		if(TAGTYPE(b->d.tag) != type)
-			fatal("dbget: bug");
+			fatal("dbget: bug: type %d tag %#ullx", type, b->d.tag);
 		return b;
 	}
 
@@ -360,7 +370,7 @@ dbget(uint type, u64int addr)
 	checktag(b->d.tag, type, addr);
 	if(type == DBfile){
 		assert(b->mf == nil);
-		b->mf = mfalloc();
+		b->mf = anew(&mfalloc);
 		gmeta(b->mf, b->d.embed, Embedsz);
 		b->written = 1;
 	}
@@ -434,9 +444,12 @@ dbdup(Memblk *b)
 			break;
 		doff = embedattrsz(nb);
 		dupdentries(nb->d.embed+doff, (Embedsz-doff)/sizeof(Dentry));
+		/*
+		 * no race: caller takes care.
+		 */
 		if(b->frozen && b->mf->melted == nil){
 			incref(nb);
-			b->mf->melted = nb;	/* XXX race *rlocked* */
+			b->mf->melted = nb;
 		}
 		break;
 	default:

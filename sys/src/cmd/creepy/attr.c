@@ -8,10 +8,16 @@
 #include "conf.h"
 #include "dbg.h"
 #include "dk.h"
+#include "ix.h"
+#include "net.h"
 #include "fns.h"
 
 /*
  * Attribute handling
+ *
+ * BUG: we only support the predefined attributes.
+ * Just store/parse a sequence of name[s] sz[2] value[sz]
+ * after predefined attributes.
  */
 
 typedef struct Adef Adef;
@@ -22,6 +28,7 @@ struct Adef
 	int	sz;
 	long	(*wattr)(Memblk*, void*, long);
 	long	(*rattr)(Memblk*, void*, long);
+	void	(*cattr)(Memblk*, int, void*, long, void*, long);
 };
 
 long wname(Memblk*, void*, long);
@@ -33,14 +40,27 @@ long wmtime(Memblk*, void*, long);
 static long rmtime(Memblk*, void*, long);
 static long wlength(Memblk*, void*, long);
 static long rlength(Memblk*, void*, long);
+static long wuid(Memblk*, void*, long);
+static long ruid(Memblk*, void*, long);
+static long wgid(Memblk*, void*, long);
+static long rgid(Memblk*, void*, long);
+static long wmuid(Memblk*, void*, long);
+static long rmuid(Memblk*, void*, long);
+static long rstar(Memblk*, void*, long);
+static void cstring(Memblk*, int, void*, long, void*, long);
+static void cu64int(Memblk*, int, void*, long, void*, long);
 
 static Adef adef[] =
 {
-	{"name", 0, wname, rname},
-	{"id",	BIT64SZ, nil, rid},
-	{"atime", BIT64SZ, watime, ratime},
-	{"mtime", BIT64SZ, wmtime, rmtime},
-	{"length", BIT64SZ, wlength, rlength},
+	{"name", 0, wname, rname, cstring},
+	{"id",	BIT64SZ, nil, rid, cu64int},
+	{"atime", BIT64SZ, watime, ratime, cu64int},
+	{"mtime", BIT64SZ, wmtime, rmtime, cu64int},
+	{"length", BIT64SZ, wlength, rlength, cu64int},
+	{"uid", 0, wuid, ruid, cstring},
+	{"gid", 0, wgid, rgid, cstring},
+	{"muid", 0, wuid, ruid, cstring},
+	{"*", 0, nil, rstar, nil},
 };
 
 /*
@@ -169,6 +189,66 @@ pmeta(void *buf, ulong nbuf, Fmeta *meta)
 	return sz;
 }
 
+static void
+ceval(int op, int v)
+{
+	switch(op){
+	case CEQ:
+		if(v != 0)
+			error("false");
+		break;
+	case CGE:
+		if(v < 0)
+			error("false");
+		break;
+	case CGT:
+		if(v <= 0)
+			error("false");
+		break;
+	case CLE:
+		if(v > 0)
+			error("false");
+		break;
+	case CLT:
+		if(v >= 0)
+			error("false");
+	case CNE:
+		if(v == 0)
+			error("false");
+		break;
+	}
+}
+
+static void
+cstring(Memblk*, int op, void *buf, long, void *val, long len)
+{
+	char *p;
+
+	p = val;
+	if(len < 1 || p[len-1] != 0)
+		error("value must end in \\0");
+	ceval(op, strcmp(buf, val));
+}
+
+static void
+cu64int(Memblk*, int op, void *buf, long, void *val, long)
+{
+	u64int v1, v2;
+	uchar *p1, *p2;
+
+	p1 = buf;
+	p2 = val;
+	v1 = GBIT64(p1);
+	v2 = GBIT64(p2);
+	/* avoid overflow */
+	if(v1 > v2)
+		ceval(op, 1);
+	else if(v1 < v2)
+		ceval(op, -1);
+	else
+		ceval(op, 0);
+}
+
 long 
 wname(Memblk *f, void *buf, long len)
 {
@@ -191,16 +271,124 @@ wname(Memblk *f, void *buf, long len)
 	return len;
 }
 
-static long 
-rname(Memblk *f, void *buf, long len)
+static long
+rstr(char *s, void *buf, long len)
 {
 	long l;
 
-	l = strlen(f->mf->name) + 1;
+	l = strlen(s) + 1;
 	if(l > len)
 		error("buffer too short");
-	strcpy(buf, f->mf->name);
+	strcpy(buf, s);
 	return l;
+}
+
+static long 
+rname(Memblk *f, void *buf, long len)
+{
+	return rstr(f->mf->name, buf, len);
+}
+
+static long 
+ruid(Memblk *f, void *buf, long len)
+{
+	return rstr(f->mf->uid, buf, len);
+}
+
+static long 
+wuid(Memblk *f, void *buf, long len)
+{
+	char *p;
+	ulong maxsz;
+	Fmeta m;
+
+	p = buf;
+	if(len < 1 || p[len-1] != 0)
+		error("name must end in \\0");
+	maxsz = embedattrsz(f);
+	m = *f->mf;
+	m.uid = buf;
+	m.gid = strdup(m.gid);
+	m.muid = strdup(m.muid);
+	m.name = strdup(m.name);
+	if(metasize(&m) > maxsz){
+		fprint(2, "%s: bug: no attribute block implemented\n", argv0);
+		error("no room to grow metadata");
+	}
+	f->mf->Fmeta = m;
+	pmeta(f->d.embed, maxsz, f->mf);
+	free(m.gid);
+	free(m.muid);
+	free(m.name);
+	return len;
+}
+
+static long 
+rgid(Memblk *f, void *buf, long len)
+{
+	return rstr(f->mf->gid, buf, len);
+}
+
+static long 
+wgid(Memblk *f, void *buf, long len)
+{
+	char *p;
+	ulong maxsz;
+	Fmeta m;
+
+	p = buf;
+	if(len < 1 || p[len-1] != 0)
+		error("name must end in \\0");
+	maxsz = embedattrsz(f);
+	m = *f->mf;
+	m.uid = strdup(m.uid);
+	m.gid = buf;
+	m.muid = strdup(m.muid);
+	m.name = strdup(m.name);
+	if(metasize(&m) > maxsz){
+		fprint(2, "%s: bug: no attribute block implemented\n", argv0);
+		error("no room to grow metadata");
+	}
+	f->mf->Fmeta = m;
+	pmeta(f->d.embed, maxsz, f->mf);
+	free(m.uid);
+	free(m.muid);
+	free(m.name);
+	return len;
+}
+
+static long 
+rmuid(Memblk *f, void *buf, long len)
+{
+	return rstr(f->mf->muid, buf, len);
+}
+
+static long 
+wmuid(Memblk *f, void *buf, long len)
+{
+	char *p;
+	ulong maxsz;
+	Fmeta m;
+
+	p = buf;
+	if(len < 1 || p[len-1] != 0)
+		error("name must end in \\0");
+	maxsz = embedattrsz(f);
+	m = *f->mf;
+	m.uid = strdup(m.uid);
+	m.gid = strdup(m.gid);
+	m.muid = buf;
+	m.name = strdup(m.name);
+	if(metasize(&m) > maxsz){
+		fprint(2, "%s: bug: no attribute block implemented\n", argv0);
+		error("no room to grow metadata");
+	}
+	f->mf->Fmeta = m;
+	pmeta(f->d.embed, maxsz, f->mf);
+	free(m.uid);
+	free(m.gid);
+	free(m.name);
+	return len;
 }
 
 static long 
@@ -304,6 +492,22 @@ rlength(Memblk *f, void *buf, long)
 	return BIT64SZ;
 }
 
+static long 
+rstar(Memblk *, void *buf, long len)
+{
+	char *s, *e;
+	int i;
+
+	s = buf;
+	e = s + len;
+	for(i = 0; i < nelem(adef); i++)
+		if(strcmp(adef[i].name, "*") != 0)
+			s = seprint(s, e, "%s ", adef[i].name);
+	if(s > buf)
+		*--s = 0;
+	return s - (char*)buf;
+}
+
 long
 dfwattr(Memblk *f, char *name, void *val, long nval)
 {
@@ -320,7 +524,7 @@ dfwattr(Memblk *f, char *name, void *val, long nval)
 		if(strcmp(adef[i].name, name) == 0)
 			break;
 	if(i == nelem(adef))
-		error("user defined attributes not yet implemented");
+		error("bug: user defined attributes not yet implemented");
 	if(adef[i].wattr == nil)
 		error("can't write %s", name);
 	if(adef[i].sz != 0 && adef[i].sz != nval)
@@ -351,11 +555,26 @@ dfrattr(Memblk *f, char *name, void *val, long count)
 	return tot;
 }
 
-static int
-member(char *gid, char *uid)
+void
+dfcattr(Memblk *f, int op, char *name, void *val, long count)
 {
-	/* BUG: no groups */
-	return strcmp(gid, uid) == 0;
+	int i;
+	long nbuf;
+	char buf[128];
+
+	isfile(f);
+	isrwlocked(f, Rd);
+
+	nbuf = dfrattr(f, name, buf, sizeof buf);
+
+	for(i = 0; i < nelem(adef); i++)
+		if(strcmp(adef[i].name, name) == 0)
+			break;
+	if(i == nelem(adef))
+		error("no such attribute");
+	if(adef[i].sz != 0 && count != adef[i].sz)
+		error("value size does not match");
+	adef[i].cattr(f, op, buf, nbuf, val, count);
 }
 
 void

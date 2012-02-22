@@ -10,12 +10,8 @@ enum
 
 #ifdef TESTING
 	Incr = 2,
-	Fsysmem = 1*MiB,		/* size for in-memory block array */
+	Fsysmem = 1*GiB	,	/* size for in-memory block array */
 	Dzerofree = 10,		/* out of disk blocks */
-	Dminfree = 100000,	/* low on disk  */
-	Dmaxfree = 100000,	/* high on disk */
-	Mminfree = 1000000ULL,	/* low on mem */
-	Mmaxfree = 1000000ULL,	/* high on mem */
 
 	/* disk parameters; don't change */
 	Dblksz = 512UL,		/* disk block size */
@@ -26,10 +22,6 @@ enum
 	Incr = 16,
 	Fsysmem = 2*GiB,		/* size for in-memory block array */
 	Dzerofree = 10,		/* out of disk blocks */
-	Dminfree = 1000,		/* low on disk blocks */
-	Dmaxfree = 1000,	/* high on disk blocks */
-	Mminfree = 50,		/* low on mem blocks */
-	Mmaxfree = 500,		/* high on mem blocks */
 
 	/* disk parameters; don't change */
 	Dblksz = 16*KiB,		/* disk block size */
@@ -38,6 +30,10 @@ enum
 	Niptr = 4,		/* # of indirect data pointers */
 #endif
 
+	Dminfree = 1000,		/* low on disk blocks */
+	Dmaxfree = 1000,	/* high on disk blocks */
+	Mminfree = 50,		/* low on mem blocks */
+	Mmaxfree = 500,		/* high on mem blocks */
 	Dminattrsz = Dblksz/2,	/* min size for attributes */
 
 	/*
@@ -60,6 +56,9 @@ enum
 	Errstack = 64,		/* max # of nested error labels */
 	Fhashsz = 7919,		/* size of file hash (plan9 has 35454 files). */
 	Fidhashsz = 97,		/* size of the fid hash size */
+	Uhashsz = 97,
 
+
+	Rpcspercli = 0,		/* != 0 places a limit */
 };
 

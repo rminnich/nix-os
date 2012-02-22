@@ -8,6 +8,8 @@
 #include "conf.h"
 #include "dbg.h"
 #include "dk.h"
+#include "ix.h"
+#include "net.h"
 #include "fns.h"
 
 /*
@@ -29,7 +31,7 @@ fatal(char *fmt, ...)
 	fprint(2, "\n");
 	if(fatalaborts)
 		abort();
-	exits("fatal");
+	threadexitsall("fatal");
 }
 
 uvlong
@@ -45,23 +47,26 @@ okaddr(u64int addr)
 		error("okaddr %#ullx", addr);
 }
 
+int
+isro(Memblk *f)
+{
+	return f == fs->archive || f == fs->root || f == fs->cons;
+}
+
 /*
  * NO LOCKS. debug only
  */
 void
 fsdump(int disktoo)
 {
-	int i, flg;
+	int i;
 	Memblk *b;
 	u64int a;
 
-	flg = dbg['D'];
-	dbg['D'] = 0;
+	nodebug();
 	if(fs != nil){
-		print("\n\nfsys '%s' limit %#ulx super m%#p root m%#p:\n",
+		print("\n\nfsys '%s' limit %#ullx super m%#p root m%#p:\n",
 			fs->dev, fs->limit, fs->super, fs->root);
-		print("nblk %uld nablk %uld used %uld free %uld\n",
-			fs->nblk, fs->nablk, fs->nused, fs->nfree);
 		print("%H\n", fs->super);
 		dfdump(fs->root, disktoo);
 		for(b = fs->refs; b != nil; b = b->next)
@@ -83,29 +88,19 @@ fsdump(int disktoo)
 	for(b = fs->mru; b != nil; b = b->lnext)
 		print(" d%#ullx", b->addr);
 	print("\n");
-	print("Fsysmem\t= %uld\n", Fsysmem);
-	print("Dminfree\t= %d\n", Dminfree);
-	print("Dblksz\t= %uld\n", Dblksz);
-	print("Dminattrsz\t= %uld\n", Dminattrsz);
-	print("Nblkgrpsz\t= %uld\n", Nblkgrpsz);
-	print("Dblkdatasz\t= %d\n", Dblkdatasz);
-	print("Embedsz\t= %d\n", Embedsz);
-	print("Dentryperblk\t= %d\n", Dblkdatasz/sizeof(Dentry));
-	print("Dptrperblk\t= %d\n\n", Dptrperblk);
-	dbg['D'] = flg;
+	fsstats();
+	debug();
 }
 
 void
 fslist(void)
 {
-	int flg;
-
-	flg = dbgclr('D');
+	nodebug();
 	print("fsys '%s' blksz %ulld maxfsz %ulld:\n",
 		fs->dev, fs->super->d.dblksz, maxfsz);
 	dflist(fs->root, nil);
 	print("\n");
-	dbg['D'] = flg;
+	debug();
 }
 
 static usize
@@ -241,7 +236,6 @@ fsfreeze(void)
 	Memblk *na, *oa, *arch;
 	char name[50];
 
-	/* call fslowmem? */
 	qlock(&fs->fzlk);
 	if(catcherror()){
 		/*
@@ -315,11 +309,13 @@ fsinit(char *dev, int nblk)
 	if(nblk > 0 && nblk < fs->nablk)
 		fs->nablk = nblk;
 	fs->limit = disksize(fs->fd);
-	if(fs->nablk > fs->limit/Dblksz)
-		fs->nablk = fs->limit/Dblksz;
-	fs->limit = fs->nablk * Dblksz;
+	fs->limit = fs->limit/Dblksz*Dblksz;
 	if(fs->limit < 10*Dblksz)
 		fatal("buy a larger disk");
+	if(fs->nablk > fs->limit/Dblksz){
+		fs->nablk = fs->limit/Dblksz;
+		print("%s: using only %uld blocks (small disk)\n", argv0, fs->nablk);
+	}
 	fs->blk = malloc(fs->nablk * sizeof fs->blk[0]);
 	dDprint("fsys '%s' init\n", fs->dev);
 }
@@ -372,8 +368,10 @@ fssync(void)
 	 * TODO: If active has not changed and we are just going
 	 * to dump a new archive for no change, do nothing.
 	 */
+	dDprint("syncing\n");
 	fsfreeze();
 	fswrite();
+	dDprint("synced\n");
 }
 
 /*
@@ -430,20 +428,22 @@ fsopen(char *dev)
 	noerror();
 }
 
-static uvlong
+uvlong
 fsmemfree(void)
 {
 	uvlong nfree;
 
 	qlock(fs);
 	nfree = fs->nablk - fs->nblk;
-	nfree += fs->nfree;
+	nfree += fs->nmfree;
 	qunlock(fs);
 	return nfree;
 }
 
 /*
- * This should be called if fs->nblk == fs->nablk && fs->nfree < some number.
+ * Check if we are low on memory and move some blocks out in that case.
+ * This does not acquire locks on blocks, so it's safe to call it while
+ * keeping some files/blocks locked.
  */
 int
 fslowmem(void)
@@ -454,59 +454,63 @@ fslowmem(void)
 
 	if(fsmemfree() > Mminfree)
 		return 0;
-
-	/*
-	 * We are low on memory, try to make a snapshot so that
-	 * dirty blocks are moved to disk and we can release them if we want.
-	 */
-	dDprint("low on memory: syncing\n");
-	fssync();
-
+	dDprint("low on memory\n");
 	tot = 0;
 	do{
 		if(fsmemfree() > Mmaxfree)
 			break;
 		qlock(&fs->fzlk);
+		qlock(&fs->llk);
 		if(catcherror()){
+			qunlock(&fs->llk);
 			qunlock(&fs->fzlk);
 			fprint(2, "%s: fslowmem: %r\n", argv0);
 			break;
 		}
+	Again:
 		n = 0;
 		for(b = fs->lru; b != nil && tot < Mmaxfree; b = bprev){
 			bprev = b->lprev;
 			type = TAGTYPE(b->d.tag);
 			switch(type){
+			case DBfree:
+				goto Again;
 			case DBsuper:
 			case DBref:
-				dDprint("out: ignored: %H\n", b);
+				dDprint("out: ignored: m%#p\n", b);
 				continue;
 			case DBfile:
 				if(b == fs->root || b == fs->active || b == fs->archive){
-					dDprint("out: ignored: %H\n", b);
+					dDprint("out: ignored: m%#p\n", b);
 					continue;
 				}
 				break;
 			}
 			if(b->dirty || b->ref > 1){
-				dDprint("out: ignored: %H\n", b);
+				dDprint("out: ignored: m%#p\n", b);
 				continue;
 			}
 			/*
-			 * Blocks have one ref because of the hash table.
-			 * Those that have exactly 1 ref are not used:
-			 * we have a clean unused block: throw it away.
+			 * Blocks here have one ref because of the hash table,
+			 * which means they are are not used.
+			 * We release the hash ref to let them go.
+			 * bprev might move while we put b, but it would
+			 * only go to another place in the lru list, or to
+			 * the free list, but that's ok.
 			 */
+			qunlock(&fs->llk);
 			dDprint("block out: m%#p d%#ullx\n", b, b->addr);
 			mbput(b);
+			qlock(&fs->llk);
 			n++;
 			tot++;
 		}
 		noerror();
+		qunlock(&fs->llk);
 		qunlock(&fs->fzlk);
 	}while(n > 0);
 	if(tot == 0)
-		fprint(2, "%s: out: everything in use or dirty.\n", argv0);
+		fprint(2, "%s: low mem and everything in use or dirty.\n", argv0);
 	else
 		dDprint("out: %uld blocks\n", tot);
 	return 1;
@@ -518,7 +522,7 @@ fsdiskfree(void)
 	uvlong nfree;
 
 	qlock(fs);
-	nfree = fs->super->d.nfree;
+	nfree = fs->super->d.ndfree;
 	nfree += (fs->limit - fs->super->d.eaddr)/Dblksz;
 	qunlock(fs);
 	return nfree;
@@ -532,7 +536,15 @@ fsdiskfree(void)
 int
 fsfull(void)
 {
-	return fsdiskfree() < Dzerofree;
+	if(fsdiskfree() > Dzerofree)
+		return 0;
+
+	if(1){
+		fprint(2, "file system full:\n");
+		fsdump(0);
+		fatal("aborting");
+	}
+	return 1;
 }
 
 /*
@@ -551,6 +563,7 @@ fsreclaim(void)
 	if(fsdiskfree() > Dminfree)
 		return 0;
 
+	fprint(2, "%s: low on disk: reclaiming...\n", argv0);
 	qlock(&fs->fzlk);
 	arch = fs->archive;
 	rwlock(arch, Wr);
@@ -634,49 +647,9 @@ fspolicy(void)
 	 * If low on memory, move some blocks out.
 	 * Otherwise, reclaim old snapshots if low on disk.
 	 */
-	if(!fslowmem())
+	if(fslowmem())
+		fssync();
+	else
 		fsreclaim();
 }
 
-void
-consprint(char *fmt, ...)
-{
-	va_list	arg;
-	char *s, *x;
-
-	va_start(arg, fmt);
-	s = vsmprint(fmt, arg);
-	va_end(arg);
-	/* consume some message if the channel is full */
-	while(nbsendp(fs->consc, s) == 0)
-		if((x = nbrecvp(fs->consc)) != nil)
-			free(x);
-}
-
-long
-consread(char *buf, long count)
-{
-	char *s;
-
-	s = recvp(fs->consc);
-	if(count > strlen(s))
-		count = strlen(s);
-	memmove(buf, s, count);
-	free(s);
-	return count;
-}
-
-/*
- * XXX: conswrite should take a look to the command and process it,
- * the reply must be issued by calling consprint(),
- * the writer should be also reading the file.
- */
-long
-conswrite(char *buf, long count)
-{
-	if(count <= 1)
-		return 0;
-	buf[count-1] = 0;
-	consprint("??\n");
-	return count;
-}
