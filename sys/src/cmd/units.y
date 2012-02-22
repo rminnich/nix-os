@@ -62,7 +62,7 @@ extern	void	main(int, char*[]);
 extern	void	mul(Node*, Node*, Node*);
 extern	void	ofile(void);
 extern	double	pname(void);
-extern	void	printdim(char*, int, int);
+extern	char*	printdim(char*, char*, int, int);
 extern	int	ralpha(int);
 extern	int	readline(void);
 extern	void	sub(Node*, Node*, Node*);
@@ -239,16 +239,31 @@ loop:
 	case L'÷':
 		return '/';
 	case L'¹':
-	case L'ⁱ':
 		yylval.numb = 1;
 		return SUP;
 	case L'²':
-	case L'⁲':
 		yylval.numb = 2;
 		return SUP;
 	case L'³':
-	case L'⁳':
 		yylval.numb = 3;
+		return SUP;
+	case L'⁴':
+		yylval.numb = 4;
+		return SUP;
+	case L'⁵':
+		yylval.numb = 5;
+		return SUP;
+	case L'⁶':
+		yylval.numb = 6;
+		return SUP;
+	case L'⁷':
+		yylval.numb = 7;
+		return SUP;
+	case L'⁸':
+		yylval.numb = 8;
+		return SUP;
+	case L'⁹':
+		yylval.numb = 9;
 		return SUP;
 	}
 	return c;
@@ -376,12 +391,13 @@ ralpha(int c)
 	case '|':
 	case '#':
 	case L'¹':
-	case L'ⁱ':
 	case L'²':
-	case L'⁲':
 	case L'³':
-	case L'⁳':
-	case L'×':
+	case L'⁴':
+	case L'⁵':
+	case L'⁶':
+	case L'⁷':
+	case L'⁹':
 	case L'÷':
 		return 0;
 	}
@@ -531,47 +547,49 @@ specialcase(Node *c, Node *a, Node *b)
 	return 0;
 }
 
-void
-printdim(char *str, int d, int n)
+char*
+printdim(char *p, char *e, int d, int n)
 {
 	Var *v;
 
 	if(n) {
 		v = fund[d];
 		if(v)
-			sprint(strchr(str, 0), " %S", v->name);
+			p = seprint(p, e, " %S", v->name);
 		else
-			sprint(strchr(str, 0), " [%d]", d);
+			p = seprint(p, e, " [%d]", d);
 		switch(n) {
 		case 1:
 			break;
 		case 2:
-			strcat(str, "²");
+			p = seprint(p, e, "²");
 			break;
 		case 3:
-			strcat(str, "³");
+			p = seprint(p, e, "³");
 			break;
 		default:
-			sprint(strchr(str, 0), "^%d", n);
+			p = seprint(p, e, "^%d", n);
 		}
 	}
+	return p;
 }
 
 int
 Ufmt(Fmt *fp)
 {
-	char str[200];
+	char str[200], *p, *e;
 	Node *n;
 	int f, i, d;
 
 	n = va_arg(fp->args, Node*);
-	sprint(str, "%g", n->val);
+	e = str + sizeof str;
+	p = seprint(str, e, "%g", n->val);
 
 	f = 0;
 	for(i=1; i<Ndim; i++) {
 		d = n->dim[i];
 		if(d > 0)
-			printdim(str, i, d);
+			p = printdim(p, e, i, d);
 		else
 		if(d < 0)
 			f = 1;
@@ -582,7 +600,7 @@ Ufmt(Fmt *fp)
 		for(i=1; i<Ndim; i++) {
 			d = n->dim[i];
 			if(d < 0)
-				printdim(str, i, -d);
+				p = printdim(p, e, i, -d);
 		}
 	}
 

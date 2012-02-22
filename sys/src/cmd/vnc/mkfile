@@ -38,6 +38,9 @@ HFILES=\
 	vncv.h\
 	vncs.h\
 
+CLEANFILES=\
+	latin1.h
+
 UPDATE=\
 	mkfile\
 	$HFILES\
@@ -54,6 +57,9 @@ default:V:	all
 $O.vncs:	$SOFILES
 
 $O.vncv:	$COFILES
+
+latin1.h: /lib/keyboard /bin/aux/mklatinkbd
+	aux/mklatinkbd /lib/keyboard > latin1.h
 
 errstr.h:	error.h
 	sed 's/extern //;s,;.*/\* (.*) \*/, = "\1";,' < error.h > errstr.h
