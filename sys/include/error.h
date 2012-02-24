@@ -14,6 +14,7 @@ struct Error {
 
 void	errinit(int stack);
 void	noerror(void);
+int	nerrors(void);
 void	error(char* msg, ...);
 #define	catcherror()	setjmp((*__ep)->label[(*__ep)->nerr++])
 extern Error**	__ep;

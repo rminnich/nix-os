@@ -18,11 +18,26 @@ errinit(int stack)
 	e->nlabel = stack;
 }
 
+int
+nerrors(void)
+{
+	return (*__ep)->nerr;
+}
+
 void
 noerror(void)
 {
-	if((*__ep)->nerr > (*__ep)->nlabel - 3)
-		sysfatal("error stack about to overflow");
+	Error *e;
+
+	e = *__ep;
+	if(e->nerr > e->nlabel - 3){
+		fprint(2, "error stack about to overflow. resizing");
+		e->nlabel *= 2;
+		(*__ep) = realloc(e, sizeof(Error) +
+				sizeof(e->label)*(e->nlabel-1));
+		if(*__ep == nil)
+			sysfatal("can't resize error stack: no memory");
+	}
 	if((*__ep)->nerr-- == 0)
 		sysfatal("noerror w/o catcherror");
 }

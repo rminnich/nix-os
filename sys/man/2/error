@@ -19,6 +19,9 @@ void	error(char* msg, ...)
 .br
 .B
 void	catcherror(void)
+.br
+.B
+int	nerrors(void)
 .SH DESCRIPTION
 These routiles are tools for error handling.
 .IR catcherror ,
@@ -46,6 +49,10 @@ declares that there was no error catched, similar to the
 function in the kernel.
 .I Error
 raises an error. If the argument is nil, the error string is unaltered. See the example.
+.PP
+.I Nerrors
+returns the number of recovery points kept in the error stack. Useful to
+perform debug checks to see if the stack depth is what it should be.
 .SH SOURCE
 .B /sys/src/liberror
 .SH EXAMPLE
