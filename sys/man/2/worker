@@ -49,7 +49,8 @@ is used to create new worker thread. By default, it is initialized to
 .I threadcreate (2).
 Initialize with the address of
 .I proccreate
-to create worker processes instead of threads.
+to create worker processes instead of threads. The stack size is
+.I mainstacksize .
 .SH SOURCE
 .B /sys/src/libworker
 .SH BUGS

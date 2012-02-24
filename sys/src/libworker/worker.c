@@ -6,11 +6,6 @@
 typedef struct Work Work;
 typedef struct Workproc Workproc;
 
-enum
-{
-	Stack = 32 * 1024
-};
-
 struct Work
 {
 	Worker	work;
@@ -94,7 +89,7 @@ ctlproc(void*)
 				wl->wc = chancreate(sizeof(ulong), 0);
 				if(wl->wc == nil)
 					sysfatal("chancreate");
-				if(workerthreadcreate(workproc, wl, Stack) < 0)
+				if(workerthreadcreate(workproc, wl, mainstacksize) < 0)
 					sysfatal("threadcreate");
 				wl->id = recvul(wl->wc);
 			}
@@ -124,7 +119,7 @@ init(void)
 	workerdonec = chancreate(sizeof(Workproc*), 0);
 	if(workerc == nil || workeridc == nil || workerdonec == nil)
 		sysfatal("chancreate");
-	if(threadcreate(ctlproc, nil, Stack) < 0)
+	if(workerthreadcreate(ctlproc, nil, mainstacksize) < 0)
 		sysfatal("threadcreate");
 }
 
