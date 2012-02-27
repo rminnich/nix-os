@@ -250,11 +250,11 @@ struct Pcidev
 		ulong	bar;
 		int	size;
 	} ioa, mema;
-
-	int	pmrb;			/* power management register block */
 };
 
 #define PCIWINDOW	0
 #define PCIWADDR(va)	(PADDR(va)+PCIWINDOW)
 #define ISAWINDOW	0
 #define ISAWADDR(va)	(PADDR(va)+ISAWINDOW)
+
+#pragma	varargck	type	"T"	int

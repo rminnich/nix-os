@@ -1282,20 +1282,12 @@ pcicap(Pcidev *p, int cap)
 	return -1;
 }
 
-static int
-pcigetpmrb(Pcidev* p)
-{
-	if(p->pmrb != 0)
-		return p->pmrb;
-	return p->pmrb = pcicap(p, PciCapPMG);
-}
-
 int
 pcigetpms(Pcidev* p)
 {
 	int pmcsr, ptr;
 
-	if((ptr = pcigetpmrb(p)) == -1)
+	if((ptr = pcicap(p, PciCapPMG)) == -1)
 		return -1;
 
 	/*
@@ -1317,7 +1309,7 @@ pcisetpms(Pcidev* p, int state)
 {
 	int ostate, pmc, pmcsr, ptr;
 
-	if((ptr = pcigetpmrb(p)) == -1)
+	if((ptr = pcicap(p, PciCapPMG)) == -1)
 		return -1;
 
 	pmc = pcicfgr16(p, ptr+2);
