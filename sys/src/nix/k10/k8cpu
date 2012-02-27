@@ -45,6 +45,7 @@ link +dev
 	ether82557	pci
 	ether82563	pci
 	etherigbe	pci ethermii
+	etherbcm	pci ethermii
 	ethermedium
 	loopbackmedium
 	netdevmedium
