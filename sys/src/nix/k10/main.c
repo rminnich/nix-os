@@ -504,15 +504,8 @@ confinit(void)
 	conf.npage = 0;
 	for(i=0; i<nelem(conf.mem); i++)
 		conf.npage += conf.mem[i].npage;
-
-	conf.nproc = 100 + ((conf.npage*PGSZ)/MB)*5;
-	if(cpuserver)
-		conf.nproc *= 3;
-	if(conf.nproc > 1000)
-		conf.nproc = 1000;
+	conf.nproc = 1000;
 	conf.nimage = 200;
-	conf.nswap = conf.nproc*80;
-	conf.nswppo = 4096;
 }
 
 static void

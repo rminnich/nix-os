@@ -117,8 +117,6 @@ struct Conf
 	ulong	copymode;	/* 0 is copy on write, 1 is copy on reference */
 	ulong	ialloc;		/* max interrupt time allocation in bytes */
 	ulong	nimage;		/* number of page cache image headers */
-	ulong	nswap;		/* number of swap pages */
-	int	nswppo;		/* max # of pageouts per segment pass */
 };
 
 enum
