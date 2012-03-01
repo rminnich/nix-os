@@ -643,7 +643,7 @@ mallocinit(void)
 	tailbase = UINT2PTR(sys->vmunused);
 	tailptr = tailbase;
 	tailnunits = NUNITS(sys->vmend - sys->vmunused);
-	print("base %#p ptr %#p nunints %ud\n", tailbase, tailptr, tailnunits);
+	print("base %#p ptr %#p nunits %ud\n", tailbase, tailptr, tailnunits);
 }
 
 static int
