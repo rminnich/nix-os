@@ -24,14 +24,6 @@ nextsym(int c)
 	int c1;
 	char *cp;
 
-<<<<<<< local
-=======
-	c = getnsc();
-	if(!isalpha(c) && c != '_' && c < Runeself) {
-		unget(c);
-		return S;
-	}
->>>>>>> other
 	for(cp = symb;;) {
 		if(c >= Runeself) {
 			for(c1=0;;) {
@@ -46,11 +38,7 @@ nextsym(int c)
 			if(cp <= symb+NSYMB-4)
 				*cp++ = c;
 		c = getc();
-<<<<<<< local
 		if(c >= Runeself || isalnum(c) || c == '_')
-=======
-		if(isalnum(c) || c == '_' || c >= Runeself)
->>>>>>> other
 			continue;
 		unget(c);
 		break;
