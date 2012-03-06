@@ -88,7 +88,7 @@ Dirtab procdir[] =
 	"ctl",		{Qctl},		0,			0000,
 	"fd",		{Qfd},		0,			0444,
 	"fpregs",	{Qfpregs},	0,			0000,
-	"kregs",	{Qkregs},	sizeof(Ureg),		0400,
+	"kregs",	{Qkregs},	sizeof(Ureg),		0600,
 	"mem",		{Qmem},		0,			0000,
 	"note",		{Qnote},	0,			0000,
 	"noteid",	{Qnoteid},	0,			0664,
@@ -147,10 +147,13 @@ static char *sname[]={ "Text", "Data", "Bss", "Stack", "Shared", "Phys", };
  *	32 bits of pid, for consistency checking
  * If notepg, c->pgrpid.path is pgrp slot, .vers is noteid.
  */
-#define QSHIFT	5	/* location in qid of proc slot # */
+#define	QSHIFT	5	/* location in qid of proc slot # */
+#define	SLOTBITS 23	/* number of bits in the slot */
+#define	QIDMASK	((1<<QSHIFT)-1)
+#define	SLOTMASK	((1<<SLOTBITS)-1 << QSHIFT)
 
-#define QID(q)		((((ulong)(q).path)&0x0000001F)>>0)
-#define SLOT(q)		(((((ulong)(q).path)&0x07FFFFFE0)>>QSHIFT)-1)
+#define QID(q)		((((ulong)(q).path)&QIDMASK)>>0)
+#define SLOT(q)		(((((ulong)(q).path)&SLOTMASK)>>QSHIFT)-1)
 #define PID(q)		((q).vers)
 #define NOTEID(q)	((q).vers)
 
@@ -230,7 +233,7 @@ procgen(Chan *c, char *name, Dirtab *tab, int, int s, Dir *dp)
 
 		if((p = psincref(s)) == nil || (pid = p->pid) == 0)
 			return 0;
-		sprint(up->genbuf, "%d", pid);
+		snprint(up->genbuf, sizeof up->genbuf, "%ud", pid);
 		/*
 		 * String comparison is done in devwalk so
 		 * name must match its formatted pid.
@@ -335,7 +338,7 @@ proctracepid(Proc *p)
 static void
 procinit(void)
 {
-	if(conf.nproc >= (1<<(16-QSHIFT))-1)
+	if(conf.nproc >= (SLOTMASK>>QSHIFT) - 1)
 		print("warning: too many procs for devproc\n");
 	addclock0link((void (*)(void))profclock, 113);	/* Relative prime to HZ */
 }
@@ -400,9 +403,14 @@ procopen(Chan *c, int omode)
 		topens++;
 		if (tevents == nil){
 			tevents = (Traceevent*)malloc(sizeof(Traceevent) * Nevents);
-			tpids = malloc(Ntracedpids * 20);
-			if(tevents == nil || tpids == nil)
+			if(tevents == nil)
 				error(Enomem);
+			tpids = malloc(Ntracedpids * 20);
+			if(tpids == nil){
+				free(tpids);
+				tpids = nil;
+				error(Enomem);
+			}
 			tpidsc = tpids;
 			tpidse = tpids + Ntracedpids * 20;
 			*tpidsc = 0;
@@ -448,6 +456,7 @@ procopen(Chan *c, int omode)
 		poperror();
 		qunlock(&p->debug);
 		psdecref(p);
+		cclose(c);
 		return tc;
 
 	case Qproc:
@@ -752,7 +761,7 @@ procread(Chan *c, void *va, long n, vlong off)
 	Segment *sg, *s;
 	int i, j, navail, pid, rsize;
 	char flag[10], *sps, *srv, statbuf[NSEG*64];
-	uintptr offset;
+	uintptr offset, u;
 	int tesz;
 
 	if(c->qid.type & QTDIR)
@@ -974,13 +983,13 @@ procread(Chan *c, void *va, long n, vlong off)
 			readnum(0, statbuf+j+NUMSIZE*i, NUMSIZE, l, NUMSIZE);
 		}
 		/* ignore stack, which is mostly non-existent */
-		l = 0;
+		u = 0;
 		for(i=1; i<NSEG; i++){
 			s = p->seg[i];
 			if(s)
-				l += s->top - s->base;
+				u += s->top - s->base;
 		}
-		readnum(0, statbuf+j+NUMSIZE*6, NUMSIZE, l>>10, NUMSIZE);
+		readnum(0, statbuf+j+NUMSIZE*6, NUMSIZE, u>>10u, NUMSIZE);	/* wrong size */
 		readnum(0, statbuf+j+NUMSIZE*7, NUMSIZE, p->basepri, NUMSIZE);
 		readnum(0, statbuf+j+NUMSIZE*8, NUMSIZE, p->priority, NUMSIZE);
 
@@ -1329,8 +1338,10 @@ proctext(Chan *c, Proc *p)
 		error(Eprocdied);
 	}
 
-	if(p->pid != PID(c->qid))
+	if(p->pid != PID(c->qid)){
+		cclose(tc);
 		error(Eprocdied);
+	}
 
 	poperror();
 	unlock(i);
@@ -1548,10 +1559,10 @@ procctlreq(Proc *p, char *va, int n)
 	case CMtrace:
 		switch(cb->nf){
 		case 1:
-			p->trace = (p->trace?0:1);
+			p->trace ^= 1;
 			break;
 		case 2:
-			p->trace = (atoi(cb->f[1])?1:0);
+			p->trace = (atoi(cb->f[1]) != 0);
 			break;
 		default:
 			error("args");
@@ -1564,7 +1575,7 @@ procctlreq(Proc *p, char *va, int n)
 		if(e=parsetime(&time, cb->f[1]))	/* time in ns */
 			error(e);
 		edfstop(p);
-		p->edf->T = time/1000;			/* Edf times are µs */
+		p->edf->T = time/1000;			/* Edf times are in µs */
 		break;
 	case CMdeadline:
 		if(p->edf == nil)
