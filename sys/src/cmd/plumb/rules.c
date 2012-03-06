@@ -123,6 +123,7 @@ popinput(void)
 		Bterm(in->fd);
 		free(in->fd);
 	}
+	free(in->file);
 	free(in);
 	return 1;
 }
@@ -330,6 +331,9 @@ expand(Exec *e, char *s, char **ends)
 	if(ends)
 		*ends = s;
 	*p = '\0';
+	/* disabled due to default plumbing having broken rule */
+	if(0 && quoting)
+		return "eof-in-quoted-string";
 	return ebuf;
 }
 
@@ -572,6 +576,8 @@ readruleset(void)
 					parseerror("too many ports");
 				if(lookup(r->qarg, badports) >= 0)
 					parseerror("illegal port name %s", r->qarg);
+				if(rs->port)
+					free(rs->port);
 				rs->port = estrdup(r->qarg);
 			}else
 				ncmd++;	/* start or client rule */
