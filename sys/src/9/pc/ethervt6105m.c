@@ -282,7 +282,7 @@ enum {						/* Tx Ds branch */
 
 enum {
 	Nrd		= 196,
-	Ntd		= 128,
+	Ntd		= 64,
 	Crcsz		= 4,
 	Bslop		= 48,
 	Rdbsz		= ETHERMAXTU+Crcsz+Bslop,
@@ -637,7 +637,7 @@ vt6105Mattach(Ether* edev)
 	alloc = mallocalign((ctlr->nrd+ctlr->ntd)*dsz, dsz, 0, 0);
 	if(alloc == nil){
 		qunlock(&ctlr->alock);
-		return;
+		error(Enomem);
 	}
 	ctlr->alloc = alloc;
 
@@ -1040,6 +1040,14 @@ vt6105Mdetach(Ctlr* ctlr)
 	return 0;
 }
 
+static void
+vt6105Mshutdown(Ether *ether)
+{
+	Ctlr *ctlr = ether->ctlr;
+
+	vt6105Mdetach(ctlr);
+}
+
 static int
 vt6105Mreset(Ctlr* ctlr)
 {
@@ -1208,6 +1216,7 @@ vt6105Mpnp(Ether* edev)
 	edev->transmit = vt6105Mtransmit;
 	edev->interrupt = vt6105Minterrupt;
 	edev->ifstat = vt6105Mifstat;
+	edev->shutdown = vt6105Mshutdown;
 	edev->ctl = nil;
 
 	edev->arg = edev;

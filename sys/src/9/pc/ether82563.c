@@ -411,7 +411,7 @@ enum {
 
 enum {
 	Nrd		= 256,		/* power of two */
-	Ntd		= 128,		/* power of two */
+	Ntd		= 64,		/* power of two */
 	Nrb		= 1024,		/* private receive buffers per Ctlr */
 };
 
@@ -1250,13 +1250,13 @@ i82563attach(Ether* edev)
 	char name[KNAMELEN];
 
 	ctlr = edev->ctlr;
-	ctlr->edev = edev;			/* point back to Ether* */
 	qlock(&ctlr->alock);
 	if(ctlr->attached){
 		qunlock(&ctlr->alock);
 		return;
 	}
 
+	ctlr->edev = edev;			/* point back to Ether* */
 	ctlr->nrd = Nrd;
 	ctlr->ntd = Ntd;
 
@@ -1287,7 +1287,7 @@ i82563attach(Ether* edev)
 
 	for(ctlr->nrb = 0; ctlr->nrb < Nrb; ctlr->nrb++){
 		if((bp = allocb(ctlr->rbsz + BY2PG)) == nil)
-			break;
+			error(Enomem);
 		bp->free = i82563rbfree;
 		freeb(bp);
 	}
@@ -1314,7 +1314,7 @@ i82563interrupt(Ureg*, void* arg)
 {
 	Ctlr *ctlr;
 	Ether *edev;
-	int icr, im;
+	int icr, im, i;
 
 	edev = arg;
 	ctlr = edev->ctlr;
@@ -1322,8 +1322,9 @@ i82563interrupt(Ureg*, void* arg)
 	ilock(&ctlr->imlock);
 	csr32w(ctlr, Imc, ~0);
 	im = ctlr->im;
-
-	for(icr = csr32r(ctlr, Icr); icr & ctlr->im; icr = csr32r(ctlr, Icr)){
+	i = 1000;			/* don't livelock */
+	for(icr = csr32r(ctlr, Icr); icr & ctlr->im && i-- > 0;
+	    icr = csr32r(ctlr, Icr)){
 		if(icr & Lsc){
 			im &= ~Lsc;
 			ctlr->lim = icr & Lsc;
@@ -1342,7 +1343,6 @@ i82563interrupt(Ureg*, void* arg)
 			wakeup(&ctlr->trendez);
 		}
 	}
-
 	ctlr->im = im;
 	csr32w(ctlr, Ims, im);
 	iunlock(&ctlr->imlock);

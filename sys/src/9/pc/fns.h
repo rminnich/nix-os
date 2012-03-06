@@ -4,12 +4,14 @@ void	aamloop(int);
 void	acpiscan(void (*func)(uchar *));
 Dirtab*	addarchfile(char*, int, long(*)(Chan*,void*,long,vlong), long(*)(Chan*,void*,long,vlong));
 void	archinit(void);
+void	archrevert(void);
 int	bios32call(BIOS32ci*, u16int[3]);
 int	bios32ci(BIOS32si*, BIOS32ci*);
 void	bios32close(BIOS32si*);
 BIOS32si* bios32open(char*);
 void	bootargs(void*);
 ulong	cankaddr(ulong);
+void	cgapost(int);
 void	clockintr(Ureg*, void*);
 int	(*cmpswap)(long*, long, long);
 int	cmpswap486(long*, long, long);
@@ -44,6 +46,7 @@ int	i8042auxcmds(uchar*, int);
 void	i8042auxenable(void (*)(int, int));
 void	i8042reset(void);
 void	i8250console(void);
+void	i8250config(char *);
 void*	i8250alloc(int, int, int);
 void	i8250mouse(char*, int (*)(Queue*, int), int);
 void	i8250setmouseputc(char*, int (*)(Queue*, int));
@@ -183,3 +186,8 @@ int	xchgw(ushort*, int);
 #define PADDR(a)	paddr((void*)(a))
 
 #define	dcflush(a, b)
+
+#define BIOSSEG(a)	KADDR(((uint)(a))<<4)
+
+#define L16GET(p)	(((p)[1]<<8)|(p)[0])
+#define L32GET(p)	(((u32int)L16GET((p)+2)<<16)|L16GET(p))

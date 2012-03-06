@@ -21,7 +21,7 @@
 #define Intel(x)	((x)->pci->vid == Vintel)
 
 enum {
-	NCtlr	= 4,
+	NCtlr	= 16,
 	NCtlrdrv= 32,
 	NDrive	= NCtlr*NCtlrdrv,
 
@@ -34,6 +34,12 @@ enum {
 	Mcomrwait= 64*1024/Nms - 1,
 
 	Obs	= 0xa0,			/* obsolete device bits */
+
+	/*
+	 * if we get more than this many interrupts per tick for a drive,
+	 * either the hardware is broken or we've got a bug in this driver.
+	 */
+	Maxintrspertick = 1000,
 };
 
 /* pci space configuration */
@@ -139,11 +145,16 @@ struct Drive {
 	char	firmware[8+1];
 	char	model[40+1];
 
-	ushort	info[0x200];
+	int	infosz;
+	ushort	*info;
+	ushort	tinyinfo[2];	/* used iff malloc fails */
 
 	int	driveno;	/* ctlr*NCtlrdrv + unit */
 	/* controller port # != driveno when not all ports are enabled */
 	int	portno;
+
+	ulong	lastintr0;
+	ulong	intrs;
 };
 
 struct Ctlr {
@@ -162,10 +173,13 @@ struct Ctlr {
 	/* phyical register address */
 	uchar	*physio;
 
-	Drive	rawdrive[NCtlrdrv];
-	Drive*	drive[NCtlrdrv];
+	Drive	*rawdrive;
+	Drive	*drive[NCtlrdrv];
 	int	ndrive;
-	int	mport;
+	int	mport;		/* highest drive # (0-origin) on ich9 at least */
+
+	ulong	lastintr0;
+	ulong	intrs;		/* not attributable to any drive */
 };
 
 struct Asleep {
@@ -278,31 +292,43 @@ ahciwait(Aportc *c, int ms)
 	return -1;
 }
 
+/* fill in cfis boilerplate */
+static uchar *
+cfissetup(Aportc *pc)
+{
+	uchar *cfis;
+
+	cfis = pc->m->ctab->cfis;
+	memset(cfis, 0, 0x20);
+	cfis[0] = 0x27;
+	cfis[1] = 0x80;
+	cfis[7] = Obs;
+	return cfis;
+}
+
+/* initialise pc's list */
+static void
+listsetup(Aportc *pc, int flags)
+{
+	Alist *list;
+
+	list = pc->m->list;
+	list->flags = flags | 5;
+	list->len = 0;
+	list->ctab = PCIWADDR(pc->m->ctab);
+	list->ctabhi = 0;
+}
+
 static int
 nop(Aportc *pc)
 {
 	uchar *c;
-	Actab *t;
-	Alist *l;
 
 	if((pc->m->feat & Dnop) == 0)
 		return -1;
-
-	t = pc->m->ctab;
-	c = t->cfis;
-
-	memset(c, 0, 0x20);
-	c[0] = 0x27;
-	c[1] = 0x80;
-	c[2] = 0x00;
-	c[7] = Obs;
-
-	l = pc->m->list;
-	l->flags = Lwrite | 0x5;
-	l->len = 0;
-	l->ctab = PCIWADDR(t);
-	l->ctabhi = 0;
-
+	c = cfissetup(pc);
+	c[2] = 0;
+	listsetup(pc, Lwrite);
 	return ahciwait(pc, 3*1000);
 }
 
@@ -310,25 +336,11 @@ static int
 setfeatures(Aportc *pc, uchar f)
 {
 	uchar *c;
-	Actab *t;
-	Alist *l;
 
-	t = pc->m->ctab;
-	c = t->cfis;
-
-	memset(c, 0, 0x20);
-	c[0] = 0x27;
-	c[1] = 0x80;
+	c = cfissetup(pc);
 	c[2] = 0xef;
 	c[3] = f;
-	c[7] = Obs;
-
-	l = pc->m->list;
-	l->flags = Lwrite | 0x5;
-	l->len = 0;
-	l->ctab = PCIWADDR(t);
-	l->ctabhi = 0;
-
+	listsetup(pc, Lwrite);
 	return ahciwait(pc, 3*1000);
 }
 
@@ -336,30 +348,15 @@ static int
 setudmamode(Aportc *pc, uchar f)
 {
 	uchar *c;
-	Actab *t;
-	Alist *l;
 
 	/* hack */
 	if((pc->p->sig >> 16) == 0xeb14)
 		return 0;
-
-	t = pc->m->ctab;
-	c = t->cfis;
-
-	memset(c, 0, 0x20);
-	c[0] = 0x27;
-	c[1] = 0x80;
+	c = cfissetup(pc);
 	c[2] = 0xef;
 	c[3] = 3;		/* set transfer mode */
-	c[7] = Obs;
 	c[12] = 0x40 | f;	/* sector count */
-
-	l = pc->m->list;
-	l->flags = Lwrite | 0x5;
-	l->len = 0;
-	l->ctab = PCIWADDR(t);
-	l->ctabhi = 0;
-
+	listsetup(pc, Lwrite);
 	return ahciwait(pc, 3*1000);
 }
 
@@ -396,30 +393,15 @@ static int
 smart(Aportc *pc, int n)
 {
 	uchar *c;
-	Actab *t;
-	Alist *l;
 
 	if((pc->m->feat&Dsmart) == 0)
 		return -1;
-
-	t = pc->m->ctab;
-	c = t->cfis;
-
-	memset(c, 0, 0x20);
-	c[0] = 0x27;
-	c[1] = 0x80;
+	c = cfissetup(pc);
 	c[2] = 0xb0;
 	c[3] = 0xd8 + n;	/* able smart */
 	c[5] = 0x4f;
 	c[6] = 0xc2;
-	c[7] = Obs;
-
-	l = pc->m->list;
-	l->flags = Lwrite | 0x5;
-	l->len = 0;
-	l->ctab = PCIWADDR(t);
-	l->ctabhi = 0;
-
+	listsetup(pc, Lwrite);
 	if(ahciwait(pc, 1000) == -1 || pc->p->task & (1|32)){
 		dprint("ahci: smart fail %lux\n", pc->p->task);
 //		preg(pc->m->fis.r, 20);
@@ -434,26 +416,13 @@ static int
 smartrs(Aportc *pc)
 {
 	uchar *c;
-	Actab *t;
-	Alist *l;
 
-	t = pc->m->ctab;
-	c = t->cfis;
-
-	memset(c, 0, 0x20);
-	c[0] = 0x27;
-	c[1] = 0x80;
+	c = cfissetup(pc);
 	c[2] = 0xb0;
 	c[3] = 0xda;		/* return smart status */
 	c[5] = 0x4f;
 	c[6] = 0xc2;
-	c[7] = Obs;
-
-	l = pc->m->list;
-	l->flags = Lwrite | 0x5;
-	l->len = 0;
-	l->ctab = PCIWADDR(t);
-	l->ctabhi = 0;
+	listsetup(pc, Lwrite);
 
 	c = pc->m->fis.r;
 	if(ahciwait(pc, 1000) == -1 || pc->p->task & (1|32)){
@@ -469,30 +438,14 @@ smartrs(Aportc *pc)
 static int
 ahciflushcache(Aportc *pc)
 {
-	uchar *c, llba;
-	Actab *t;
-	Alist *l;
-	static uchar tab[2] = {0xe7, 0xea};
+	uchar *c;
 
-	llba = pc->m->feat&Dllba? 1: 0;
-	t = pc->m->ctab;
-	c = t->cfis;
-
-	memset(c, 0, 0x20);
-	c[0] = 0x27;
-	c[1] = 0x80;
-	c[2] = tab[llba];
-	c[7] = Obs;
-
-	l = pc->m->list;
-	l->flags = Lwrite | 0x5;
-	l->len = 0;
-	l->ctab = PCIWADDR(t);
-	l->ctabhi = 0;
-
+	c = cfissetup(pc);
+	c[2] = pc->m->feat & Dllba? 0xea: 0xe7;
+	listsetup(pc, Lwrite);
 	if(ahciwait(pc, 60000) == -1 || pc->p->task & (1|32)){
 		dprint("ahciflushcache: fail %lux\n", pc->p->task);
-//		preg( pc->m->fis.r, 20);
+//		preg(pc->m->fis.r, 20);
 		return -1;
 	}
 	return 0;
@@ -534,32 +487,18 @@ static int
 ahciidentify0(Aportc *pc, void *id, int atapi)
 {
 	uchar *c;
-	Actab *t;
-	Alist *l;
 	Aprdt *p;
 	static uchar tab[] = { 0xec, 0xa1, };
 
-	t = pc->m->ctab;
-	c = t->cfis;
-
-	memset(c, 0, 0x20);
-	c[0] = 0x27;
-	c[1] = 0x80;
+	c = cfissetup(pc);
 	c[2] = tab[atapi];
-	c[7] = Obs;
-
-	l = pc->m->list;
-	l->flags = 1<<16 | 0x5;
-	l->len = 0;
-	l->ctab = PCIWADDR(t);
-	l->ctabhi = 0;
+	listsetup(pc, 1<<16);
 
 	memset(id, 0, 0x100);
-	p = &t->prdt;
+	p = &pc->m->ctab->prdt;
 	p->dba = PCIWADDR(id);
 	p->dbahi = 0;
 	p->count = 1<<31 | (0x200-2) | 1;
-
 	return ahciwait(pc, 3*1000);
 }
 
@@ -647,8 +586,6 @@ static int
 ahcicomreset(Aportc *pc)
 {
 	uchar *c;
-	Actab *t;
-	Alist *l;
 
 	dprint("ahcicomreset\n");
 	dreg("ahci: comreset ", pc->p);
@@ -658,21 +595,10 @@ ahcicomreset(Aportc *pc)
 	}
 	dreg("comreset ", pc->p);
 
-	t = pc->m->ctab;
-	c = t->cfis;
-
-	memset(c, 0, 0x20);
-	c[0] = 0x27;
-	c[1] = 0x00;
-	c[7] = Obs;
+	c = cfissetup(pc);
+	c[1] = 0;
 	c[15] = 1<<2;		/* srst */
-
-	l = pc->m->list;
-	l->flags = Lclear | Lreset | 0x5;
-	l->len = 0;
-	l->ctab = PCIWADDR(t);
-	l->ctabhi = 0;
-
+	listsetup(pc, Lclear | Lreset);
 	if(ahciwait(pc, 500) == -1){
 		dprint("ahcicomreset: first command failed\n");
 		return -1;
@@ -680,17 +606,9 @@ ahcicomreset(Aportc *pc)
 	microdelay(250);
 	dreg("comreset ", pc->p);
 
-	memset(c, 0, 0x20);
-	c[0] = 0x27;
-	c[1] = 0x00;
-	c[7] = Obs;
-
-	l = pc->m->list;
-	l->flags = Lwrite | 0x5;
-	l->len = 0;
-	l->ctab = PCIWADDR(t);
-	l->ctabhi = 0;
-
+	c = cfissetup(pc);
+	c[1] = 0;
+	listsetup(pc, Lwrite);
 	if(ahciwait(pc, 150) == -1){
 		dprint("ahcicomreset: second command failed\n");
 		return -1;
@@ -877,10 +795,10 @@ ahciconf(Ctlr *ctlr)
 		h->ghc |= Hae;
 
 	dprint("#S/sd%c: type %s port %#p: sss %ld ncs %ld coal %ld "
-		"mports %ld led %ld clo %ld ems %ld\n",
+		"%ld ports, led %ld clo %ld ems %ld\n",
 		ctlr->sdev->idno, tname[ctlr->type], h,
-		(u>>27) & 1, (u>>8) & 0x1f, (u>>7) & 1, u & 0x1f, (u>>25) & 1,
-		(u>>24) & 1, (u>>6) & 1);
+		(u>>27) & 1, (u>>8) & 0x1f, (u>>7) & 1,
+		(u & 0x1f) + 1, (u>>25) & 1, (u>>24) & 1, (u>>6) & 1);
 	return countbits(h->pi);
 }
 
@@ -926,6 +844,14 @@ identify(Drive *d)
 	uchar oserial[21];
 	SDunit *u;
 
+	if(d->info == nil) {
+		d->infosz = 512 * sizeof(ushort);
+		d->info = malloc(d->infosz);
+	}
+	if(d->info == nil) {
+		d->info = d->tinyinfo;
+		d->infosz = sizeof d->tinyinfo;
+	}
 	id = d->info;
 	s = ahciidentify(&d->portc, id);
 	if(s == -1){
@@ -1350,8 +1276,39 @@ satakproc(void*)
 	for(;;){
 		tsleep(&up->sleep, return0, 0, Nms);
 		for(i = 0; i < niadrive; i++)
-			checkdrive(iadrive[i], i);
+			if(iadrive[i] != nil)
+				checkdrive(iadrive[i], i);
 	}
+}
+
+static void
+isctlrjabbering(Ctlr *c, ulong cause)
+{
+	ulong now;
+
+	now = TK2MS(MACHP(0)->ticks);
+	if (now > c->lastintr0) {
+		c->intrs = 0;
+		c->lastintr0 = now;
+	}
+	if (++c->intrs > Maxintrspertick)
+		panic("sdiahci: too many intrs per tick for no serviced "
+			"drive; cause %#lux mport %d", cause, c->mport);
+}
+
+static void
+isdrivejabbering(Drive *d)
+{
+	ulong now;
+
+	now = TK2MS(MACHP(0)->ticks);
+	if (now > d->lastintr0) {
+		d->intrs = 0;
+		d->lastintr0 = now;
+	}
+	if (++d->intrs > Maxintrspertick)
+		panic("sdiahci: too many interrupts per tick for %s",
+			d->unit->name);
 }
 
 static void
@@ -1365,16 +1322,29 @@ iainterrupt(Ureg*, void *a)
 	c = a;
 	ilock(c);
 	cause = c->hba->isr;
-	for(i = 0; i < c->mport; i++){
+	if (cause == 0) {
+		isctlrjabbering(c, cause);
+		// iprint("sdiahci: interrupt for no drive\n");
+		iunlock(c);
+		return;
+	}
+	for(i = 0; cause && i <= c->mport; i++){
 		m = 1 << i;
 		if((cause & m) == 0)
 			continue;
 		d = c->rawdrive + i;
 		ilock(d);
+		isdrivejabbering(d);
 		if(d->port->isr && c->hba->pi & m)
 			updatedrive(d);
 		c->hba->isr = m;
 		iunlock(d);
+
+		cause &= ~m;
+	}
+	if (cause) {
+		isctlrjabbering(c, cause);
+		iprint("sdiachi: intr cause unserviced: %#lux\n", cause);
 	}
 	iunlock(c);
 }
@@ -1408,7 +1378,7 @@ iaenable(SDev *s)
 	if(!c->enabled) {
 		if(once == 0) {
 			once = 1;
-			kproc("iasata", satakproc, 0);
+			kproc("ahci", satakproc, 0);
 		}
 		if(c->ndrive == 0)
 			panic("iaenable: zero s->ctlr->ndrive");
@@ -1656,7 +1626,7 @@ iariopkt(SDreq *r, Drive *d)
 	aprint("ahci: iariopkt: %02ux %02ux %c %d %p\n",
 		cmd[0], cmd[2], "rw"[r->write], r->dlen, r->data);
 	if(cmd[0] == 0x5a && (cmd[2] & 0x3f) == 0x3f)
-		return sdmodesense(r, cmd, d->info, sizeof d->info);
+		return sdmodesense(r, cmd, d->info, d->infosz);
 	r->rlen = 0;
 	count = r->dlen;
 	max = 65536;
@@ -1757,7 +1727,7 @@ iario(SDreq *r)
 		return sdsetsense(r, SDcheck, 3, 0xc, 2);
 	}
 
-	if((i = sdfakescsi(r, d->info, sizeof d->info)) != SDnostatus){
+	if((i = sdfakescsi(r, d->info, d->infosz)) != SDnostatus){
 		r->status = i;
 		return i;
 	}
@@ -1912,13 +1882,60 @@ didtype(Pcidev *p)
 	return -1;
 }
 
+static int
+newctlr(Ctlr *ctlr, SDev *sdev, int nunit)
+{
+	int i, n;
+	Drive *drive;
+
+	ctlr->ndrive = sdev->nunit = nunit;
+	ctlr->mport = ctlr->hba->cap & ((1<<5)-1);
+
+	i = (ctlr->hba->cap >> 20) & ((1<<4)-1);		/* iss */
+	print("#S/sd%c: %s: %#p %s, %d ports, irq %d\n", sdev->idno,
+		Tname(ctlr), ctlr->physio, descmode[i], nunit, ctlr->pci->intl);
+	/* map the drives -- they don't all need to be enabled. */
+	n = 0;
+	ctlr->rawdrive = malloc(NCtlrdrv * sizeof(Drive));
+	if(ctlr->rawdrive == nil) {
+		print("ahci: out of memory\n");
+		return -1;
+	}
+	for(i = 0; i < NCtlrdrv; i++) {
+		drive = ctlr->rawdrive + i;
+		drive->portno = i;
+		drive->driveno = -1;
+		drive->sectors = 0;
+		drive->serial[0] = ' ';
+		drive->ctlr = ctlr;
+		if((ctlr->hba->pi & (1<<i)) == 0)
+			continue;
+		drive->port = (Aport*)(ctlr->mmio + 0x80*i + 0x100);
+		drive->portc.p = drive->port;
+		drive->portc.m = &drive->portm;
+		drive->driveno = n++;
+		ctlr->drive[drive->driveno] = drive;
+		iadrive[niadrive + drive->driveno] = drive;
+	}
+	for(i = 0; i < n; i++)
+		if(ahciidle(ctlr->drive[i]->port) == -1){
+			dprint("ahci: %s: port %d wedged; abort\n",
+				Tname(ctlr), i);
+			return -1;
+		}
+	for(i = 0; i < n; i++){
+		ctlr->drive[i]->mode = DMsatai;
+		configdrive(ctlr->drive[i]);
+	}
+	return n;
+}
+
 static SDev*
 iapnp(void)
 {
-	int i, n, nunit, type;
+	int n, nunit, type;
 	ulong io;
 	Ctlr *c;
-	Drive *d;
 	Pcidev *p;
 	SDev *head, *tail, *s;
 	static int done;
@@ -1970,42 +1987,9 @@ loop:
 			vunmap(c->mmio, p->mem[Abar].size);
 			continue;
 		}
-		c->ndrive = s->nunit = nunit;
-		c->mport = c->hba->cap & ((1<<5)-1);
-
-		i = (c->hba->cap >> 20) & ((1<<4)-1);		/* iss */
-		print("#S/sd%c: %s: %#p %s, %d ports, irq %d\n", s->idno,
-			Tname(c), c->physio, descmode[i], nunit, c->pci->intl);
-		/* map the drives -- they don't all need to be enabled. */
-		memset(c->rawdrive, 0, sizeof c->rawdrive);
-		n = 0;
-		for(i = 0; i < NCtlrdrv; i++) {
-			d = c->rawdrive + i;
-			d->portno = i;
-			d->driveno = -1;
-			d->sectors = 0;
-			d->serial[0] = ' ';
-			d->ctlr = c;
-			if((c->hba->pi & (1<<i)) == 0)
-				continue;
-			d->port = (Aport*)(c->mmio + 0x80*i + 0x100);
-			d->portc.p = d->port;
-			d->portc.m = &d->portm;
-			d->driveno = n++;
-			c->drive[d->driveno] = d;
-			iadrive[niadrive + d->driveno] = d;
-		}
-		for(i = 0; i < n; i++)
-			if(ahciidle(c->drive[i]->port) == -1){
-				dprint("ahci: %s: port %d wedged; abort\n",
-					Tname(c), i);
-				goto loop;
-			}
-		for(i = 0; i < n; i++){
-			c->drive[i]->mode = DMsatai;
-			configdrive(c->drive[i]);
-		}
-
+		n = newctlr(c, s, nunit);
+		if(n < 0)
+			goto loop;
 		niadrive += n;
 		niactlr++;
 		if(head)
@@ -2136,6 +2120,23 @@ forcestate(Drive *d, char *state)
 	iunlock(d);
 }
 
+/*
+ * force this driver to notice a change of medium if the hardware doesn't
+ * report it.
+ */
+static void
+changemedia(SDunit *u)
+{
+	Ctlr *c;
+	Drive *d;
+
+	c = u->dev->ctlr;
+	d = c->drive[u->subno];
+	ilock(d);
+	d->mediachange = 1;
+	u->sectors = 0;
+	iunlock(d);
+}
 
 static int
 iawctl(SDunit *u, Cmdbuf *cmd)
@@ -2149,7 +2150,9 @@ iawctl(SDunit *u, Cmdbuf *cmd)
 	d = c->drive[u->subno];
 	f = cmd->f;
 
-	if(strcmp(f[0], "flushcache") == 0)
+	if(strcmp(f[0], "change") == 0)
+		changemedia(u);
+	else if(strcmp(f[0], "flushcache") == 0)
 		runflushcache(d);
 	else if(strcmp(f[0], "identify") ==  0){
 		i = strtoul(f[1]? f[1]: "0", 0, 0);
