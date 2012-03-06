@@ -24,11 +24,12 @@ static void dumpstackwithureg(Ureg*);
 static Lock vctllock;
 static Vctl *vctl[256];
 
-enum
-{
-	Ntimevec = 20		/* number of time buckets for each intr */
+typedef struct Intrtime Intrtime;
+struct Intrtime {
+	uvlong	count;
+	uvlong	cycles;
 };
-ulong intrtimes[256][Ntimevec];
+static Intrtime intrtimes[256];
 
 void*
 intrenable(int irq, void (*f)(Ureg*, void*), void* a, int tbdf, char *name)
@@ -62,17 +63,22 @@ intrenable(int irq, void (*f)(Ureg*, void*), void* a, int tbdf, char *name)
 		return nil;
 	}
 	if(vctl[vno]){
-		iunlock(&vctllock);
-		panic("vno %d for %s already allocated by %s\n",
-			vno, v->name, vctl[vno]->name);
+		if(vctl[v->vno]->isr != v->isr || vctl[v->vno]->eoi != v->eoi)
+			panic("intrenable: handler: %s %s %#p %#p %#p %#p",
+				vctl[v->vno]->name, v->name,
+				vctl[v->vno]->isr, v->isr, vctl[v->vno]->eoi, v->eoi);
 	}
 	v->vno = vno;
+	v->next = vctl[vno];
 	vctl[vno] = v;
 	iunlock(&vctllock);
 
+	if(v->mask)
+		v->mask(v, 0);
+
 	/*
 	 * Return the assigned vector so intrdisable can find
-	 * the handler; the IRQ is useless in the wondrefule world
+	 * the handler; the IRQ is useless in the wonderful world
 	 * of the IOAPIC.
 	 */
 	return v;
@@ -81,28 +87,36 @@ intrenable(int irq, void (*f)(Ureg*, void*), void* a, int tbdf, char *name)
 int
 intrdisable(void* vector)
 {
-	Vctl *v;
+	Vctl *v, *x, **ll;
 	extern int ioapicintrdisable(int);
 
 	ilock(&vctllock);
 	v = vector;
 	if(v == nil || vctl[v->vno] != v)
 		panic("intrdisable: v %#p", v);
+	for(ll = vctl+v->vno; x = *ll; ll = &x->next)
+		if(v == x)
+			break;
+	if(x != v)
+		panic("intrdisable: v %#p", v);
+	if(v->mask)
+		v->mask(v, 1);
+	v->f(nil, v->a);
+	*ll = v->next;
 	ioapicintrdisable(v->vno);
-	vctl[v->vno] = nil;
 	iunlock(&vctllock);
 
 	free(v);
-
 	return 0;
 }
 
 static long
 irqallocread(Chan*, void *vbuf, long n, vlong offset)
 {
-	char *buf, *p, str[2*(11+1)+KNAMELEN+1+1];
+	char *buf, *p, str[2*(11+1)+2*(20+1)+(KNAMELEN+1)+(8+1)+1];
 	int m, vno;
 	long oldn;
+	Intrtime *t;
 	Vctl *v;
 
 	if(n < 0 || offset < 0)
@@ -112,7 +126,9 @@ irqallocread(Chan*, void *vbuf, long n, vlong offset)
 	buf = vbuf;
 	for(vno=0; vno<nelem(vctl); vno++){
 		for(v=vctl[vno]; v; v=v->next){
-			m = snprint(str, sizeof str, "%11d %11d %.*s\n", vno, v->irq, KNAMELEN, v->name);
+			t = intrtimes + vno;
+			m = snprint(str, sizeof str, "%11d %11d %20llud %20llud %-*.*s %.*s\n",
+				vno, v->irq, t->count, t->cycles, 8, 8, v->type, KNAMELEN, v->name);
 			if(m <= offset)	/* if do not want this, skip entry */
 				offset -= m;
 			else{
@@ -144,6 +160,7 @@ trapenable(int vno, void (*f)(Ureg*, void*), void* a, char *name)
 	if(vno < 0 || vno >= 256)
 		panic("trapenable: vno %d\n", vno);
 	v = malloc(sizeof(Vctl));
+	v->type = "trap";
 	v->tbdf = BUSUNKNOWN;
 	v->f = f;
 	v->a = a;
@@ -151,8 +168,7 @@ trapenable(int vno, void (*f)(Ureg*, void*), void* a, char *name)
 	v->name[KNAMELEN-1] = 0;
 
 	ilock(&vctllock);
-	if(vctl[vno])
-		v->next = vctl[vno]->next;
+	v->next = vctl[vno];
 	vctl[vno] = v;
 	iunlock(&vctllock);
 }
@@ -229,13 +245,12 @@ static char* excname[32] = {
 };
 
 /*
- *  keep histogram of interrupt service times
+ *  keep interrupt service times and counts
  */
 void
-intrtime(Mach*, int vno)
+intrtime(int vno)
 {
-	ulong diff;
-	ulong x;
+	ulong diff, x;		/* should be uvlong */
 
 	x = perfticks();
 	diff = x - m->perf.intrts;
@@ -245,10 +260,8 @@ intrtime(Mach*, int vno)
 	if(up == nil && m->perf.inidle > diff)
 		m->perf.inidle -= diff;
 
-	diff /= m->cpumhz*100;	// quantum = 100µsec
-	if(diff >= Ntimevec)
-		diff = Ntimevec-1;
-	intrtimes[vno][diff]++;
+	intrtimes[vno].cycles += diff;
+	intrtimes[vno].count++;
 }
 
 static void
@@ -349,9 +362,8 @@ trap(Ureg* ureg)
 		}
 		if(ctl->eoi)
 			ctl->eoi(vno);
+		intrtime(vno);
 		if(ctl->isintr){
-			intrtime(m, vno);
-
 			if(ctl->irq == IrqCLOCK || ctl->irq == IrqTIMER)
 				clockintr = 1;
 
@@ -361,7 +373,7 @@ trap(Ureg* ureg)
 	}
 	else if(vno < nelem(excname) && user){
 		spllo();
-		sprint(buf, "sys: trap: %s", excname[vno]);
+		snprint(buf, sizeof buf, "sys: trap: %s", excname[vno]);
 		postnote(up, 1, buf, NDebug);
 	}
 	else if(vno >= VectorPIC && vno != VectorSYSCALL){
@@ -379,7 +391,7 @@ trap(Ureg* ureg)
 
 		iprint("cpu%d: spurious interrupt %d, last %d\n",
 			m->machno, vno, m->lastintr);
-
+		intrtime(vno);
 		if(user)
 			kexit(ureg);
 		return;
@@ -394,10 +406,6 @@ trap(Ureg* ureg)
 			}
 		}
 		dumpregs(ureg);
-#ifdef notdef
-		iprint("vno %d: buggeration @ %#p...\n", vno, ureg->ip);
-		i8042reset();
-#else
 		if(!user){
 			ureg->sp = PTR2UINT(&ureg->sp);
 			dumpstackwithureg(ureg);
@@ -405,7 +413,6 @@ trap(Ureg* ureg)
 		if(vno < nelem(excname))
 			panic("%s", excname[vno]);
 		panic("unknown trap/intr: %d\n", vno);
-#endif /* notdef */
 	}
 	splhi();
 
@@ -511,18 +518,19 @@ callwithureg(void (*fn)(Ureg*))
 static void
 dumpstackwithureg(Ureg* ureg)
 {
+	char *s;
 	uintptr l, v, i, estack;
 	extern ulong etext;
 	int x;
 
-	if(getconf("*nodumpstack")){
+	if((s = getconf("*nodumpstack")) != nil && atoi(s) != 0){
 		iprint("dumpstack disabled\n");
 		return;
 	}
 	iprint("dumpstack\n");
 
 	x = 0;
-	x += iprint("ktrace 9k8cpu %#p %#p\n", ureg->ip, ureg->sp);
+	x += iprint("ktrace 9%s %#p %#p\n", strrchr(conffile, '/')+1, ureg->ip, ureg->sp);
 	i = 0;
 	if(up != nil
 //	&& (uintptr)&l >= (uintptr)up->kstack

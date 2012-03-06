@@ -36,7 +36,7 @@ struct Apic {
 };
 
 enum {
-	Nbus		= 32,
+	Nbus		= 256,
 	Napic		= 254,			/* xAPIC architectural limit */
 	Nrdt		= 64,
 };
@@ -87,3 +87,6 @@ extern	Mach	*xlapicmachptr[Napic];		/* maintained, but unused */
 extern void apicdump(void);
 extern void apictimerenab(void);
 extern void ioapicdump(void);
+
+extern int pcimsienable(Pcidev*, uvlong);
+extern int pcimsimask(Pcidev*, int);

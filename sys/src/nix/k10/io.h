@@ -58,19 +58,25 @@ enum {
 	IdtMAX		= 255,
 };
 
+typedef struct Vkey {
+	int	tbdf;			/* pci: ioapic or msi sources */
+	int	irq;			/* 8259-emulating sources */
+} Vkey;
+
 typedef struct Vctl {
 	Vctl*	next;			/* handlers on this vector */
 
 	int	isintr;			/* interrupt or fault/trap */
 
-	int	irq;
+	Vkey;				/* source-specific key; tbdf for pci */
 	void	(*f)(Ureg*, void*);	/* handler to call */
 	void*	a;			/* argument to call it with */
-	int	tbdf;
 	char	name[KNAMELEN];		/* of driver */
+	char	*type;
 
 	int	(*isr)(int);		/* get isr bit for this irq */
 	int	(*eoi)(int);		/* eoi */
+	int	(*mask)(Vkey*, int);	/* interrupt enable returns masked vector */
 	int	vno;
 } Vctl;
 
