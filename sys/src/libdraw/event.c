@@ -4,6 +4,10 @@
 #include <cursor.h>
 #include <event.h>
 
+enum {
+	Kbdmsgsz	= 1 + 4 /* allow for 32-bit runes */
+};
+
 typedef struct	Slave Slave;
 typedef struct	Ebuf Ebuf;
 
@@ -199,7 +203,7 @@ static void
 ekeyslave(int fd)
 {
 	Rune r;
-	char t[3], k[10];
+	char t[Kbdmsgsz], k[10];
 	int kr, kn, w;
 
 	if(eforkslave(Ekeyboard) < MAXSLAVE)
@@ -218,7 +222,9 @@ ekeyslave(int fd)
 		memmove(k, &k[w], kn);
 		t[1] = r;
 		t[2] = r>>8;
-		if(write(epipe[1], t, 3) != 3)
+		t[3] = r>>16;
+		t[4] = r>>24;
+		if(write(epipe[1], t, sizeof t) != sizeof t)
 			break;
 	}
 breakout:;
@@ -302,7 +308,7 @@ loop:
 		s->head = (Ebuf *)1;
 		return;
 	}
-	if(i == Skeyboard && n != 3)
+	if(i == Skeyboard && n != Kbdmsgsz)
 		drawerror(display, "events: protocol error: keyboard");
 	if(i == Smouse){
 		if(n < 1+1+2*12)
@@ -417,13 +423,15 @@ emouse(void)
 int
 ekbd(void)
 {
-	Ebuf *eb;
+	uchar *t;
 	int c;
+	Ebuf *eb;
 
 	if(Skeyboard < 0)
 		drawerror(display, "events: keyboard not initialzed");
 	eb = ebread(&eslave[Skeyboard]);
-	c = eb->buf[0] + (eb->buf[1]<<8);
+	t = eb->buf;
+	c = t[0] | t[1]<<8 | t[2]<<16 | t[3]<<24;
 	free(eb);
 	return c;
 }

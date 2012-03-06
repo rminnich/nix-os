@@ -356,7 +356,7 @@ screenputs(char *s, int n)
 {
 	int i;
 	Rune r;
-	char buf[4];
+	char buf[UTFmax + 1];
 
 	drawlock();
 	while(n > 0){

@@ -15,12 +15,14 @@ uchar	bits[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
 #define	CLEARBIT(a,c)		((a)[(c)/8] &= ~bits[(c)&07])
 #define	BITSET(a,c)		((a)[(c)/8] & bits[(c)&07])
 
-#define	MAXRUNE	0xFFFF
-
-uchar	f[(MAXRUNE+1)/8];
-uchar	t[(MAXRUNE+1)/8];
+uchar	f[(Runemax+1)/8];
+uchar	t[(Runemax+1)/8];
 char 	wbuf[4096];
 char	*wptr;
+
+enum {
+	Lastc	= Runemax + 1,
+};
 
 Pcb pfrom, pto;
 
@@ -94,7 +96,7 @@ delete(void)
 			SETBIT(t, c);
 	}
 
-	last = 0x10000;
+	last = Lastc;
 	while (readrune(0, &c) > 0) {
 		if(!BITSET(f, c) && (c != last || !BITSET(t,c))) {
 			last = c;
@@ -134,7 +136,7 @@ complement(void)
 		else p[i] = i;
 	}
 	if (sflag){
-		lastc = 0x10000;
+		lastc = Lastc;
 		while (readrune(0, &from) > 0) {
 			if (from > high)
 				from = to;
@@ -188,7 +190,7 @@ translit(void)
 		SETBIT(t,to);
 	}
 	if (sflag){
-		lastc = 0x10000;
+		lastc = Lastc;
 		while (readrune(0, &from) > 0) {
 			if (from <= high)
 				from = p[from];
@@ -276,7 +278,7 @@ getrune(char *s, Rune *rp)
 		n = 0;
 		if (*s == 'x') {
 			s++;
-			for (i = 0; i < 4; i++) {
+			for (i = 0; i < 6; i++) {
 				save = s;
 				s += chartorune(&r, s);
 				if ('0' <= r && r <= '9')
@@ -291,6 +293,8 @@ getrune(char *s, Rune *rp)
 					else *rp = n;
 					return save;
 				}
+				if(n > Runemax)
+					sysfatal("character > Runemax");
 			}
 		} else {
 			for(i = 0; i < 3; i++) {

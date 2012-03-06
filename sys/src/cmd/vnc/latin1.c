@@ -35,7 +35,9 @@ unicode(Rune *k)
 		else
 			return -1;
 	}
-	return c;
+	if(c <= Runemax)
+		return c;
+	return -1;
 }
 
 /*

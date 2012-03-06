@@ -1,6 +1,10 @@
 #include "a.h"
 
 /*
+ * hopeless if runes are not 16 bits
+ */
+
+/*
  * Translate Unicode to HTML by asking tcs(1).
  * This way we don't have yet another table.
  */

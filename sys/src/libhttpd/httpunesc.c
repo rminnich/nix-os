@@ -10,26 +10,25 @@
 char *
 httpunesc(HConnect *cc, char *s)
 {
-	char *t, *v;
-	int c;
+	char *t, *v, *p;
+	int c, n;
 	Htmlesc *e;
+	Rune r;
 
 	v = halloc(cc, UTFmax*strlen(s) + 1);
 	for(t = v; c = *s;){
 		if(c == '&'){
-			if(s[1] == '#' && s[2] && s[3] && s[4] && s[5] == ';'){
-				c = atoi(s+2);
-				if(c < Runeself){
-					*t++ = c;
-					s += 6;
-					continue;
-				}
-				if(c < 256 && c >= 161){
-					e = &htmlesc[c-161];
-					t += runetochar(t, &e->value);
-					s += 6;
-					continue;
-				}
+			if(s[1] == '#' && (n = strtoul(s+2,  &p, 10)) != 0 && *p == ';'){
+				r = n;
+				t += runetochar(t, &r);
+				s = p+1;
+				continue;
+			}else if(s[1] == '#' && (s[2] == 'x' || s[2] == 'X') &&
+				(n = strtoul(s+3,  &p, 16)) != 0 && *p == ';'){
+				r = n;
+				t += runetochar(t, &r);
+				s = p+1;
+				continue;
 			} else {
 				for(e = htmlesc; e->name != nil; e++)
 					if(strncmp(e->name, s, strlen(e->name)) == 0)

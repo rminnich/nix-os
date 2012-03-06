@@ -51,7 +51,7 @@ struct	Node
 	double	fconst;		/* fp constant */
 	vlong	vconst;		/* non fp const */
 	char*	cstring;	/* character string */
-	ushort*	rstring;	/* rune string */
+	Rune*	rstring;	/* rune string */
 
 	Sym*	sym;
 	Type*	type;
@@ -336,6 +336,12 @@ enum
 	TFILE,
 	TOLD,
 	NALLTYPES,
+
+	/*
+	 * bootstrapping
+	 */
+//	TRUNE = TUINT,
+	TRUNE = sizeof(Rune)==4? TUINT: TUSHORT,
 };
 enum
 {
@@ -739,7 +745,7 @@ void	gclean(void);
 void	gextern(Sym*, Node*, long, long);
 void	ginit(void);
 long	outstring(char*, long);
-long	outlstring(ushort*, long);
+long	outlstring(Rune*, long);
 void	sextern(Sym*, Node*, long, long);
 void	xcom(Node*);
 long	exreg(Type*);

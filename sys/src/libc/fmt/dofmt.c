@@ -512,12 +512,13 @@ _flagfmt(Fmt *f)
 int
 _badfmt(Fmt *f)
 {
-	char x[3];
+	char x[2+UTFmax];
+	int n;
 
 	x[0] = '%';
-	x[1] = f->r;
-	x[2] = '%';
-	f->prec = 3;
-	_fmtcpy(f, x, 3, 3);
+	n = 1 + runetochar(x+1, (Rune*)&f->r);
+	x[n++] = '%';
+	f->prec = n;
+	_fmtcpy(f, x, n, n);
 	return 0;
 }

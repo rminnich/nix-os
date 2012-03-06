@@ -7,7 +7,7 @@ Bgetrune(Biobufhdr *bp)
 {
 	int c, i;
 	Rune rune;
-	char str[4];
+	char str[UTFmax + 1];
 
 	c = Bgetc(bp);
 	if(c < Runeself) {		/* one char */

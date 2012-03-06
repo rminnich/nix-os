@@ -27,9 +27,10 @@ extern	int	atoi(char*);
 enum
 {
 	UTFmax		= 3,	/* maximum bytes per rune */
-	Runesync	= 0x80,	/* cannot represent part of a UTF sequence */
-	Runeself	= 0x80,	/* rune and UTF sequences are the same (<) */
-	Runeerror	= 0x80,	/* decoding error in UTF */
+	Runesync	= 0x80,		/* cannot represent part of a UTF sequence (<) */
+	Runeself	= 0x80,		/* rune and UTF sequences are the same (<) */
+	Runeerror	= 0xFFFD,	/* decoding error in UTF */
+	Runemax	= 0xFFFF,	/* 16 bit rune */
 };
 
 /*

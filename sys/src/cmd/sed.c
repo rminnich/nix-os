@@ -623,7 +623,7 @@ compsub(Rune *rhs, Rune *end)
 	while ((r = *cp++) != '\0') {
 		if(r == '\\') {
 			if (rhs < end)
-				*rhs++ = 0xFFFF;
+				*rhs++ = Runemax;
 			else
 				return 0;
 			r = *cp++;

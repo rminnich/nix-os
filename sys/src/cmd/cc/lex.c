@@ -469,7 +469,7 @@ l1:
 				yyerror("missing '");
 				peekc = c1;
 			}
-			yylval.vval = convvtox(c, TUSHORT);
+			yylval.vval = convvtox(c, TRUNE);
 			return LUCONST;
 		}
 		if(c == '"') {
@@ -543,15 +543,15 @@ l1:
 			c = escchar('"', 1, 0);
 			if(c == EOF)
 				break;
-			cp = allocn(cp, c1, sizeof(ushort));
-			*(ushort*)(cp + c1) = c;
-			c1 += sizeof(ushort);
+			cp = allocn(cp, c1, sizeof(Rune));
+			*(Rune*)(cp + c1) = c;
+			c1 += sizeof(Rune);
 		}
 		yylval.sval.l = c1;
 		do {
-			cp = allocn(cp, c1, sizeof(ushort));
-			*(ushort*)(cp + c1) = 0;
-			c1 += sizeof(ushort);
+			cp = allocn(cp, c1, sizeof(Rune));
+			*(Rune*)(cp + c1) = 0;
+			c1 += sizeof(Rune);
 		} while(c1 & MAXALIGN);
 		yylval.sval.s = cp;
 		return LLSTRING;
@@ -1029,7 +1029,7 @@ getnsc(void)
 	} else
 		c = GETC();
 	for(;;) {
-		if(!isspace(c))
+		if(c >= Runeself || !isspace(c))
 			return c;
 		if(c == '\n') {
 			lineno++;
