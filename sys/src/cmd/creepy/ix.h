@@ -56,7 +56,8 @@
  * There is no flush. Flushing is done by flushing the channel.
  */
 
-enum{
+enum
+{
 	IXTversion = 50,
 	IXRversion,
 	IXTattach,

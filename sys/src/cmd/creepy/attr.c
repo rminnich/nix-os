@@ -34,6 +34,7 @@ struct Adef
 long wname(Memblk*, void*, long);
 static long rname(Memblk*, void*, long);
 static long rid(Memblk*, void*, long);
+long wid(Memblk*, void*, long);
 long watime(Memblk*, void*, long);
 static long ratime(Memblk*, void*, long);
 long wmtime(Memblk*, void*, long);
@@ -152,10 +153,8 @@ pmeta(void *buf, ulong nbuf, Fmeta *meta)
 	ulong sz;
 
 	sz = metasize(meta);
-	if(sz > nbuf){
-		fatal("bug: allocate and use ablk");
+	if(sz > nbuf)
 		error("attributes are too long");
-	}
 	d = buf;
 	bufp = buf;
 	d->id = meta->id;
@@ -389,6 +388,19 @@ wmuid(Memblk *f, void *buf, long len)
 	free(m.gid);
 	free(m.name);
 	return len;
+}
+
+long 
+wid(Memblk *f, void *buf, long)
+{
+	u64int *p;
+	Dmeta *d;
+
+	p = buf;
+	d = (Dmeta*)f->d.embed;
+	f->mf->id = *p;
+	d->id = *p;
+	return BIT64SZ;
 }
 
 static long 

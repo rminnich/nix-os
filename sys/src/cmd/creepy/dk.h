@@ -17,22 +17,9 @@ typedef struct Cmd Cmd;
 typedef struct Path Path;
 typedef struct Alloc Alloc;
 typedef struct Next Next;
-
-/*
- * these are used by several functions that have flags to indicate
- * mem-only, also on disk; and read-access/write-access. (eg. dfmap).
- */
-enum{
-	Mem=0,
-	Disk,
-
-	Rd=0,
-	Wr,
-	No,
-};
-
-#define HOWMANY(x, y)	(((x)+((y)-1))/(y))
-#define ROUNDUP(x, y)	(HOWMANY((x), (y))*(y))
+typedef struct Lstat Lstat;
+typedef struct List List;
+typedef struct Link Link;
 
 /*
  * Conventions:
@@ -41,12 +28,26 @@ enum{
  *	- Ref is used for in-memory RCs. This has nothing to do with on-disk refs.
  * 	- Mem refs include the reference from the hash. That one keeps the file
  *	  loaded in memory while unused.
- *	- The hash ref also accounts for the lru list and list of DBref blocks.
+ *	- The hash ref also accounts for refs from the lru/ref/dirty lists.
  *	- Disk refs count only references within the tree on disk.
+ *	- There are two copies of disk references, even, and odd.
+ *	  Only one of them is active. Every time the system is written,
+ *	  the inactive copy becomes active and vice-versa. Upon errors,
+ *	  the active copy on disk is always coherent because the super is
+ *	  written last.
  *	- Children do not add refs to parents; parents do not add ref to children.
  *	- 9p, fscmd, ix, and other top-level shells for the fs are expected to
  *	  keep Paths for files in use, so that each file in the path
  *	  is referenced once by the path
+ *	- example, on debug fsdump()s:
+ *		r=2 -> 1 (from hash) + 1 (while dumping the file info).
+ *		(block is cached, in the hash, but unused otherwise).
+ *		r=3 in /active: 1 (hash) + 1(fs->active) + 1(dump)
+ *		r is greater:
+ *			- some fid is referencing the block
+ *			- it's a melt and the frozen f->mf->melted is a ref.
+ *			- some rpc is using it (reading/writing/...)
+ *
  * Assumptions:
  *	- /active is *never* found on disk, it's memory-only.
  *	- b->addr is worm.
@@ -79,11 +80,57 @@ enum{
  * All the code assumes outofmemoryexits = 1.
  */
 
+/*
+ * these are used by several functions that have flags to indicate
+ * mem-only, also on disk; and read-access/write-access. (eg. dfmap).
+ */
+enum{
+	Mem=0,
+	Disk,
+
+	Rd=0,
+	Wr,
+
+	Tqlock = 0,
+	Trwlock,
+	Tlock,
+};
+
+
+struct Lstat
+{
+	int	type;
+	uintptr	pc;
+	int	ntimes;
+	int	ncant;
+	vlong	wtime;
+};
+
+
+
+#define HOWMANY(x, y)	(((x)+((y)-1))/(y))
+#define ROUNDUP(x, y)	(HOWMANY((x), (y))*(y))
+
+/*
+ * ##### On disk structures. #####
+ *
+ * All on-disk integer values are little endian.
+ *
+ * blk 0: unused
+ * blk 1: super
+ * even ref blk + odd ref blk + Nblkgrpsz-2 blocks
+ * ...
+ * even ref blk + odd ref blk + Nblkgrpsz-2 blocks
+ *
+ * The code assumes these structures are packed.
+ * Be careful if they are changed to make things easy for the
+ * compiler and keep them naturally aligned.
+ */
+
 enum
 {
 	/* block types */
 	DBfree = 0,
-	DBnew,			/* never found on disk */
 	DBref,
 	DBattr,
 	DBfile,
@@ -93,23 +140,13 @@ enum
 				/* double */
 				/* triple */
 				/*...*/
-};
+	DBctl = ~0,		/* DBfile, never on disk. arg for dballoc */
 
-/*
- * ##### On disk structures. #####
- *
- * All on-disk integer values are little endian.
- *
- * blk 0: unused
- * blk 1: super
- * ref blk + Nblkgrpsz-1 blocks
- * ...
- * ref blk + Nblkgrpsz-1 blocks
- *
- * The code assumes these structures are packed.
- * Be careful if they are changed to make things easy for the
- * compiler and keep them naturally aligned.
- */
+	Dblkhdrsz = 2*BIT64SZ,
+	Nblkgrpsz = (Dblksz - Dblkhdrsz) / BIT64SZ,
+	Dblk0addr = 2*Dblksz,
+
+};
 
 struct Ddatablk
 {
@@ -200,6 +237,7 @@ struct Dsuperblk
 	u64int	free;		/* first free block on list  */
 	u64int	eaddr;		/* end of the assigned disk portion */
 	u64int	root;		/* address of /archive in disk */
+	u64int	oddrefs;	/* use odd ref blocks? or even ref blocks? */
 	u64int	ndfree;		/* # of blocks in free list */
 	u64int	dblksz;		/* only for checking */
 	u64int	nblkgrpsz;	/* only for checking */
@@ -215,10 +253,14 @@ struct Dsuperblk
 
 enum
 {
-	Noaddr = ~0UL		/* null address, for / */
+	/* addresses for ctl files and / have this bit set, and are never
+	 * found on disk.
+	 */
+	Fakeaddr = 0x8000000000000000ULL,
+	Noaddr = ~0ULL,
 };
 
-#define	TAG(addr,type)		((addr)<<8|((type)&0x7F))
+#define	TAG(type,addr)		((addr)<<8|((type)&0x7F))
 #define	TAGTYPE(t)		((t)&0x7F)
 #define	TAGADDROK(t,addr)	(((t)&~0xFF) == ((addr)<<8))
 
@@ -228,12 +270,10 @@ enum
 
 /*
  * header for all disk blocks.
- * Those using on-disk references keep them at a DBref block
  */
 struct Diskblkhdr
 {
 	u64int	tag;		/* block tag */
-	u64int	epoch;		/* block epoch */
 };
 
 union Diskblk
@@ -296,8 +336,26 @@ struct Mfile
 	Fmeta;
 
 	Memblk*	melted;		/* next version for this one, if frozen */
-	ulong	lastbno;	/* help for RA */
+	ulong	lastbno;	/* last accessed block nb within this file */
+	ulong	sequential;	/* access has been sequential */
+
 	int	open;		/* for DMEXCL */
+	uvlong	raoffset;	/* we did read ahead up to this offset */
+	int	wadone;		/* we did walk ahead here */
+};
+
+struct List
+{
+	QLock;
+	Memblk	*hd;
+	Memblk	*tl;
+	long	n;
+};
+
+struct Link
+{
+	Memblk	*lprev;
+	Memblk	*lnext;
 };
 
 /*
@@ -309,19 +367,17 @@ struct Memblk
 	u64int	addr;			/* block address */
 	Memblk	*next;			/* in hash or free list */
 
-	union{
-		Memblk	*rnext;		/* in list of DBref blocks */
-		Mfile	*mf;		/* DBfile on memory info. */
-	};
+	Link;				/* lru / dirty / ref lists */
 
+	Mfile	*mf;			/* DBfile on-memory info. */
+
+	int	type;
 	int	dirty;			/* must be written */
 	int	frozen;			/* is frozen */
-	int	written;			/* no need to scan this for dirties */
-
-	Memblk	*lnext;			/* list from fs->mru -> fs->lru */
-	Memblk	*lprev;
-
+	int	loading;			/* block is being read */
+	int	changed;		/* for freerefs/writerefs */
 	QLock	newlk;			/* only to wait on DBnew blocks */
+
 	Diskblk	d;
 };
 
@@ -349,18 +405,15 @@ struct Fsys
 	usize	nablk;		/* # of entries allocated */
 	usize	nmused;		/* blocks in use */
 	usize	nmfree;		/* free blocks */
-
 	Memblk	*free;		/* free list of unused blocks in blk */
 
-	QLock	llk;
-	Memblk	*lru;
-	Memblk	*mru;
+	List	lru;		/* hd: mru; tl: lru */
+	List	mdirty;		/* dirty blocks, not on lru */
+	List	refs;		/* DBref blocks, not in lru nor dirty lists */
 
 	QLock	mlk;
 	Mfile	*mfree;		/* unused list */
 
-	QLock	rlk;
-	Memblk	*refs;		/* list of DBref blocks (also hashed) */
 
 	Memblk	*super;		/* locked by blklk */
 	Memblk	*root;		/* only in memory */
@@ -376,8 +429,14 @@ struct Fsys
 	char	*dev;		/* name for disk */
 	int	fd;		/* of disk */
 	u64int	limit;		/* address for end of disk */
+	usize	ndblk;		/* # of disk blocks in dev */
 
 	int	config;		/* config mode enabled */
+
+	int	nindirs[Niptr];	/* stats */
+	int	nmelts;
+
+	uchar	*chk;		/* for fscheck() */
 };
 
 /*
@@ -425,10 +484,13 @@ struct Path
 
 #pragma	varargck	type	"H"	Memblk*
 
+/* used in debug prints to print just part of huge values */
+#define EP(e)	((e)&0xFFFFFFFFUL)
+
 typedef int(*Blkf)(Memblk*);
 
 
 extern Fsys*fs;
 extern uvlong maxfsz;
 extern char*defaultusers;
-extern Alloc mfalloc;
+extern Alloc mfalloc, pathalloc;

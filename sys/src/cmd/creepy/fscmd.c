@@ -12,6 +12,16 @@
 #include "net.h"
 #include "fns.h"
 
+/*
+ * HUGE warning:
+ * these commands do not perform checks at all.
+ * that means you know what you are doing if you use them.
+ * e.g., you can create multiple files with the same name
+ * in the same directory.
+ *
+ * This tool is only an aid for testing and debugging.
+ */
+
 enum 
 {
 	Nels = 64
@@ -19,6 +29,17 @@ enum
 
 static char *fsdir;
 static int verb;
+
+int
+member(char *uid, char *member)
+{
+	return strcmp(uid, member);
+}
+
+void
+meltfids(void)
+{
+}
 
 /*
  * Walks elems starting at f.
@@ -48,6 +69,7 @@ walkpath(Memblk *f, char *elems[], int nelems)
 		nf = dfwalk(f, elems[i], 0);
 		rwunlock(f, Rd);
 		addelem(&p, nf);
+		mbput(nf);
 		f = nf;
 		USED(&f);	/* in case of error() */
 		noerror();
@@ -105,7 +127,7 @@ fscd(int, char *argv[])
 /*
  * This is unrealistic in that it keeps the file locked
  * during the entire put. This means that we can only give
- * fslowmem() a chance before each put, and not before each
+ * fslru() a chance before each put, and not before each
  * write, because everything is going to be in use and dirty if
  * we run out of memory.
  */
@@ -142,7 +164,6 @@ fsput(int, char *argv[])
 	m = p->f[p->nf-1];
 	if(catcherror()){
 		rwunlock(m, Wr);
-		mbput(m);
 		error(nil);
 	}
 	f = dfcreate(m, fn, d->uid, d->mode&(DMDIR|0777));
@@ -158,12 +179,12 @@ fsput(int, char *argv[])
 	if((d->mode&DMDIR) == 0){
 		off = 0;
 		for(;;){
-			fslowmem();
+			fslru();
 			nr = read(fd, buf, sizeof buf);
 			if(nr <= 0)
 				break;
 			nw = dfpwrite(f, buf, nr, &off);
-			dDprint("wrote %ld of %ld bytes\n", nw, nr);
+			dWprint("wrote %ld of %ld bytes\n", nw, nr);
 			off += nr;
 		}
 	}
@@ -202,7 +223,7 @@ fscat(int, char *argv[])
 	if((m->mode&DMDIR) == 0){
 		off = 0;
 		for(;;){
-			fslowmem();
+			fslru();
 			nr = dfpread(f, buf, sizeof buf, off);
 			if(nr <= 0)
 				break;
@@ -247,7 +268,7 @@ fsget(int, char *argv[])
 	if((m->mode&DMDIR) == 0){
 		off = 0;
 		for(;;){
-			fslowmem();
+			fslru();
 			nr = dfpread(f, buf, sizeof buf, off);
 			if(nr <= 0)
 				break;
@@ -266,15 +287,6 @@ fsget(int, char *argv[])
 }
 
 static void
-fsls(int, char**)
-{
-	if(verb)
-		fsdump(1);
-	else
-		fslist();
-}
-
-static void
 fssnap(int, char**)
 {
 	fssync();
@@ -284,18 +296,13 @@ static void
 fsrcl(int, char**)
 {
 	fsreclaim();
+	fssync();	/* commit changes to disk */
 }
 
 static void
-fsdmp(int, char**)
+fsdmp(int, char *argv[])
 {
-	fsdump(0);
-}
-
-static void
-fsdmpall(int, char**)
-{
-	fsdump(1);
+	fsdump(*argv[0] == 'l', strstr(argv[0], "all") != 0);
 }
 
 static void
@@ -307,7 +314,7 @@ fsdbg(int, char *argv[])
 static void
 fsout(int, char*[])
 {
-	fslowmem();
+	fslru();
 }
 
 static void
@@ -343,7 +350,13 @@ fsrm(int, char *argv[])
 static void
 fsst(int, char**)
 {
-	fsstats();
+	fsstats(0);
+}
+
+static void
+fschk(int, char**)
+{
+	fscheck();
 }
 
 static void
@@ -359,15 +372,18 @@ static Cmd cmds[] =
 	{"put",	fsput,	3, "put!src!dst"},
 	{"get",	fsget,	3, "get!dst!src"},
 	{"cat",	fscat,	3, "cat!what"},
-	{"ls",	fsls,	1, "ls"},
 	{"dump",	fsdmp,	1, "dump"},
-	{"dumpall",	fsdmpall, 1, "dumpall"},
+	{"dumpall",	fsdmp, 1, "dumpall"},
+	{"ldump",	fsdmp,	1, "ldump"},
+	{"ldumpall",	fsdmp, 1, "ldumpall"},
+	{"sync", fssnap, 1, "sync"},
 	{"snap", fssnap, 1, "snap"},
 	{"rcl",	fsrcl,	1, "rcl"},
 	{"dbg", fsdbg,	2, "dbg!n"},
 	{"out", fsout, 1, "out"},
 	{"rm",	fsrm,	2, "rm!what"},
 	{"stats", fsst, 1, "stats"},
+	{"check", fschk, 1, "check"},
 };
 
 void
@@ -404,14 +420,14 @@ threadmain(int argc, char *argv[])
 		if(catcherror())
 			fatal("cmd %s: %r", argv[i]);
 		if(verb>1)
-			fsdump(0);
+			fsdump(0, 0);
 		print("%% %s\n", argv[i]);
 		nargs = gettokens(argv[i], args, Nels, "!");
 		for(j = 0; j < nelem(cmds); j++){
 			if(strcmp(cmds[j].name, argv[i]) != 0)
 				continue;
 			if(cmds[j].nargs != 0 && cmds[j].nargs != nargs)
-				print("usage: %s\n", cmds[j].usage);
+				fprint(2, "usage: %s\n", cmds[j].usage);
 			else
 				cmds[j].f(nargs, args);
 			fspolicy();
@@ -419,14 +435,14 @@ threadmain(int argc, char *argv[])
 		}
 		noerror();
 		if(j == nelem(cmds)){
-			print("no such command\n");
+			fprint(2, "no such command\n");
 			for(j = 0; j < nelem(cmds); j++)
-				print("\t%s\n", cmds[j].usage);
+				fprint(2, "\t%s\n", cmds[j].usage);
 			break;
 		}
 	}
 	if(verb>1)
-		fsdump(0);
+		fsdump(0, 0);
 	noerror();
 	exits(nil);
 }

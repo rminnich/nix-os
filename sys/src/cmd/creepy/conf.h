@@ -10,43 +10,27 @@ enum
 
 #ifdef TESTING
 	Incr = 2,
-	Fsysmem = 1*GiB	,	/* size for in-memory block array */
-	Dzerofree = 10,		/* out of disk blocks */
+	Fsysmem = 200*KiB,	/* size for in-memory block array */
 
 	/* disk parameters; don't change */
 	Dblksz = 512UL,		/* disk block size */
-	Dblkhdrsz = 2*BIT64SZ,
 	Ndptr = 2,		/* # of direct data pointers */
 	Niptr = 2,		/* # of indirect data pointers */
 #else
 	Incr = 16,
 	Fsysmem = 2*GiB,		/* size for in-memory block array */
-	Dzerofree = 10,		/* out of disk blocks */
 
 	/* disk parameters; don't change */
 	Dblksz = 16*KiB,		/* disk block size */
-	Dblkhdrsz = 2*BIT64SZ,
 	Ndptr = 8,		/* # of direct data pointers */
 	Niptr = 4,		/* # of indirect data pointers */
 #endif
 
-	Dminfree = 1000,		/* low on disk blocks */
-	Dmaxfree = 1000,	/* high on disk blocks */
 	Mminfree = 50,		/* low on mem blocks */
-	Mmaxfree = 500,		/* high on mem blocks */
+	Dminfree = 1000,		/* low on disk blocks */
 	Dminattrsz = Dblksz/2,	/* min size for attributes */
 
-	/*
-	 * The format of the disk is:
-	 * blk 0: unused
-	 * blk 1: super
-	 * Nblkgrpsz blocks (1st is ref, Nblkgrpsz-1 are data)
-	 * ...
-	 * Nblkgrpsz blocks (1st is ref, Nblkgrpsz-1 are data)
-	 *
-	 */
-	Nblkgrpsz = (Dblksz - Dblkhdrsz) / BIT64SZ,
-	Dblk0addr = 2*Dblksz,
+	Nahead = 10 * Dblksz,	/* # of bytes to read ahead */
 
 	/*
 	 * Caution: Errstack also limits the max tree depth,
@@ -58,7 +42,12 @@ enum
 	Fidhashsz = 97,		/* size of the fid hash size */
 	Uhashsz = 97,
 
-
 	Rpcspercli = 0,		/* != 0 places a limit */
+
+	Nlstats = 1009,		/* # of lock profiling entries */
+
+	Mmaxfree = 2*Mminfree,		/* high on mem blocks */
+	Dmaxfree = 2*Dminfree,		/* high on disk blocks */
+	Dzerofree = 10,			/* out of disk blocks */
 };
 

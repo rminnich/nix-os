@@ -285,9 +285,22 @@ consread(char *buf, long count)
 }
 
 static void
-cdump(int, char *argv[])
+cdump(int argc, char *argv[])
 {
-	fsdump(strcmp(argv[0], "dumpall") == 0);
+	switch(argc){
+	case 1:
+		fsdump(0, strcmp(argv[0], "dumpall") == 0);
+		break;
+	case 2:
+		if(strcmp(argv[1], "-l") == 0){
+			fsdump(1, strcmp(argv[0], "dumpall") == 0);
+			break;
+		}
+		/*fall*/
+	default:
+		consprint("usage: %s [-l]\n", argv[0]);
+		return;
+	}
 }
 
 static void
@@ -329,15 +342,91 @@ cusers(int argc, char *argv[])
 	}
 }
 
+static void
+cstats(int argc, char *argv[])
+{
+	int clr;
+
+	clr  =0;
+	if(argc == 2 && strcmp(argv[1], "-c") == 0){
+		clr = 1;
+		argc--;
+	}
+	if(argc != 1){
+		consprint("usage: %s [-c]\n", argv[0]);
+		return;
+	}
+	fsstats(clr);
+	ninestats(clr);
+	ixstats(clr);
+}
+
+static void
+cdebug(int, char *argv[])
+{
+	char *f;
+	char flags[50];
+	int i;
+
+	f = argv[1];
+	if(strcmp(f, "on") == 0){
+		dbg['D'] = 1;
+		return;
+	}
+	if(strcmp(f, "off") == 0){
+		memset(dbg, 0, sizeof dbg);
+		return;
+	}
+	if(*f != '+' && *f != '-')
+		memset(dbg, 0, sizeof dbg);
+	else
+		f++;
+	for(; *f != 0; f++){
+		dbg[*f] = 1;
+		if(*argv[1] == '-')
+			dbg[*f] = 0;
+	}
+	f = flags;
+	for(i = 0; i < nelem(dbg) && f < flags+nelem(flags)-1; i++)
+		if(dbg[i])
+			*f++ = i;
+	*f = 0;
+	consprint("debug = '%s'\n", flags);
+		
+}
+
+static void
+clocks(int, char *argv[])
+{
+	if(strcmp(argv[1], "on") == 0)
+		lockstats(1);
+	else if(strcmp(argv[1], "off") == 0)
+		lockstats(0);
+	else if(strcmp(argv[1], "dump") == 0)
+		dumplockstats();
+	else
+		consprint("usage: %s [on|off|dump]\n", argv[0]);
+}
+
+static void
+cfids(int, char**)
+{
+	dumpfids();
+}
+
 static void chelp(int, char**);
 
 static Cmd cmds[] =
 {
-	{"dump",	cdump, 1, "dump"},
-	{"dumpall",	cdump, 1, "dumpall"},
+	{"dump",	cdump, 0, "dump [-l]"},
+	{"dumpall",	cdump, 0, "dumpall [-l]"},
+	{"stats",	cstats, 0, "stats [-c]"},
 	{"sync",	csync, 1, "sync"},
 	{"halt",	chalt, 1, "halt"},
 	{"users",	cusers, 0, "users [-r|-w]"},
+	{"debug",	cdebug, 2, "cdebug [+-]FLAGS | on | off"},
+	{"locks",	clocks, 2, "locks [on|off|dump]"},
+	{"fids",		cfids, 1, "fids"},
 	{"?",		chelp, 1, "?"},
 };
 

@@ -15,13 +15,13 @@ OFILES=\
 	attr.$O\
 	fsys.$O\
 	file.$O\
-	cfg.$O\
 	tools.$O\
 
 IXOFILES=\
 	ixcall.$O\
 	ix.$O\
 	9p.$O\
+	cfg.$O\
 
 HFILES=\
 	dbg.h\
@@ -33,6 +33,8 @@ HFILES=\
 
 # not ready for install
 BIN=.
+
+default:V:all
 
 </sys/src/cmd/mkmany
 

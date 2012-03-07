@@ -12,37 +12,161 @@
 #include "net.h"
 #include "fns.h"
 
-
 /*
  * Misc tools.
  */
 
-static Alloc pathalloc =
+static Lock	lstatslk;
+static Lstat	none;
+static Lstat	*lstats;
+static int	lstatson;
+int fatalaborts = 1;
+
+Alloc pathalloc =
 {
 	.elsz = sizeof(Path),
 	.zeroing = 0,
 };
 
 void
-fsstats(void)
+fatal(char *fmt, ...)
 {
-	print("blks:\t%4uld nblk %4uld nablk %4uld mused %4uld mfree %4ulld dfree\n",
-		fs->nblk, fs->nablk, fs->nmused, fs->nmfree, fs->super->d.ndfree);
-	print("paths:\t%4uld alloc %4uld free (%4uld bytes)\n",
-		pathalloc.nalloc, pathalloc.nfree, pathalloc.elsz);
-	print("mfs:\t%4uld alloc %4uld free (%4uld bytes)\n",
-		mfalloc.nalloc, mfalloc.nfree, mfalloc.elsz);
-	print("\n");
-	print("Fsysmem:\t%uld\n", Fsysmem);
-	print("Dminfree:\t%d\n", Dminfree);
-	print("Dblksz:  \t%uld\n", Dblksz);
-	print("Mblksz:  \t%ud\n", sizeof(Memblk));
-	print("Dminattrsz:\t%uld\n", Dminattrsz);
-	print("Nblkgrpsz:\t%uld\n", Nblkgrpsz);
-	print("Dblkdatasz:\t%d\n", Dblkdatasz);
-	print("Embedsz:\t%d\n", Embedsz);
-	print("Dentryperblk:\t%d\n", Dblkdatasz/sizeof(Dentry));
-	print("Dptrperblk:\t%d\n\n", Dptrperblk);
+	va_list arg;
+
+	va_start(arg, fmt);
+	vfprint(2, fmt, arg);
+	va_end(arg);
+	fprint(2, "\n");
+	if(fatalaborts)
+		abort();
+	threadexitsall("fatal");
+}
+
+uvlong
+now(void)
+{
+	return nsec();
+}
+
+void
+lockstats(int on)
+{
+	if(lstats == nil && on)
+		lstats = mallocz(sizeof lstats[0] * Nlstats, 1);
+	lstatson = on;
+}
+
+void
+dumplockstats(void)
+{
+	static char *tname[] = {"qlock", "rwlock", "lock"};
+	int lon, i;
+	Lstat *lst;
+
+	lon = lstatson;
+	lstatson = 0;
+	fprint(2, "locks\tpc\tntimes\tncant\twtime\tmtime\n");
+	for(i = 0; i < Nlstats; i++){
+		lst = &lstats[i];
+		if(lst->ntimes != 0)
+			fprint(2, "src -n -s %#ulx %s\t# %s\t%d\t%d\t%ulld\t%ulld\t\n",
+				lst->pc, argv0, tname[lst->type], lst->ntimes,
+				lst->ncant, lst->wtime, lst->wtime/lst->ntimes);
+	}
+	lstatson = lon;
+}
+
+Lstat*
+getlstat(uintptr pc, int type)
+{
+	Lstat *lst;
+	int i, h;
+
+	h = pc%Nlstats;
+	lock(&lstatslk);
+	for(i = 0; i < Nlstats; i++){
+		lst = &lstats[(h+i)%Nlstats];
+		if(lst->pc == 0){
+			lst->type = type;
+			lst->pc = pc;
+		}
+		if(lst->pc == pc){
+			unlock(&lstatslk);
+			return lst;
+		}
+	}
+	unlock(&lstatslk);
+	return &none;
+}
+
+void
+xqlock(QLock *q)
+{
+	vlong t;
+	Lstat *lst;
+
+	lst = nil;
+	if(lstats != nil){
+		lst = getlstat(getcallerpc(&q), Tqlock);
+		ainc(&lst->ntimes);
+		if(canqlock(q))
+			return;
+		ainc(&lst->ncant);
+		t = nsec();
+	}
+	qlock(q);
+	if(lstats != nil){
+		t = nsec() - t;
+		lock(&lstatslk);
+		lst->wtime += t;
+		unlock(&lstatslk);
+	}
+}
+
+void
+xqunlock(QLock *q)
+{
+	qunlock(q);
+}
+
+void
+xrwlock(RWLock *rw, int iswr)
+{
+	vlong t;
+	Lstat *lst;
+
+	lst = nil;
+	if(lstats != nil){
+		lst = getlstat(getcallerpc(&rw), Trwlock);
+		ainc(&lst->ntimes);
+		if(iswr){
+			if(canwlock(rw))
+				return;
+		}else
+			if(canrlock(rw))
+				return;
+		ainc(&lst->ncant);
+		t = nsec();
+	}
+	if(iswr)
+		wlock(rw);
+	else
+		rlock(rw);
+	if(lstats != nil){
+		t = nsec() - t;
+		lock(&lstatslk);
+		lst->wtime += t;
+		unlock(&lstatslk);
+	}
+}
+
+void
+xrwunlock(RWLock *rw, int iswr)
+{
+	if(iswr)
+		wunlock(rw);
+	else
+		runlock(rw);
 }
 
 void*
@@ -51,7 +175,7 @@ anew(Alloc *a)
 	Next *n;
 
 	assert(a->elsz > 0);
-	qlock(a);
+	xqlock(a);
 	n = a->free;
 	if(n != nil){
 		a->free = n->next;
@@ -60,7 +184,7 @@ anew(Alloc *a)
 		a->nalloc++;
 		n = mallocz(a->elsz, !a->zeroing);
 	}
-	qunlock(a);
+	xqunlock(a);
 	if(a->zeroing)
 		memset(n, 0, a->elsz);
 	return n;
@@ -75,11 +199,11 @@ afree(Alloc *a, void *nd)
 	if(nd == nil)
 		return;
 	n = nd;
-	qlock(a);
+	xqlock(a);
 	n->next = a->free;
 	a->free = n;
 	a->nfree++;
-	qunlock(a);
+	xqunlock(a);
 }
 
 static void

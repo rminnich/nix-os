@@ -1,20 +1,28 @@
 /*
  * '9': 9p
+ * 'A': mblk/dblk alloc/free chdentry, drefs
  * 'D': disk
+ * 'E': fids
  * 'F': slices, indirects, dirnth
+ * 'K': reclaim
  * 'M': mblk/dblk gets puts
+ * 'P': procs
  * 'R': block read
  * 'W': block write
+ * 'X': ix
  * 'd': general debug
- * 'P': procs
- * 'x': ix
+ * 'O': lru blocks out
  */
-#define d9print	if(!dbg['9']){}else print
-#define dDprint	if(!dbg['D']){}else print
-#define dFprint	if(!dbg['F']){}else print
-#define dMprint	if(!dbg['M']){}else print
-#define dRprint	if(!dbg['R']){}else print
-#define dWprint	if(!dbg['W']){}else print
-#define dxprint	if(!dbg['x']){}else print
-#define dPprint	if(!dbg['P']){}else print
-extern char dbg[];
+#define d9print(...)	if(!dbg['9']){}else fprint(2, __VA_ARGS__)
+#define dAprint(...)	if(!dbg['A']){}else fprint(2, __VA_ARGS__)
+#define dEprint(...)	if(!dbg['E']){}else fprint(2, __VA_ARGS__)
+#define dFprint(...)	if(!dbg['F']){}else fprint(2, __VA_ARGS__)
+#define dKprint(...)	if(!dbg['K']){}else fprint(2, __VA_ARGS__)
+#define dMprint(...)	if(!dbg['M']){}else fprint(2, __VA_ARGS__)
+#define dPprint(...)	if(!dbg['P']){}else fprint(2, __VA_ARGS__)
+#define dRprint(...)	if(!dbg['R']){}else fprint(2, __VA_ARGS__)
+#define dWprint(...)	if(!dbg['W']){}else fprint(2, __VA_ARGS__)
+#define dXprint(...)	if(!dbg['X']){}else fprint(2, __VA_ARGS__)
+#define dOprint(...)	if(!dbg['O']){}else fprint(2, __VA_ARGS__)
+#define dprint(...)	if(!dbg['d']){}else fprint(2, __VA_ARGS__)
+extern char dbg[256];

@@ -12,32 +12,40 @@
 #include "net.h"
 #include "fns.h"
 
+int
+member(char *uid, char *member)
+{
+	return strcmp(uid, member);
+}
+
+void
+meltfids(void)
+{
+}
+
 static void
 usage(void)
 {
-	fprint(2, "usage: %s [-DFLAGS] [-dv]\n", argv0);
+	fprint(2, "usage: %s [-DFLAGS] [disk]\n", argv0);
 	exits("usage");
 }
-
-static char xdbg[256];
-static char zdbg[256];
 
 void
 threadmain(int argc, char *argv[])
 {
-	int verb;
 	char *dev;
+	int verb;
 
 	dev = "disk";
 	verb = 0;
 	ARGBEGIN{
 	case 'v':
-		verb++;
+		verb = 1;
 		break;
 	default:
-		if(ARGC() >= 'A' && ARGC() <= 'Z'){
-			xdbg['d'] = 1;
-			xdbg[ARGC()] = 1;
+		if((ARGC() >= 'A' && ARGC() <= 'Z') || ARGC() == '9'){
+			dbg['d'] = 1;
+			dbg[ARGC()] = 1;
 		}else
 			usage();
 	}ARGEND;
@@ -50,13 +58,9 @@ threadmain(int argc, char *argv[])
 	errinit(Errstack);
 	if(catcherror())
 		fatal("error: %r");
-	memmove(dbg, xdbg, sizeof xdbg);
 	fsfmt(dev);
-	memmove(dbg, zdbg, sizeof zdbg);
 	if(verb)
-		fsdump(0);
-	else
-		fslist();
+		fsdump(0, 0);
 	noerror();
 	exits(nil);
 }

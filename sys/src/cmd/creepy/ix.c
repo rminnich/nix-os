@@ -76,10 +76,22 @@ Alloc srpcalloc =
 static int ixrreadhdrsz;
 
 void
-ixstats(void)
+ixstats(int clr)
 {
-	print("srpcs:\t%4uld alloc %4uld free (%4uld bytes)\n",
+	int i;
+
+	fprint(2, "srpcs:\t%4uld alloc %4uld free (%4uld bytes)\n",
 		srpcalloc.nalloc, srpcalloc.nfree, srpcalloc.elsz);
+	for(i = 0; i < nelem(ixcalls); i++)
+		if(ixcalls[i] != nil && ncalls[i] > 0){
+			fprint(2, "%-8s\t%5uld calls\t%11ulld µs\n",
+				callname[i], ncalls[i],
+				(calltime[i]/ncalls[i])/1000);
+			if(clr){
+				ncalls[i] = 0;
+				calltime[i] = 0;
+			}
+		}
 }
 
 
@@ -135,7 +147,7 @@ rattach(Rpc *rpc)
 {
 	putfid(rpc->fid);
 	rpc->rpc0->fid = newfid(rpc->cli, -1);
-	attach(rpc->rpc0->fid, rpc->xt.aname,  rpc->xt.uname);
+	fidattach(rpc->rpc0->fid, rpc->xt.aname,  rpc->xt.uname);
 }
 
 static void
@@ -153,7 +165,7 @@ rclone(Rpc *rpc)
 
 	if(rpc->rpc0->fid == nil)
 		error("fid not set");
-	nfid = clone(rpc->cli, rpc->rpc0->fid, -1);
+	nfid = fidclone(rpc->cli, rpc->rpc0->fid, -1);
 	putfid(rpc->rpc0->fid);
 	rpc->rpc0->fid = nfid;
 	nfid->cflags = rpc->xt.cflags;
@@ -164,7 +176,7 @@ rwalk(Rpc *rpc)
 {
 	if(rpc->rpc0->fid == nil)
 		error("fid not set");
-	walk(rpc->rpc0->fid, rpc->xt.wname);
+	fidwalk(rpc->rpc0->fid, rpc->xt.wname);
 }
 
 static void
@@ -191,11 +203,27 @@ rcreate(Rpc *rpc)
 	rpc->rpc0->fid->cflags = cflags;
 }
 
+static ulong
+pixd(Memblk *f, uchar *buf, int nbuf)
+{
+	ulong n;
+
+	if(nbuf < BIT32SZ)
+		return 0;
+	if(catcherror())
+		return 0;
+	n = pmeta(buf+BIT32SZ, nbuf-BIT32SZ, f->mf);
+	noerror();
+	PBIT32(buf, n);
+	return n+BIT32SZ;
+}
+
 static void
 rread(Rpc *rpc)
 {
 	vlong off;
 	Fid *fid;
+	int nmsg;
 
 	fid = rpc->rpc0->fid;
 	if(fid == nil)
@@ -211,11 +239,12 @@ rread(Rpc *rpc)
 	 * As usual, the caller sends the last reply when we return.
 	 */
 	off = rpc->xt.offset;
+	nmsg = rpc->xt.nmsg;
 	for(;;){
-		rpc->xr.count = fidread(fid, rpc->xr.data, rpc->xt.count, off);
+		rpc->xr.count = fidread(fid, rpc->xr.data, rpc->xt.count, off, pixd);
 		if(rpc->xr.count == 0)
 			break;
-		if(rpc->xt.nmsg-- <= 0)
+		if(nmsg-- <= 0)
 			break;
 		if(reply(rpc) < 0)
 			break;
@@ -313,6 +342,7 @@ rwattr(Rpc *rpc)
 		error(nil);
 	}
 	dfwattr(f, rpc->xt.attr, rpc->xt.value, rpc->xt.nvalue);
+	noerror();
 	rwunlock(f, Wr);
 }
 
@@ -334,8 +364,8 @@ rcond(Rpc *rpc)
 		error(nil);
 	}
 	dfcattr(f, rpc->xt.op, rpc->xt.attr, rpc->xt.value, rpc->xt.nvalue);
-	rwunlock(f, Rd);
 	noerror();
+	rwunlock(f, Rd);
 }
 
 static void
@@ -361,7 +391,7 @@ readix(int fd)
 
 	nhdr = readn(fd, hdr, sizeof hdr);
 	if(nhdr < 0){
-		dxprint("readix: %r\n");
+		dXprint("readix: %r\n");
 		return nil;
 	}
 	if(nhdr == 0){
@@ -400,6 +430,7 @@ readix(int fd)
 		freeixrpc(rpc);
 		return nil;
 	}
+	rpc->t0 = nsec();
 	if(ixunpack(rpc->data, sz-BIT16SZ, &rpc->xt) != sz-BIT16SZ){
 		freeixrpc(rpc);
 		return nil;
@@ -419,7 +450,7 @@ reply(Rpc *rpc)
 	chan = rpc->chan&Tmask;
 	if(rpc->xr.type == IXRerror || (rpc->chan&Tlast) != 0)
 		chan |= Tlast;
-	qlock(&cli->wlk);
+	xqlock(&cli->wlk);
 	if(largeix[rpc->xt.type])
 		buf = rpc->data;
 	else
@@ -436,18 +467,24 @@ reply(Rpc *rpc)
 	p += sz;
 
 	if(rpc->rpc0->flushed){
-		qunlock(&cli->wlk);
+		xqunlock(&cli->wlk);
 		werrstr("flushed");
-		dxprint("write: flushed");
+		dXprint("write: flushed");
 		return -1;
 	}
-	dxprint("-> %G\n", &rpc->xr);
+	if(chan&Tlast){
+		putfid(rpc->rpc0->fid);
+		rpc->rpc0->fid = nil;
+	}
+	dXprint("-> %G\n", &rpc->xr);
 	if(write(cli->fd, buf, p-buf) != p-buf){
-		qunlock(&cli->wlk);
-		dxprint("write: %r");
+		xqunlock(&cli->wlk);
+		dXprint("write: %r");
 		return -1;
 	}
-	qunlock(&cli->wlk);
+	calltime[rpc->xt.type] += nsec() - rpc->t0;
+	ncalls[rpc->xt.type]++;
+	xqunlock(&cli->wlk);
 	return p-buf;
 }
 
@@ -458,7 +495,9 @@ rpcworkerix(void *v, void**aux)
 	Cli *cli;
 	Channel *c;
 	char err[128];
-	long nw;
+	long nw, count;
+	int nerr;
+	Fid *fid;
 
 	c = v;
 	if(*aux == nil){
@@ -473,6 +512,7 @@ rpcworkerix(void *v, void**aux)
 	threadsetname("rpcworkerix %s chan %d", cli->addr, rpc0->chan);
 	dPprint("%s started\n", threadgetname());
 	do{
+		nerr = nerrors();
 		rpc->xr.type = rpc->xt.type + 1;
 		rpc->rpc0 = rpc0;
 		if(catcherror()){
@@ -485,12 +525,41 @@ rpcworkerix(void *v, void**aux)
 			ixcalls[rpc->xt.type](rpc);
 			noerror();
 		}
+
+		fid = nil;
+		if(rpc->fid != nil && rpc0->fid->ref > 1){
+			/* The fid is not clunked by this rpc; read/walk ahead ok*/
+			fid = rpc0->fid;
+			incref(fid);
+		}
+		if(catcherror()){
+			if(fid != nil)
+				putfid(fid);
+		}
+
 		nw = reply(rpc);
+
+		if(fid != nil){
+			switch(rpc->xt.type){
+			case Tread:
+				count = rpc->xt.count;
+				if(rpc->xr.type == Rread)
+				if(rpc->xt.nmsg <= 1 && rpc->xr.count == count)
+					fidrahead(rpc0->fid, rpc->xt.offset+count);
+				break;
+			case Twalk:
+				if(rpc->xr.type == Rwalk)
+					fidwahead(rpc0->fid);
+				break;
+			}
+			putfid(fid);
+		}
+
 		if(rpc != rpc0)
 			freeixrpc(rpc);
+		if(nerrors() != nerr)
+			fatal("%s: unbalanced error stack", threadgetname());
 	}while(!rpc0->closed && nw > 0 && err[0] == 0 && (rpc = recvp(c)) != nil);
-	if(rpc0->fid != nil && (rpc0->fid->cflags&OCEND) != 0)
-		putfid(rpc0->fid);	/* clunk */
 	while((rpc = nbrecvp(c)) != nil)
 		freeixrpc(rpc);
 	replied(rpc0);
@@ -521,15 +590,17 @@ cliworkerix(void *v, void**aux)
 
 	ixinit();
 	for(;;){
+		if(dbg['E'])
+			dumpfids();
 	loop:	rpc = readix(cli->fd);
 		if(rpc == nil){
-			dxprint("%s: read: %r\n", cli->addr);
+			dXprint("%s: read: %r\n", cli->addr);
 			break;
 		}
 		rpc->cli = cli;
 		incref(cli);
 
-		qlock(&cli->rpclk);
+		xqlock(&cli->rpclk);
 		for(r = cli->rpcs; r != nil; r = r->next)
 			if((r->chan&Tmask) == (rpc->chan&Tmask)){
 				if(rpc->chan&Tlast)
@@ -538,12 +609,12 @@ cliworkerix(void *v, void**aux)
 					else
 						r->closed = 1;
 				sendp(r->c, rpc);
-				qunlock(&cli->rpclk);
+				xqunlock(&cli->rpclk);
 				goto loop;
 			}
 		if((rpc->chan&Tfirst) == 0){	/* it's channel is gone */
 			freeixrpc(rpc);
-			qunlock(&cli->rpclk);
+			xqunlock(&cli->rpclk);
 			goto loop;
 		}
 
@@ -553,7 +624,7 @@ cliworkerix(void *v, void**aux)
 		if(rpc->c == nil)
 			rpc->c = chancreate(sizeof(Rpc*), 64);
 		cli->nrpcs++;
-		qunlock(&cli->rpclk);
+		xqunlock(&cli->rpclk);
 
 		fspolicy();
 

@@ -17,7 +17,9 @@ enum
  */
 struct Fid
 {
-	Fid	*next;		/* in hash or free list */
+	Fid	*next;		/* in alloc or free list */
+	Fid	*prev;		/* in alloc list */
+	Fid	*hnext;		/* in hash */
 	Ref;
 	QLock;
 	void*	clino;		/* no is local to a client */
@@ -31,7 +33,7 @@ struct Fid
 	char	*uid;
 
 	uvlong	loff;		/* last offset, for dir reads */
-	long	lidx;		/* next dir entry index to read */
+	int	lidx;		/* next dir entry index to read */
 };
 
 struct Rpc
@@ -54,6 +56,7 @@ struct Rpc
 	Channel* c;		/* to worker (ix) */
 	int	closed;		/* got last rpc in chan */
 
+	vlong	t0;
 	int	flushed;
 	uchar	data[1];
 };
@@ -93,5 +96,12 @@ struct Cli
 	Rpc *rpcs;
 };
 
+typedef ulong (*Packmeta)(Memblk*, uchar*, int);
+
 #pragma	varargck	type	"X"	Fid*
 #pragma	varargck	type	"R"	Rpc*
+
+extern vlong calltime[];
+extern ulong ncalls[];
+extern char *callname[];
+extern Alloc fidalloc, rpcalloc, clialloc;

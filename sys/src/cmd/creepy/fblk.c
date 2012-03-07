@@ -21,39 +21,27 @@
 void
 rwlock(Memblk *f, int iswr)
 {
-	if(iswr == No)
-		return;
-	if(iswr)
-		wlock(f->mf);
-	else
-		rlock(f->mf);
+	xrwlock(f->mf, iswr);
 }
 
 void
 rwunlock(Memblk *f, int iswr)
 {
-	if(iswr == No)
-		return;
-	if(iswr)
-		wunlock(f->mf);
-	else
-		runlock(f->mf);
+	xrwunlock(f->mf, iswr);
 }
 
 void
 isfile(Memblk *f)
 {
-	if(TAGTYPE(f->d.tag) != DBfile || f->mf == nil)
+	if(f->type != DBfile || f->mf == nil)
 		fatal("isfile: not a file at pc %#p", getcallerpc(&f));
 }
 
 void
 isrwlocked(Memblk *f, int iswr)
 {
-	if(TAGTYPE(f->d.tag) != DBfile || f->mf == nil)
+	if(f->type != DBfile || f->mf == nil)
 		fatal("isrwlocked: not a file  at pc %#p", getcallerpc(&f));
-	if(iswr == No)
-		return;
 	if((iswr && canrlock(f->mf)) || (!iswr && canwlock(f->mf)))
 		fatal("is%clocked at pc %#p", iswr?'w':'r', getcallerpc(&f));
 }
@@ -61,7 +49,7 @@ isrwlocked(Memblk *f, int iswr)
 void
 isdir(Memblk *f)
 {
-	if(TAGTYPE(f->d.tag) != DBfile || f->mf == nil)
+	if(f->type != DBfile || f->mf == nil)
 		fatal("isdir: not a file at pc %#p", getcallerpc(&f));
 	if((f->mf->mode&DMDIR) == 0)
 		fatal("isdir: not a dir at pc %#p", getcallerpc(&f));
@@ -70,7 +58,7 @@ isdir(Memblk *f)
 void
 isnotdir(Memblk *f)
 {
-	if(TAGTYPE(f->d.tag) != DBfile || f->mf == nil)
+	if(f->type != DBfile || f->mf == nil)
 		fatal("isnotdir: not a file at pc %#p", getcallerpc(&f));
 	if((f->mf->mode&DMDIR) != 0)
 		fatal("isnotdir: dir at pc %#p", getcallerpc(&f));
@@ -104,9 +92,10 @@ getmelted(uint isdir, int isarch, uint type, u64int *addrp)
 		dupdentries(nb->d.data, Dblkdatasz/sizeof(Dentry));
 	USED(&nb);		/* for error() */
 	*addrp = nb->addr;
-	incref(nb);
-	dbdecref(b->addr);
+	dbput(b, b->type, b->addr);
 	noerror();
+	incref(nb);
+	mbput(b);
 	return nb;
 }
 
@@ -135,7 +124,11 @@ dfblk(Memblk *f, ulong bno, int mkit)
 		ismelted(f);
 	isdir = (f->mf->mode&DMDIR);
 
-	f->mf->lastbno = bno;
+	if(bno != f->mf->lastbno){
+		f->mf->sequential = (!mkit && bno == f->mf->lastbno + 1);
+		f->mf->lastbno = bno;
+	}
+
 	/*
 	 * bno: block # relative to the the block we are looking at.
 	 * prev: # of blocks before the current one.
@@ -168,7 +161,7 @@ dfblk(Memblk *f, ulong bno, int mkit)
 	}
 	if(i == nelem(f->d.iptr))
 		error("offset exceeds file capacity");
-
+	ainc(&fs->nindirs[i]);
 	type = DBptr0+i;
 	dFprint("dfblk: indirect %s nblks %uld (ppb %ud) bno %uld\n",
 		tname(type), nblks, Dptrperblk, bno);
@@ -234,7 +227,7 @@ dfdropblks(Memblk *f, ulong bno, ulong bend)
 	ismelted(f);
 	isnotdir(f);
 
-	dDprint("dfdropblks: could remove d%#ullx[%uld:%uld]\n",
+	dprint("dfdropblks: could remove d%#ullx[%uld:%uld]\n",
 		f->addr, bno, bend);
 	/*
 	 * Instead of releasing the references on the data blocks,
@@ -352,7 +345,7 @@ done:
 			f, off, len, iswr?'w':'r', sl.len);
 		return sl;
 	}
-	if(TAGTYPE(sl.b->d.tag) == DBfile)
+	if(sl.b->type == DBfile)
 		dFprint("slice m%#p[%#ullx:+%#ulx]%c -> m%#p:e+%#uld[%#ulx]\n",
 			f, off, len, iswr?'w':'r',
 			sl.b, (uchar*)sl.data - sl.b->d.embed, sl.len);
@@ -387,7 +380,7 @@ compact(Memblk *d, Dentry *de, u64int off)
 	}
 	noerror();
 	updatesize(d, lastoff);
-	changed(d);
+	changed(d);		/*paranoia: caller of dfchdentry calls dfchanged*/
 }
 
 /*
@@ -405,7 +398,7 @@ dfchdentry(Memblk *d, u64int addr, u64int naddr, int iswr)
 	uvlong off;
 	int i;
 
-	dDprint("dfchdentry d%#ullx -> d%#ullx\nin %H\n", addr, naddr, d);
+	dAprint("dfchdentry d%#ullx -> d%#ullx\nin %H\n", addr, naddr, d);
 	isrwlocked(d, iswr);
 	isdir(d);
 
@@ -414,10 +407,14 @@ dfchdentry(Memblk *d, u64int addr, u64int naddr, int iswr)
 		sl = dfslice(d, Dblkdatasz, off, iswr);
 		if(sl.len == 0)
 			break;
-		if(sl.b == 0){
+		if(sl.b == nil){
 			if(addr == 0 && !iswr)
 				return off;
 			continue;
+		}
+		if(catcherror()){
+			mbput(sl.b);
+			error(nil);
 		}
 		de = sl.data;
 		for(i = 0; i < sl.len/sizeof(Dentry); i++){
@@ -429,11 +426,13 @@ dfchdentry(Memblk *d, u64int addr, u64int naddr, int iswr)
 						de[i].file = naddr;
 					changed(sl.b);
 				}
+				noerror();
 				mbput(sl.b);
 				return off + i*sizeof(Dentry);
 			}
 		}
 		off += sl.len;
+		noerror();
 		mbput(sl.b);
 	}
 	if(iswr)
@@ -481,7 +480,7 @@ xfchild(Memblk *f, int n, int disktoo)
 	addr = dfdirnth(f, n);
 	if(addr == 0)
 		return nil;
-	b = mbget(addr, 0);
+	b = mbget(DBfile, addr, 0);
 	if(b != nil || disktoo == 0)
 		return b;
 	return dbget(DBfile, addr);
@@ -510,11 +509,10 @@ dflink(Memblk *d, Memblk *f)
 	isdir(d);
 
 	dfchdentry(d, 0, f->addr, Wr);
-	changed(d);
 }
 
 /*
- * does not dbdecref(f)
+ * does not dbput(f)
  * caller locks both d and f
  */
 void
@@ -524,7 +522,6 @@ dfunlink(Memblk *d, Memblk *f)
 	isdir(d);
 
 	dfchdentry(d, f->addr, 0, Wr);
-	changed(d);
 }
 
 /*
@@ -540,7 +537,6 @@ dfwalk(Memblk *d, char *name, int iswr)
 	uvlong off;
 	int i;
 
-	dDprint("dfwalk '%s' at %H\n", name, d);
 	if(strcmp(name, "..") == 0)
 		fatal("dfwalk: '..'");
 	isdir(d);
@@ -556,6 +552,7 @@ dfwalk(Memblk *d, char *name, int iswr)
 		if(sl.b == nil)
 			continue;
 		if(catcherror()){
+			dprint("dfwalk d%#ullx '%s': %r\n", d->addr, name);
 			mbput(sl.b);
 			error(nil);
 		}
@@ -584,6 +581,7 @@ dfwalk(Memblk *d, char *name, int iswr)
 	error("file not found");
 
 done:
+	dprint("dfwalk d%#ullx '%s' -> d%#ullx\n", d->addr, name, f->addr);
 	return f;
 }
 
@@ -638,6 +636,7 @@ dfmelt(Path **pp, int nth)
 	f = *fp;
 	if(!f->frozen)
 		return p;
+	ainc(&fs->nmelts);
 	rwunlock(f, Wr);
 
 	/*
@@ -647,13 +646,23 @@ dfmelt(Path **pp, int nth)
 	 * /active is special, because it's only frozen temporarily while
 	 * creating a frozen version of the tree. Instead of melting it,
 	 * we should just wait for it.
+	 * p[0] is /
+	 * p[1] is /active
 	 */
-	followmelted(&p->f[1]);
-
+	for(;;){
+		followmelted(&p->f[1]);
+		if(p->f[1]->frozen == 0)
+			break;
+		rwunlock(p->f[1], Wr);
+		yield();
+	}
+	/*
+	 * At loop header, parent is p->f[i-1], melted and wlocked.
+	 * At the end of the loop, p->f[i] is melted and wlocked.
+	 */
 	for(i = 2; i < nth; i++){
 		followmelted(&p->f[i]);
-		f = p->f[i];
-		if(!f->frozen){
+		if(!p->f[i]->frozen){
 			rwunlock(p->f[i-1], Wr);
 			continue;
 		}
@@ -662,21 +671,54 @@ dfmelt(Path **pp, int nth)
 			rwunlock(p->f[i], Wr);
 			error(nil);
 		}
-		nf = dbdup(f);
+
+		nf = dbdup(p->f[i]);
 		rwlock(nf, Wr);
+
 		if(catcherror()){
 			rwunlock(nf, Wr);
 			mbput(nf);
 			error(nil);
 		}
-		dfchdentry(p->f[i-1], f->addr, nf->addr, 1);
+		dfchdentry(p->f[i-1], p->f[i]->addr, nf->addr, 1);
+		noerror();
+		noerror();
 		/* committed */
-		rwunlock(f, Wr);
-		rwunlock(p->f[i-1], Wr);
+		rwunlock(p->f[i-1], Wr);		/* parent */
+		rwunlock(p->f[i], Wr);		/* old frozen version */
+		f = p->f[i];
+		p->f[i] = nf;
+		assert(f->ref > 1);
+		mbput(f);			/* ref from path */
 		if(!catcherror()){
-			dbdecref(f->addr);
+			dbput(f, f->type, f->addr); /* p->f[i] ref from disk */
 			noerror();
 		}
 	}
 	return p;
+}
+
+/*
+ * Report that a file has been modified.
+ * Modification times propagate up to the root of the file tree.
+ */
+void
+dfchanged(Path *p)
+{
+	Memblk *f;
+	u64int t;
+	int i;
+
+	t = now();
+	for(i = 0; i < p->nf; i++){
+		f = p->f[i];
+		rwlock(f, Wr);
+		if(f->frozen == 0)
+			if(!catcherror()){
+				wmtime(f, &t, sizeof t);
+				watime(f, &t, sizeof t);
+				noerror();
+			}
+		rwunlock(f, Wr);
+	}
 }

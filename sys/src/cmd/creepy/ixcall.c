@@ -8,6 +8,86 @@
 #include "ix.h"
 #include "net.h"
 
+static char* cname[CMAX] = 
+{
+	[CEQ] "==",
+	[CGE] ">=",
+	[CGT] "> ",
+	[CLT] "< ",
+	[CLE] "<=",
+	[CNE] "!=",
+};
+
+vlong calltime[Tmax];
+ulong ncalls[Tmax];
+
+char* callname[] =
+{
+	/* ix requests */
+	[IXTversion]	"Tversion",
+	[IXRversion]	"Rversion",
+	[IXTattach]	"Tattach",
+	[IXRattach]	"Rattach",
+	[IXTfid]	"Tfid",
+	[IXRfid]	"Rfid",
+	[__IXunused__]	"__IXunused__",
+	[IXRerror]	"Rerror",
+	[IXTclone]	"Tclone",
+	[IXRclone]	"Rclone",
+	[IXTwalk]	"Twalk",
+	[IXRwalk]	"Rwalk",
+	[IXTopen]	"Topen",
+	[IXRopen]	"Ropen",
+	[IXTcreate]	"Tcreate",
+	[IXRcreate]	"Rcreate",
+	[IXTread]	"Tread",
+	[IXRread]	"Rread",
+	[IXTwrite]	"Twrite",
+	[IXRwrite]	"Rwrite",
+	[IXTclunk]	"Tclunk",
+	[IXRclunk]	"Rclunk",
+	[IXTremove]	"Tremove",
+	[IXRremove]	"Rremove",
+	[IXTattr]	"Tattr",
+	[IXRattr]	"Rattr",
+	[IXTwattr]	"Twattr",
+	[IXRwattr]	"Rwattr",
+	[IXTcond]	"Tcond",
+	[IXRcond]	"Rcond",
+	[IXTmove]	"Tmove",
+	[IXRmove]	"Rmove",
+
+	/* 9p requests */
+	[Tversion]	"Tversion",
+	[Rversion]	"Rversion",
+	[Tauth]		"Tauth",
+	[Rauth]		"Rauth",
+	[Tattach]	"Tattach",
+	[Rattach]	"Rattach",
+	[Terror]	"Terror",
+	[Rerror]	"Rerror",
+	[Tflush]	"Tflush",
+	[Rflush]	"Rflush",
+	[Twalk]		"Twalk",
+	[Rwalk]		"Rwalk",
+	[Topen]		"Topen",
+	[Ropen]		"Ropen",
+	[Tcreate]	"Tcreate",
+	[Rcreate]	"Rcreate",
+	[Tread]		"Tread",
+	[Rread]		"Rread",
+	[Twrite]		"Twrite",
+	[Rwrite]		"Rwrite",
+	[Tclunk]	"Tclunk",
+	[Rclunk]	"Rclunk",
+	[Tremove]	"Tremove",
+	[Rremove]	"Rremove",
+	[Tstat]		"Tstat",
+	[Rstat]		"Rstat",
+	[Twstat]	"Twstat",
+	[Rwstat]	"Rwstat",
+};
+
 static uchar*
 pstring(uchar *p, char *s)
 {
@@ -530,83 +610,6 @@ ixunpack(uchar *ap, uint nap, IXcall *f)
 	return p - ap;
 }
 
-static char* cname[CMAX] = 
-{
-	[CEQ] "==",
-	[CGE] ">=",
-	[CGT] "> ",
-	[CLT] "< ",
-	[CLE] "<=",
-	[CNE] "!=",
-};
-
-static char* tname[] =
-{
-	/* ix requests */
-	[IXTversion]	"Tversion",
-	[IXRversion]	"Rversion",
-	[IXTattach]	"Tattach",
-	[IXRattach]	"Rattach",
-	[IXTfid]	"Tfid",
-	[IXRfid]	"Rfid",
-	[__IXunused__]	"__IXunused__",
-	[IXRerror]	"Rerror",
-	[IXTclone]	"Tclone",
-	[IXRclone]	"Rclone",
-	[IXTwalk]	"Twalk",
-	[IXRwalk]	"Rwalk",
-	[IXTopen]	"Topen",
-	[IXRopen]	"Ropen",
-	[IXTcreate]	"Tcreate",
-	[IXRcreate]	"Rcreate",
-	[IXTread]	"Tread",
-	[IXRread]	"Rread",
-	[IXTwrite]	"Twrite",
-	[IXRwrite]	"Rwrite",
-	[IXTclunk]	"Tclunk",
-	[IXRclunk]	"Rclunk",
-	[IXTremove]	"Tremove",
-	[IXRremove]	"Rremove",
-	[IXTattr]	"Tattr",
-	[IXRattr]	"Rattr",
-	[IXTwattr]	"Twattr",
-	[IXRwattr]	"Rwattr",
-	[IXTcond]	"Tcond",
-	[IXRcond]	"Rcond",
-	[IXTmove]	"Tmove",
-	[IXRmove]	"Rmove",
-
-	/* 9p requests */
-	[Tversion]	"Tversion",
-	[Rversion]	"Rversion",
-	[Tauth]		"Tauth",
-	[Rauth]		"Rauth",
-	[Tattach]	"Tattach",
-	[Rattach]	"Rattach",
-	[Terror]	"Terror",
-	[Rerror]	"Rerror",
-	[Tflush]	"Tflush",
-	[Rflush]	"Rflush",
-	[Twalk]		"Twalk",
-	[Rwalk]		"Rwalk",
-	[Topen]		"Topen",
-	[Ropen]		"Ropen",
-	[Tcreate]	"Tcreate",
-	[Rcreate]	"Rcreate",
-	[Tread]		"Tread",
-	[Rread]		"Rread",
-	[Twrite]		"Twrite",
-	[Rwrite]		"Rwrite",
-	[Tclunk]	"Tclunk",
-	[Rclunk]	"Rclunk",
-	[Tremove]	"Tremove",
-	[Rremove]	"Rremove",
-	[Tstat]		"Tstat",
-	[Rstat]		"Rstat",
-	[Twstat]	"Twstat",
-	[Rwstat]	"Rwstat",
-};
-
 int
 rpcfmt(Fmt *fmt)
 {
@@ -617,8 +620,8 @@ rpcfmt(Fmt *fmt)
 		return fmtprint(fmt, "<nil>");
 	if(rpc->t.type == 0)
 		return fmtprint(fmt, "Tnull");
-	if(rpc->t.type < nelem(tname) && tname[rpc->t.type])
-		return fmtprint(fmt, "%s tag %ud", tname[rpc->t.type], rpc->t.tag);
+	if(rpc->t.type < nelem(callname) && callname[rpc->t.type])
+		return fmtprint(fmt, "%s tag %ud", callname[rpc->t.type], rpc->t.tag);
 	return fmtprint(fmt, "type=%d??? tag %ud", rpc->t.type, rpc->t.tag);
 }
 
@@ -689,7 +692,7 @@ ixcallfmt(Fmt *fmt)
 	type = f->type;
 	if(type < IXTversion || type >= IXTmax)
 		return fmtprint(fmt, "<TYPE %d>", type);
-	s = seprint(buf, e, "%s", tname[type]);
+	s = seprint(buf, e, "%s", callname[type]);
 	switch(type){
 	case IXTversion:
 	case IXRversion:
