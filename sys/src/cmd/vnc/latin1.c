@@ -1,4 +1,5 @@
 #include <u.h>
+#include <libc.h>
 
 /*
  * The code makes two assumptions: strlen(ld) is 1 or 2; latintab[i].ld can be a
