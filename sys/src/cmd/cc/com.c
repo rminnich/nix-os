@@ -636,8 +636,8 @@ tcomo(Node *n, int f)
 		if(n->type->link != types[TRUNE]) {
 			o = outstring(0, 0);
 			while(o & 3) {
-			//	outlstring(L"", sizeof(Rune));
-				uint str[1] = {0};
+				/* outlstring(L"", sizeof(Rune)); */
+				Rune str[1] = {0};
 				outlstring(str, sizeof(Rune));
 				o = outlstring(0, 0);
 			}
