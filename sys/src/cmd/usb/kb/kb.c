@@ -696,7 +696,7 @@ kbmain(Dev *d, int argc, char* argv[])
 	USED(devid);
 	ud = d->usb;
 	d->aux = nil;
-	dprint(2, "kb: main: dev %s ref %ld\n", d->dir, d->ref);
+	dprint(2, "kb: main: dev %s ref %d\n", d->dir, d->ref);
 
 	if(kena)
 		for(i = 0; i < nelem(ud->ep); i++)
