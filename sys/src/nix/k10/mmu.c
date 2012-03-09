@@ -343,6 +343,25 @@ mmuptpcheck(Proc *proc)
 	}
 }
 
+static uint
+pteflags(uint attr)
+{
+	uint flags;
+
+	flags = 0;
+	if(attr & ~(PTEVALID|PTEWRITE|PTERONLY|PTEUSER|PTEUNCACHED))
+		panic("mmuput: wrong attr bits: %#ux\n", attr);
+	if(attr&PTEVALID)
+		flags |= PteP;
+	if(attr&PTEWRITE)
+		flags |= PteRW;
+	if(attr&PTEUSER)
+		flags |= PteU;
+	if(attr&PTEUNCACHED)
+		flags |= PtePCD;
+	return flags;
+}
+
 /*
  * pg->pgszi indicates the page size in m->pgsz[] used for the mapping.
  * For the user, it can be either 2*MiB or 1*GiB pages.
@@ -373,9 +392,7 @@ mmuput(uintptr va, Page *pg, uint attr)
 	pgsz = m->pgsz[pg->pgszi];
 	if(pa & (pgsz-1))
 		panic("mmuput: pa offset non zero: %#ullx\n", pa);
-	if(attr & ~(PTEVALID|PTEWRITE|PTERONLY|PTEUSER|PTEUNCACHED))
-		panic("mmuput: wrong attr bits: %#ux\n", attr);
-	pa |= attr;
+	pa |= pteflags(attr);
 
 	pl = splhi();
 	if(DBGFLG)
