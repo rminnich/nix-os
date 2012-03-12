@@ -17,7 +17,7 @@ typedef struct {
 			uvlong hdr[1];
 		};
 		Ehdr;			/* elf.h */
-		Ehdr64;			/* elf.h */
+		E64hdr;			/* elf.h */
 		struct mipsexec;	/* bootexec.h */
 		struct mips4kexec;	/* bootexec.h */
 		struct sparcexec;	/* bootexec.h */
@@ -214,7 +214,7 @@ ExecTable exectab[] =
 		FNONE,
 		0,
 		&mamd64,
-		sizeof(Ehdr64),
+		sizeof(E64hdr),
 		nil,
 		elf64dotout },
 	{ ELF_MAG,			/* any elf32 */
@@ -691,7 +691,7 @@ elf64dotout(int fd, Fhdr *fp, ExecHdr *hp)
 	uvlong (*swav)(uvlong);
 	ulong (*swal)(ulong);
 	ushort (*swab)(ushort);
-	Ehdr64 *ep;
+	E64hdr *ep;
 	Phdr64 *ph;
 	int i, it, id, is, phsz, memsz;
 

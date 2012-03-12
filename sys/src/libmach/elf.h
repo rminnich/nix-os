@@ -1,5 +1,5 @@
 /*
- *	Definitions needed for  accessing Irix ELF headers
+ *	Definitions needed for accessing ELF headers
  */
 typedef struct {
 	uchar	ident[16];	/* ident bytes */
@@ -19,21 +19,21 @@ typedef struct {
 } Ehdr;
 
 typedef struct {
-	uchar	ident[16];	/* ident bytes */
-	ushort	type;		/* file type */
-	ushort	machine;	/* target machine */
-	int	version;	/* file version */
-	uvlong	elfentry;	/* start address */
-	uvlong	phoff;		/* phdr file offset */
-	uvlong	shoff;		/* shdr file offset */
-	int	flags;		/* file flags */
-	ushort	ehsize;		/* sizeof ehdr */
-	ushort	phentsize;	/* sizeof phdr */
-	ushort	phnum;		/* number phdrs */
-	ushort	shentsize;	/* sizeof shdr */
-	ushort	shnum;		/* number shdrs */
-	ushort	shstrndx;	/* shdr string index */
-} Ehdr64;
+	u8int	ident[16];	/* ident bytes */
+	u16int	type;		/* file type */
+	u16int	machine;	/* target machine */
+	u32int	version;	/* file version */
+	u64int	elfentry;	/* start address */
+	u64int	phoff;		/* phdr file offset */
+	u64int	shoff;		/* shdr file offset */
+	u32int	flags;		/* file flags */
+	u16int	ehsize;		/* sizeof ehdr */
+	u16int	phentsize;	/* sizeof phdr */
+	u16int	phnum;		/* number phdrs */
+	u16int	shentsize;	/* sizeof shdr */
+	u16int	shnum;		/* number shdrs */
+	u16int	shstrndx;	/* shdr string index */
+} E64hdr;
 
 typedef struct {
 	int	type;		/* entry type */
@@ -121,7 +121,8 @@ enum {
 	S370 = 9,		/* Amdhal	*/
 	SPARC64 = 18,		/* Sun SPARC v9 */
 	POWER = 20,		/* PowerPC */
-	ARM = 40,			/* ARM */
+	POWER64 = 21,		/* PowerPC64 */
+	ARM = 40,		/* ARM */
 	AMD64 = 62,		/* Amd64 */
 
 	NO_VERSION = 0,		/* version, ident[VERSION] */
