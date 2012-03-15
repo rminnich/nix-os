@@ -22,10 +22,10 @@ _intrcommon:
 
 	MOVQ	RUSER, 0(SP)
 	MOVQ	RMACH, 8(SP)
-//	MOVW	DS, 16(SP)
-//	MOVW	ES, 18(SP)
-//	MOVW	FS, 20(SP)
-//	MOVW	GS, 22(SP)
+	MOVW	DS, 16(SP)
+	MOVW	ES, 18(SP)
+	MOVW	FS, 20(SP)
+	MOVW	GS, 22(SP)
 
 	SWAPGS
 	BYTE $0x65; MOVQ 0, RMACH		/* m-> (MOVQ GS:0x0, R15) */
@@ -71,11 +71,13 @@ TEXT _intrr<>(SB), 1, $-4			/* so ktrace can pop frame */
 	JEQ	_iretnested
 
 	SWAPGS
-	/* per the architecture manual, moving 16 bits to FS can zero it. Bad ... */
-//	MOVW	22(SP), GS
-//	MOVW	20(SP), FS
-//	MOVW	18(SP), ES
-//	MOVW	16(SP), DS
+	/*	per the architecture manual, moving 16 bits to FS can zero it. Bad ... 
+	 *	not restoring it gives back the bad segment selector bug
+	 */
+	MOVW	22(SP), GS
+	MOVW	20(SP), FS
+	MOVW	18(SP), ES
+	MOVW	16(SP), DS
 	MOVQ	8(SP), RMACH
 	MOVQ	0(SP), RUSER
 
