@@ -1,67 +1,42 @@
+#include "std.h"
 #include "dat.h"
 
 Logbuf confbuf;
 
-Req *cusewait;		/* requests waiting for confirmation */
-Req **cuselast = &cusewait;
-
 void
 confirmread(Req *r)
 {
-	logbufread(&confbuf, r);
+	lbread(&confbuf, r);
 }
 
 void
 confirmflush(Req *r)
 {
-	Req **l;
-
-	for(l=&cusewait; *l; l=&(*l)->aux){
-		if(*l == r){
-			*l = r->aux;
-			if(r->aux == nil)
-				cuselast = l;
-			closereq(r);
-			break;
-		}
-	}
-	logbufflush(&confbuf, r);
-}
-
-static int
-hastag(Fsstate *fss, int tag, int *tagoff)
-{
-	int i;
-
-	for(i=0; i<fss->nconf; i++)
-		if(fss->conf[i].tag == tag){
-			*tagoff = i;
-			return 1;
-		}
-	return 0;
+	lbflush(&confbuf, r);
 }
 
 int
 confirmwrite(char *s)
 {
 	char *t, *ans;
-	int allow, tagoff;
+	int allow;
 	ulong tag;
 	Attr *a;
-	Fsstate *fss;
-	Req *r, **l;
+	Conv *c;
 
 	a = _parseattr(s);
 	if(a == nil){
-		werrstr("empty write");
+		werrstr("bad attr");
 		return -1;
 	}
 	if((t = _strfindattr(a, "tag")) == nil){
+		flog("bad confirm write: no tag");
 		werrstr("no tag");
 		return -1;
 	}
 	tag = strtoul(t, 0, 0);
 	if((ans = _strfindattr(a, "answer")) == nil){
+		flog("bad confirm write: no answer");
 		werrstr("no answer");
 		return -1;
 	}
@@ -70,84 +45,51 @@ confirmwrite(char *s)
 	else if(strcmp(ans, "no") == 0)
 		allow = 0;
 	else{
+		flog("bad confirm write: bad answer");
 		werrstr("bad answer");
 		return -1;
 	}
-	r = nil;
-	tagoff = -1;
-	for(l=&cusewait; *l; l=&(*l)->aux){
-		r = *l;
-		if(hastag(r->fid->aux, tag, &tagoff)){
-			*l = r->aux;
-			if(r->aux == nil)
-				cuselast = l;
+	for(c=conv; c; c=c->next){
+		if(tag == c->tag){
+			nbsendul(c->keywait, allow);
 			break;
 		}
 	}
-	if(r == nil || tagoff == -1){
+	if(c == nil){
 		werrstr("tag not found");
 		return -1;
 	}
-	fss = r->fid->aux;
-	fss->conf[tagoff].canuse = allow;
-	rpcread(r);
 	return 0;
 }
 
-void
-confirmqueue(Req *r, Fsstate *fss)
+int
+confirmkey(Conv *c, Key *k)
 {
-	int i, n;
-	char msg[1024];
+	int ret;
 
-	if(*confirminuse == 0){
-		respond(r, "confirm is closed");
-		return;
-	}
+	if(*confirminuse == 0)
+		return -1;
 
-	n = 0;
-	for(i=0; i<fss->nconf; i++)
-		if(fss->conf[i].canuse == -1){
-			n++;
-			snprint(msg, sizeof msg, "confirm tag=%lud %A", fss->conf[i].tag, fss->conf[i].key->attr);
-			logbufappend(&confbuf, msg);
-		}
-	if(n == 0){
-		respond(r, "no confirmations to wait for (bug)");
-		return;
-	}
-	*cuselast = r;
-	r->aux = nil;
-	cuselast = &r->aux;
+	lbappend(&confbuf, "confirm tag=%lud %A %N", c->tag, k->attr, k->privattr);
+	flog("confirm %A %N", k->attr, k->privattr);
+	c->state = "keyconfirm";
+	ret = recvul(c->keywait);
+	flog("confirm=%d %A %N", ret, k->attr, k->privattr);
+	return ret;
 }
 
-/* Yes, I am unhappy that the code below is a copy of the code above. */
-
 Logbuf needkeybuf;
-Req *needwait;		/* requests that need keys */
-Req **needlast = &needwait;
 
 void
 needkeyread(Req *r)
 {
-	logbufread(&needkeybuf, r);
+	lbread(&needkeybuf, r);
 }
 
 void
 needkeyflush(Req *r)
 {
-	Req **l;
-
-	for(l=&needwait; *l; l=&(*l)->aux){
-		if(*l == r){
-			*l = r->aux;
-			if(r->aux == nil)
-				needlast = l;
-			closereq(r);
-			break;
-		}
-	}
-	logbufflush(&needkeybuf, r);
+	lbflush(&needkeybuf, r);
 }
 
 int
@@ -156,7 +98,7 @@ needkeywrite(char *s)
 	char *t;
 	ulong tag;
 	Attr *a;
-	Req *r, **l;
+	Conv *c;
 
 	a = _parseattr(s);
 	if(a == nil){
@@ -165,40 +107,44 @@ needkeywrite(char *s)
 	}
 	if((t = _strfindattr(a, "tag")) == nil){
 		werrstr("no tag");
+		freeattr(a);
 		return -1;
 	}
 	tag = strtoul(t, 0, 0);
-	r = nil;
-	for(l=&needwait; *l; l=&(*l)->aux){
-		r = *l;
-		if(r->tag == tag){
-			*l = r->aux;
-			if(r->aux == nil)
-				needlast = l;
+	for(c=conv; c; c=c->next)
+		if(c->tag == tag){
+			nbsendul(c->keywait, 0);
 			break;
 		}
-	}
-	if(r == nil){
+	if(c == nil){
 		werrstr("tag not found");
+		freeattr(a);
 		return -1;
 	}
-	rpcread(r);
+	freeattr(a);
 	return 0;
 }
 
 int
-needkeyqueue(Req *r, Fsstate *fss)
+needkey(Conv *c, Attr *a)
 {
-	char msg[1024];
-
-	if(*needkeyinuse == 0)
+	if(c == nil || *needkeyinuse == 0)
 		return -1;
 
-	snprint(msg, sizeof msg, "needkey tag=%lud %s", r->tag, fss->keyinfo);
-	logbufappend(&needkeybuf, msg);
-	*needlast = r;
-	r->aux = nil;
-	needlast = &r->aux;
-	return 0;
+	lbappend(&needkeybuf, "needkey tag=%lud %A", c->tag, a);
+	flog("needkey %A", a);
+	return nbrecvul(c->keywait);
 }
 
+int
+badkey(Conv *c, Key *k, char *msg, Attr *a)
+{
+	if(c == nil || *needkeyinuse == 0)
+		return -1;
+
+	lbappend(&needkeybuf, "badkey tag=%lud %A %N\n%s\n%A",
+		c->tag, k->attr, k->privattr, msg, a);
+	flog("badkey %A / %N / %s / %A",
+		k->attr, k->privattr, msg, a);
+	return nbrecvul(c->keywait);
+}
