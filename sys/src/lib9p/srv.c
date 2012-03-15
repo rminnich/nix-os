@@ -1,26 +1,25 @@
 #include <u.h>
 #include <libc.h>
-#include <auth.h>
 #include <fcall.h>
 #include <thread.h>
 #include <9p.h>
 
 void (*_forker)(void(*)(void*), void*, int);
 
-static char Ebadattach[] = "unknown specifier in attach";
+/* static char Ebadattach[] = "unknown specifier in attach"; */
 static char Ebadoffset[] = "bad offset";
-static char Ebadcount[] = "bad count";
+/* static char Ebadcount[] = "bad count"; */
 static char Ebotch[] = "9P protocol botch";
 static char Ecreatenondir[] = "create in non-directory";
 static char Edupfid[] = "duplicate fid";
 static char Eduptag[] = "duplicate tag";
 static char Eisdir[] = "is a directory";
 static char Enocreate[] = "create prohibited";
-static char Enomem[] = "out of memory";
+/* static char Enomem[] = "out of memory"; */
 static char Enoremove[] = "remove prohibited";
 static char Enostat[] = "stat prohibited";
 static char Enotfound[] = "file not found";
-static char Enowrite[] = "write prohibited";
+/* static char Enowrite[] = "write prohibited"; */
 static char Enowstat[] = "wstat prohibited";
 static char Eperm[] = "permission denied";
 static char Eunknownfid[] = "unknown fid";
@@ -175,6 +174,7 @@ sversion(Srv*, Req *r)
 	r->ofcall.msize = r->ifcall.msize;
 	respond(r, nil);
 }
+
 static void
 rversion(Req *r, char *error)
 {
@@ -198,6 +198,7 @@ sauth(Srv *srv, Req *r)
 		respond(r, e);
 	}
 }
+
 static void
 rauth(Req *r, char *error)
 {
@@ -230,6 +231,7 @@ sattach(Srv *srv, Req *r)
 		respond(r, nil);
 	return;
 }
+
 static void
 rattach(Req *r, char *error)
 {
@@ -248,6 +250,7 @@ sflush(Srv *srv, Req *r)
 	else
 		respond(r, nil);
 }
+
 static int
 rflush(Req *r, char *error)
 {
@@ -340,7 +343,7 @@ rwalk(Req *r, char *error)
 			if(error==nil && r->ifcall.nwname!=0)
 				r->error = Enotfound;
 		}else
-			r->error = nil;	// No error on partial walks
+			r->error = nil;	/* No error on partial walks */
 	}else{
 		if(r->ofcall.nwqid == 0){
 			/* Just a clone */
@@ -415,6 +418,7 @@ sopen(Srv *srv, Req *r)
 	else
 		respond(r, nil);
 }
+
 static void
 ropen(Req *r, char *error)
 {
@@ -447,6 +451,7 @@ screate(Srv *srv, Req *r)
 	else
 		respond(r, Enocreate);
 }
+
 static void
 rcreate(Req *r, char *error)
 {
@@ -494,6 +499,7 @@ sread(Srv *srv, Req *r)
 	else
 		respond(r, "no srv->read");
 }
+
 static void
 rread(Req *r, char *error)
 {
@@ -612,6 +618,7 @@ sstat(Srv *srv, Req *r)
 	else
 		respond(r, Enostat);
 }
+
 static void
 rstat(Req *r, char *error)
 {
@@ -677,6 +684,7 @@ swstat(Srv *srv, Req *r)
 	}
 	srv->wstat(r);
 }
+
 static void
 rwstat(Req*, char*)
 {
@@ -701,6 +709,9 @@ srv(Srv *srv)
 
 	srv->fpool->srv = srv;
 	srv->rpool->srv = srv;
+
+	if(srv->start)
+		srv->start(srv);
 
 	while(r = getreq(srv)){
 		if(r->error){
@@ -751,6 +762,11 @@ respond(Req *r, char *error)
 	srv = r->srv;
 	assert(srv != nil);
 
+	if(r->responded){
+		assert(r->pool);
+		goto free;
+	}
+		
 	assert(r->responded == 0);
 	r->error = error;
 
@@ -795,22 +811,65 @@ if(chatty9p)
 		abort();
 	}
 	assert(n > 2);
+	/*
+	 * There is a race here - we must remove the entry before
+	 * the write, so that if the client is very fast and reuses the
+	 * tag, the read loop won't think it is still in use.
+	 * 
+	 * By removing the entry before the write, we open up a 
+	 * race with incoming Tflush messages.  Specifically, an
+	 * incoming Tflush might not see r even though it has not
+	 * yet been responded to.  It would then send an Rflush
+	 * immediately, potentially before we do the write.  This can't
+	 * happen because we already old srv->wlock, so nothing
+	 * is going out on the wire before this write.
+	 */
 	if(r->pool)	/* not a fake */
 		closereq(removereq(r->pool, r->ifcall.tag));
+
+	qlock(&r->lk);
+	r->responded = 1;
+	if(r->pool)
+	if(r->ref.ref == 1+r->nflush)
+	if(r->fid){
+		/*
+		 * There are no references other than in our r->flush array,
+		 * so no one else should be accessing r concurrently.
+		 * Close the fid now, before responding to the message.
+		 * 
+		 * If the client is behaving (there are no outstanding T-messages
+		 * that reference r->fid) and the message is a Tclunk or Tremove,
+		 * then this closefid will call destroyfid.  
+		 * 
+		 * This means destroyfid can't piddle around 
+		 * indefinitely (we're holding srv->wlock!), but it provides
+		 * for tighter semantics as to when destroyfid is called.
+		 *
+		 * LANL has observed cases where waiting until after the write
+		 * can delay a closefid on a Twrite for many 9P transactions,
+		 * so that a handful of transactions can happen including a Tclunk
+		 * and a Topen, and the original fid will still not be destroyed.
+		 */
+		closefid(r->fid);
+		r->fid = nil;
+	}
+	qunlock(&r->lk);
 	m = write(srv->outfd, srv->wbuf, n);
 	if(m != n)
 		sysfatal("lib9p srv: write %d returned %d on fd %d: %r", n, m, srv->outfd);
 	qunlock(&srv->wlock);
 
+free:
 	qlock(&r->lk);	/* no one will add flushes now */
-	r->responded = 1;
-	qunlock(&r->lk);
 
-	for(i=0; i<r->nflush; i++)
+	for(i=0; i<r->nflush; i++){
+		r->flush[i]->oldreq = nil;	/* so it doesn't try to lock us! */
 		respond(r->flush[i], nil);
+	}
 	free(r->flush);
 	r->flush = nil;
 	r->nflush = 0;
+	qunlock(&r->lk);
 
 	if(r->pool)
 		closereq(r);
