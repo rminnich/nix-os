@@ -922,14 +922,16 @@ walk(Chan **cp, char **names, int nnames, int nomount, int *nerror)
 				 * mh->mount->to == c, so start at mh->mount->next
 				 */
 				rlock(&mh->lock);
-				for(f = mh->mount->next; f; f = f->next)
-					if((wq = ewalk(f->to, nil, names+nhave, ntry)) != nil)
-						break;
-				runlock(&mh->lock);
-				if(f != nil){
-					dc = f->to->dev->dc;
-					devno = f->to->devno;
+				if(mh->mount){
+					for(f = mh->mount->next; f != nil; f = f->next){
+						if((wq = ewalk(f->to, nil, names+nhave, ntry)) != nil){
+							dc = f->to->dev->dc;
+							devno = f->to->devno;
+							break;
+						}
+					}
 				}
+				runlock(&mh->lock);
 			}
 			if(wq == nil){
 				cclose(c);
@@ -1551,7 +1553,7 @@ if(c->umh != nil){
 		goto Open;
 
 	default:
-		panic("unknown namec access %d\n", amode);
+		panic("unknown namec access %d", amode);
 	}
 
 	/* place final element in genbuf for e.g. exec */
