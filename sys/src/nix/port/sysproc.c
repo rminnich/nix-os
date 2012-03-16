@@ -409,6 +409,8 @@ execac(Ar0* ar0, int flags, char *ufile, char **argv)
 
 	if(up->ac != nil && up->ac != m)
 		up->color = corecolor(up->ac->machno);
+	else
+		up->color = corecolor(m->machno);
 
 	/*
 	 * The new stack is created in ESEG, temporarily mapped elsewhere.
