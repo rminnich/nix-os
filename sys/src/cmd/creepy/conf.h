@@ -26,8 +26,9 @@ enum
 	Niptr = 4,		/* # of indirect data pointers */
 #endif
 
-	Mminfree = 50,		/* low on mem blocks */
-	Dminfree = 1000,		/* low on disk blocks */
+	Mmaxdirtypcent = 50,	/* Max % of blocks dirty in mem */
+	Mminfree = 50,		/* # blocks when low on mem blocks */
+	Dminfree = 1000,		/* # blocks when low on disk blocks */
 	Dminattrsz = Dblksz/2,	/* min size for attributes */
 
 	Nahead = 10 * Dblksz,	/* # of bytes to read ahead */
@@ -48,6 +49,12 @@ enum
 
 	Mmaxfree = 2*Mminfree,		/* high on mem blocks */
 	Dmaxfree = 2*Dminfree,		/* high on disk blocks */
+	Mzerofree = 10,			/* out of memory blocks */
 	Dzerofree = 10,			/* out of disk blocks */
+
+	Unamesz = 20,
+	Statsbufsz = 1024,
+
+	Syncival = 60 * 1000,	/* desired sync intervals (ms) */
 };
 

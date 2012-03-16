@@ -13,52 +13,56 @@
 #include "fns.h"
 
 /*
- * CAUTION: We keep the format used in fossil, but,
- * creepy rules are simpler:
- * names are ignored. uids are names:
- * 	Nemo is nemo and nobody else is nemo,
- *	new users should pick a different name. that one is taken.
- * there is no leadership.
- *	members may chown files to the group, may chmod files in the group,
- *	and may chgrp files to the group.
- *	Plus, to donate a file, you must be the owner.
+ * Locking is coarse, only functions used from outside
+ * care to lock the user information.
  *
- * sorry. 9 rules were too complex to remember.
+ * Access checks are like those described in Plan 9's stat(5), but for:
+ * 
+ * - to change gid, the group leader is not required to be a leader
+ *   of the new group; it suffices if he's a member.
+ * - attempts to change muid are honored if the user is "allowed",
+ *   and ignored otherwise.
+ * - "allowed" users can also set atime.
+ * - attributes other than length, name, uid, gid, muid, mode, atime, and mtime
+ *   are ignored (no error raised if they are not void)
+ * 
+ *
+ * The user file has the format:
+ *	uid:name:leader:members
+ * uid is a number.
+ *
+ * This program insists on preserving uids already seen.
+ * That is, after editing /active/adm/users, the server program will notice
+ * and re-read the file, then clean it up, and upate its contents.
+ *
+ * Cleaning ensures that uids for known users are kept as they were, and
+ * that users not yet seen get unique uids. Numeric uids are only an internal
+ * concept, the protocol uses names.
  */
 
-typedef struct Usr Usr;
-typedef struct Member Member;
+/*
+ * The uid numbers are irrelevant, they are rewritten.
+ * XXX: There's code assuming the positions of these users...
+ * search for it and make it search the user if needed or use a global for it.
+ */
+static char *defaultusers = 
+	"1:none::\n"
+	"2:adm:adm:sys, elf \n"
+	"3:sys::glenda,elf\n"
+	"4:glenda:glenda:\n"
+	"5:elf:elf:sys\n";
 
-struct Member
-{
-	Member *next;
-	char *uid;
-	Usr *u;
-};
-
-struct Usr
-{
-	Usr *next;
-	char *uid;
-	char *lead;
-	Member *members;
-};
-
-char *defaultusers = 
-	"adm:adm:adm:sys\n"
-	"elf:elf:elf:sys\n"
-	"none:none::\n"
-	"noworld:noworld::\n"
-	"sys:sys::glenda\n"
-	"glenda:glenda:glenda:\n";
-
-static Usr *usrs[Uhashsz];
+static RWLock ulk;
+static Usr *uids[Uhashsz];
+static Usr *unames[Uhashsz];
+static Usr *uwrite;
+static int uidgen;
 
 static uint
-uhash(char* s)
+usrhash(char* s)
 {
 	uchar *p;
-	u32int hash;
+	uint hash;
 
 	hash = 0;
 	for(p = (uchar*)s; *p != '\0'; p++)
@@ -67,129 +71,269 @@ uhash(char* s)
 	return hash % Uhashsz;
 }
 
-static Usr*
-findusr(char *uid)
+static int
+findmember(Usr *u, int member)
 {
-	Usr *u;
-
-	for(u = usrs[uhash(uid)]; u != nil; u = u->next)
-		if(strcmp(u->uid, uid) == 0)
-			return u;
-	return nil;
-}
-
-int
-member(char *uid, char *member)
-{
-	Usr *u;
 	Member *m;
 
-	if(strcmp(uid, member) == 0)
-		return 1;
-	u = findusr(uid);
-	if(u == nil)
-		return 0;
 	for(m = u->members; m != nil; m = m->next)
-		if(strcmp(member, m->uid) == 0)
+		if(member == m->u->id)
 			return 1;
 	return 0;
 }
 
 static Usr*
-mkusr(char *uid, char *lead)
+finduid(int uid)
+{
+	Usr *u;
+
+	for(u = uids[uid%Uhashsz]; u != nil; u = u->inext)
+		if(u->id == uid)
+			return u;
+	return nil;
+}
+
+static Usr*
+finduname(char *name, int mkit)
 {
 	Usr *u;
 	uint h;
 
-	h = uhash(uid);
-	for(u = usrs[h]; u != nil; u = u->next)
-		if(strcmp(u->uid, uid) == 0)
-			error("dup uid %s", uid);
-
-	u = mallocz(sizeof *u, 1);
-	u->uid = strdup(uid);
-	if(lead != 0)
-		u->lead = strdup(lead);
-	u->next = usrs[h];
-	usrs[h] = u;
+	h = usrhash(name);
+	for(u = unames[h]; u != nil; u = u->nnext)
+		if(strcmp(u->name, name) == 0)
+			return u;
+	if(mkit){
+		/* might be leaked. see freeusr() */
+		u = mallocz(sizeof *u, 1);
+		strecpy(u->name, u->name+sizeof u->name, name);
+		u->nnext = unames[h];
+		unames[h] = u;
+	}
 	return u;
+}
+
+char*
+usrname(int uid)
+{
+	Usr *u;
+
+	xrwlock(&ulk, Rd);
+	u = finduid(uid);
+	if(u == nil){
+		xrwunlock(&ulk, Rd);	/* zero patatero: */
+		return "ZP";		/*    disgusting, isn't it? */
+	}
+	xrwunlock(&ulk, Rd);
+	return u->name;
+}
+
+int
+usrid(char *n)
+{
+	Usr *u;
+
+	xrwlock(&ulk, Rd);
+	u = finduname(n, Dontmk);
+	if(u == nil || !u->enabled){
+		xrwunlock(&ulk, Rd);
+		return -1;
+	}
+	xrwunlock(&ulk, Rd);
+	return u->id;
+}
+
+int
+member(int uid, int member)
+{
+	Usr *u;
+	int r;
+
+	if(uid == member)
+		return 1;
+	xrwlock(&ulk, Rd);
+	u = finduid(uid);
+	r = u != nil && u->lead != nil && u->lead->id == member;
+	r |= u != nil && findmember(u, member);
+	xrwunlock(&ulk, Rd);
+	return r;
+}
+
+int
+leader(int gid, int lead)
+{
+	Usr *u;
+	int r;
+
+	xrwlock(&ulk, Rd);
+	u = finduid(gid);
+	r = 0;
+	if(u != nil)
+		if(u->lead != nil)
+			r = u->lead->id == lead;
+		else
+			r = findmember(u, lead);
+	xrwunlock(&ulk, Rd);
+	return r;
+}
+
+static void
+clearmembers(Usr *u)
+{
+	Member *m;
+
+	while(u->members != nil){
+		m = u->members;
+		u->members = m->next;
+		free(m);
+	}
 }
 
 static void
 addmember(Usr *u, char *n)
 {
-	Member *m;
+	Member *m, **ml;
 
-	for(m = u->members; m != nil; m = m->next)
-		if(strcmp(m->uid, n) == 0)
-			error("%s already a member of %s", n, u->uid);
-	m = mallocz(sizeof *m, 1);
-	m->uid = strdup(n);
-	m->next = u->members;
-	u->members = m;
-}
-
-static void
-freemember(Member *m)
-{
-	if(m == nil)
-		return;
-	free(m->uid);
-	free(m);
-}
-
-static void
-freeusr(Usr *u)
-{
-	Member *m;
-
-	if(u == nil)
-		return;
-	while(u->members != nil){
-		m = u->members;
-		u->members = m->next;
-		freemember(m);
-	}
-	free(u->uid);
-	free(u->lead);
-	free(u);
-}
-
-void
-clearusers(void)
-{
-	Usr *u;
-	int i;
-
-	for(i = 0; i < nelem(usrs); i++)
-		while(usrs[i] != nil){
-			u = usrs[i];
-			usrs[i] = u->next;
-			freeusr(u);
+	for(ml = &u->members; (m = *ml) != nil; ml = &m->next)
+		if(strcmp(m->u->name, n) == 0){
+			xrwunlock(&ulk, Wr);
+			fprint(2, "%s: '%s' is already a member of '%s'",
+				argv0, n, u->name);
+			return;
 		}
+	m = mallocz(sizeof *m, 1);
+	m->u = finduname(n, Mkit);
+	*ml = m;
 }
 
 static void
 checkmembers(Usr *u)
 {
+	Member *m, **ml;
+
+	for(ml = &u->members; (m = *ml) != nil; )
+		if(m->u->id == 0){
+			fprint(2, "no user '%s' (member of '%s')\n",
+				m->u->name, u->name);
+			*ml = m->next;
+			free(m);
+		}else
+			ml = &m->next;
+}
+
+int
+usrfmt(Fmt *fmt)
+{
+	Usr *usr;
 	Member *m;
 
-	d9print("checkmembers %s\n", u->uid);
-	for(m = u->members; m != nil; m = m->next)
-		if((m->u = findusr(m->uid)) == nil){
-			fprint(2, "no user '%s'\n", m->uid);
-			consprint("no user '%s'\n", m->uid);
+	usr = va_arg(fmt->args, Usr*);
+
+	if(usr == nil)
+		return fmtprint(fmt, "#no user");
+	fmtprint(fmt, "%s%d:%s:", usr->enabled?"":"!",
+		usr->id, usr->name);
+	fmtprint(fmt, "%s:", usr->lead?usr->lead->name:"");
+	for(m = usr->members; m != nil; m = m->next){
+		fmtprint(fmt, "%s", m->u->name);
+		if(m->next != nil)
+			fmtprint(fmt, ",");
+	}
+	return 0;
+}
+
+static void
+dumpusers(void)
+{
+	int i;
+	Usr *usr;
+
+	for(i = 0; i < nelem(uids); i++)
+		for(usr = uids[i]; usr != nil; usr = usr->inext){
+			fprint(2, "%A\n", usr);
 		}
 }
 
-void
-parseusers(char *u)
+/*
+ * Add a user.
+ * A partial user entry might already exists, as a placeholder
+ * for the user name (if seen before in the file).
+ * If the user was known, it's uid is preserved.
+ * If not, a new unique uid is assigned.
+ */
+static Usr*
+mkusr(char *name)
 {
-	char *c, *nc, *p, *np, *args[5];
-	int nargs, i;
+	Usr *u;
+	uint h;
+
+	u = finduname(name, Mkit);
+	if(u->id == 0){
+		/* first seen! */
+		u->id = ++uidgen;
+		h = u->id%Uhashsz;
+		u->inext = uids[h];
+		uids[h] = u;
+	}
+	if(strcmp(name, "write") == 0)
+		uwrite = u;
+	return u;
+}
+
+static void
+addusr(char *p)
+{
+	char *c, *nc, *s, *args[5];
+	int nargs, on;
 	Usr *usr;
 
-	u = strdup(u);
+	on = 1;
+	if(*p == '!'){
+		on = 0;
+		p++;
+	}
+	nargs = getfields(p, args, nelem(args), 0, ":");
+	if(nargs != 4)
+		error("wrong number of fields %s", args[0]);
+	if(*args[1] == 0)
+		error("null name");
+	usr = mkusr(args[1]);
+	usr->enabled = on;
+	usr->lead = finduname(args[2], Mkit);
+	clearmembers(usr);
+	for(c = args[3]; c != nil; c = nc){
+		while(*c == ' ' || *c == '\t')
+			c++;
+		if(*c == 0)
+			break;
+		nc = utfrune(c, ',');
+		if(nc != nil)
+			*nc++ = 0;
+		s = utfrune(c, ' ');
+		if(s != nil)
+			*s = 0;
+		s = utfrune(c, '\t');
+		if(s != nil)
+			*s = 0;
+		if(*c != 0)
+			addmember(usr, c);
+	}
+}
+
+/*
+ * Absorb the new user information as read from u.
+ * Old users are not removed, but renamed to be disabled.
+ */
+static void
+rwdefaultusers(void)
+{
+	char *u, *c, *p, *np;
+	static int once;
+
+	if(once++ > 0)
+		return;
+
+	u = strdup(defaultusers);
 	if(catcherror()){
 		free(u);
 		error(nil);
@@ -202,34 +346,132 @@ parseusers(char *u)
 		c = utfrune(p, '#');
 		if(c != nil)
 			*c = 0;
+		if(*p == 0)
+			continue;
 		if(catcherror()){
 			fprint(2, "users: %r\n");
 			consprint("users: %r\n");
 			continue;
 		}
-		if(*p == 0)
-			continue;
-		nargs = getfields(p, args, nelem(args), 0, ":");
-		if(nargs != 4)
-			error("wrong number of fields %s", args[0]);
-		if(*args[0] == 0 || *args[1] == 0)
-			error("null uid or name");
-		usr = mkusr(args[0], args[2]);
-		for(c = args[3]; c != nil; c = nc){
-			if(*c == 0)
-				break;
-			nc = utfrune(c, ',');
-			if(nc != nil)
-				*nc++ = 0;
-			addmember(usr, c);
-		}
+		addusr(p);
 		noerror();
 	}while((p = np) != nil);
-	for(i = 0; i < nelem(usrs); i++)
-		for(usr = usrs[i]; usr != nil; usr = usr->next)
-			checkmembers(usr);
+
+	if(dbg['d']){
+		dprint("users:\n");
+		dumpusers();
+		dprint("\n");
+	}
 	noerror();
 	free(u);
+
+}
+
+/*
+ * This should be called at start time and whenever
+ * the user updates /active/adm/users, to rewrite it according to our
+ * in memory data base.
+ */
+void
+rwusers(Memblk *uf)
+{
+	static char ubuf[512];
+	char *p, *nl, *c;
+	uvlong off;
+	u64int z;
+	long tot, nr, nw;
+	int i;
+	Usr *usr;
+
+	xrwlock(&ulk, Wr);
+	if(catcherror()){
+		fprint(2, "%s: users: %r\n", argv0);
+		goto update;
+	}
+	if(uf == nil){
+		rwdefaultusers();
+		xrwunlock(&ulk, Wr);
+		return;
+	}
+	tot = 0;
+	p = nil;
+	for(off = 0; off < uf->d.length; off += nr){
+		nr = dfpread(uf, ubuf + tot, sizeof ubuf - tot - 1, off);
+		tot += nr;
+		ubuf[tot] = 0;
+		for(p = ubuf; p != nil && p - ubuf < tot; p = nl){
+			nl = utfrune(p, '\n');
+			if(nl == nil){
+				tot = strlen(p);
+				memmove(ubuf, p, tot+1);
+				break;
+			}
+			*nl++ = 0;
+			c = utfrune(p, '#');
+			if(c != nil)
+				*c = 0;
+			if(*p != 0)
+				addusr(p);
+		}
+	}
+	if(p != nil)
+		fprint(2, "%s: last line in users is not a full line\n", argv0);
+
+	noerror();
+	if(uf->frozen){	/* loaded at boot time */
+		xrwunlock(&ulk, Wr);
+		return;
+	}
+
+update:
+	if(catcherror()){
+		xrwunlock(&ulk, Wr);
+		fprint(2, "%s: users: %r\n", argv0);
+		return;	/* what could we do? */
+	}
+	ismelted(uf);
+	isrwlocked(uf, Wr);
+	z = 0;
+	dfwattr(uf, "length", &z, sizeof z);
+	off = 0;
+	dprint("users updated:\n");
+	for(i = 0; i < uidgen; i++)
+		if((usr=finduid(i)) != nil){
+			dprint("%A\n", usr);
+			p = seprint(ubuf, ubuf+sizeof ubuf, "%A\n", usr);
+			nw = dfpwrite(uf, ubuf, p - ubuf, &off);
+			off += nw;
+		}
+	noerror();
+	xrwunlock(&ulk, Wr);
+}
+
+int
+writedenied(int uid)
+{
+	int r;
+
+	if(uwrite == nil)
+		return 0;
+	xrwlock(&ulk, Rd);
+	r = findmember(uwrite, uid) == 0;
+	xrwunlock(&ulk, Rd);
+	return r;
+}
+
+int
+allowed(int uid)
+{
+	Usr *u;
+	int r;
+
+	xrwlock(&ulk, Rd);
+	u = finduid(uid);
+	r = 0;
+	if(u)
+		r = u->allow;
+	xrwunlock(&ulk, Rd);
+	return r;
 }
 
 /*
@@ -265,7 +507,9 @@ consread(char *buf, long count)
 
 	if(count <= 0)		/* shouldn't happen */
 		return 0;
+	quiescent(Yes);
 	s = recvp(fs->consc);
+	quiescent(No);
 	tot = 0;
 	do{
 		nr = strlen(s);
@@ -318,28 +562,21 @@ chalt(int, char**)
 }
 
 static void
-cusers(int argc, char *argv[])
+cusers(int, char *[])
 {
 	int i;
-	Usr *u;
+	Usr *usr;
 
-	switch(argc){
-	case 1:
-		for(i = 0; i < nelem(usrs); i++)
-			for(u = usrs[i]; u != nil; u = u->next)
-				consprint("%s\n", u->uid);
-		break;
-	case 2:
-		if(strcmp(argv[1], "-r") == 0)
-			consprint("-r not implemented\n");
-		else if(strcmp(argv[1], "-w") == 0)
-			consprint("-w not implemented\n");
-		else
-			consprint("usage: users [-r|-w]\n");
-		break;
-	default:
-		consprint("usage: users [-r|-w]\n");
+	xrwlock(&ulk, Rd);
+	if(catcherror()){
+		xrwunlock(&ulk, Rd);
+		error(nil);
 	}
+	for(i = 0; i < uidgen; i++)
+		if((usr=finduid(i)) != nil)
+			consprint("%A\n", usr);
+	noerror();
+	xrwunlock(&ulk, Rd);
 }
 
 static void
@@ -356,9 +593,7 @@ cstats(int argc, char *argv[])
 		consprint("usage: %s [-c]\n", argv[0]);
 		return;
 	}
-	fsstats(clr);
-	ninestats(clr);
-	ixstats(clr);
+	consprint("%s\n", updatestats(clr));
 }
 
 static void
@@ -414,6 +649,89 @@ cfids(int, char**)
 	dumpfids();
 }
 
+static void
+crwerr(int, char *argv[])
+{
+	if(*argv[0] == 'r'){
+		swreaderr = atoi(argv[1]);
+		fprint(2, "%s: sw read err count = %d\n", argv0, swreaderr);
+	}else{
+		swwriteerr = atoi(argv[1]);
+		fprint(2, "%s: sw write err count = %d\n", argv0, swwriteerr);
+	}
+}
+
+static void
+ccheck(int argc, char *argv[])
+{
+	switch(argc){
+	case 1:
+		fscheck();
+		break;
+	case 2:
+		if(strcmp(argv[1], "-v") == 0){
+			if(fscheck() > 0)
+				fsdump(1, 0);
+		}else
+			consprint("usage: %s [-v]\n", argv[0]);
+		break;
+	default:
+		consprint("usage: %s [-v]\n", argv[0]);
+	}
+}
+
+static void
+clru(int, char**)
+{
+	fslru();
+}
+
+
+static void
+creclaim(int, char**)
+{
+	fsreclaim();
+}
+
+static void
+callow(int argc, char *argv[])
+{
+	Usr *u, *usr;
+	int i;
+
+	usr = nil;
+	switch(argc){
+	case 1:
+		if(*argv[0] == 'd')
+			for(i = 0; i < nelem(uids); i++)
+				for(u = uids[i]; u != nil; u = u->inext)
+					u->allow = 0;
+		break;
+	case 2:
+		xrwlock(&ulk, Wr);
+		usr = finduname(argv[1], Dontmk);
+		if(usr == nil){
+			xrwunlock(&ulk, Wr);
+			consprint("user not found\n");
+			return;
+		}
+		usr->allow = (*argv[0] == 'a');
+		xrwunlock(&ulk, Wr);
+		break;
+	default:
+		consprint("usage: %s [uid]\n", argv[0]);
+		return;
+	}
+	xrwlock(&ulk, Rd);
+	for(i = 0; i < nelem(uids); i++)
+		for(u = uids[i]; u != nil; u = u->inext)
+			if(u->allow)
+				consprint("user '%s' is allowed\n", u->name);
+			else if(u == usr)
+				consprint("user '%s' is not allowed\n", u->name);
+	xrwunlock(&ulk, Rd);
+}
+
 static void chelp(int, char**);
 
 static Cmd cmds[] =
@@ -423,10 +741,17 @@ static Cmd cmds[] =
 	{"stats",	cstats, 0, "stats [-c]"},
 	{"sync",	csync, 1, "sync"},
 	{"halt",	chalt, 1, "halt"},
-	{"users",	cusers, 0, "users [-r|-w]"},
+	{"users",	cusers, 1, "users"},
 	{"debug",	cdebug, 2, "cdebug [+-]FLAGS | on | off"},
 	{"locks",	clocks, 2, "locks [on|off|dump]"},
 	{"fids",		cfids, 1, "fids"},
+	{"rerr",	crwerr, 2, "rerr n"},
+	{"werr",	crwerr, 2, "werr n"},
+	{"check",	ccheck, 0, "check"},
+	{"lru",		clru, 1, "lru"},
+	{"reclaim",	creclaim, 1, "reclaim"},
+	{"allow",	callow, 0, "allow [uid]"},
+	{"disallow",	callow, 0, "disallow [uid]"},
 	{"?",		chelp, 1, "?"},
 };
 
@@ -446,7 +771,6 @@ consinit(void)
 {
 	consprint("creepy> ");
 }
-
 
 long
 conswrite(char *ubuf, long count)
@@ -491,10 +815,17 @@ conswrite(char *ubuf, long count)
 		for(i = 0; i < nelem(cmds); i++){
 			if(strcmp(args[0], cmds[i].name) != 0)
 				continue;
+			quiescent(Yes);
+			if(catcherror()){
+				quiescent(No);
+				error(nil);
+			}
 			if(cmds[i].nargs != 0 && cmds[i].nargs != nargs)
 				consprint("usage: %s\n", cmds[i].usage);
 			else
 				cmds[i].f(nargs, args);
+			noerror();
+			quiescent(No);
 			break;
 		}
 		if(i == nelem(cmds))

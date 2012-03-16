@@ -13,14 +13,49 @@
 #include "fns.h"
 
 int
-member(char *uid, char *member)
+usrid(char*)
 {
-	return strcmp(uid, member);
+	return 3;
+}
+
+char*
+usrname(int)
+{
+	return "sys";
+}
+
+int
+member(int uid, int member)
+{
+	return uid == member;
+}
+
+int
+allowed(int)
+{
+	return 1;
 }
 
 void
 meltfids(void)
 {
+}
+
+void
+rwusers(Memblk*)
+{
+}
+
+char*
+ninestats(char *s, char*, int)
+{
+	return s;
+}
+
+char*
+ixstats(char *s, char*, int)
+{
+	return s;
 }
 
 static void
@@ -46,6 +81,7 @@ threadmain(int argc, char *argv[])
 		if((ARGC() >= 'A' && ARGC() <= 'Z') || ARGC() == '9'){
 			dbg['d'] = 1;
 			dbg[ARGC()] = 1;
+			fatalaborts = 1;
 		}else
 			usage();
 	}ARGEND;
@@ -60,7 +96,7 @@ threadmain(int argc, char *argv[])
 		fatal("error: %r");
 	fsfmt(dev);
 	if(verb)
-		fsdump(0, 0);
+		fsdump(0, Mem);
 	noerror();
 	exits(nil);
 }

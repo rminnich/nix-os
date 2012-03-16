@@ -1,4 +1,3 @@
-typedef struct Fmeta Fmeta;
 typedef struct Ddatablk Ddatablk;
 typedef struct Dptrblk Dptrblk;
 typedef struct Drefblk Drefblk;
@@ -9,7 +8,6 @@ typedef union Diskblk Diskblk;
 typedef struct Diskblkhdr Diskblkhdr;
 typedef struct Memblk Memblk;
 typedef struct Fsys Fsys;
-typedef struct Dentry Dentry;
 typedef struct Dmeta Dmeta;
 typedef struct Blksl Blksl;
 typedef struct Mfile Mfile;
@@ -20,6 +18,9 @@ typedef struct Next Next;
 typedef struct Lstat Lstat;
 typedef struct List List;
 typedef struct Link Link;
+typedef struct Usr Usr;
+typedef struct Member Member;
+
 
 /*
  * Conventions:
@@ -60,8 +61,6 @@ typedef struct Link Link;
  *	- disk refs are frozen while waiting to go to disk during a fs freeze.
  *	  in which case db*ref functions write the block in place and melt it.
  *	- frozen blocks are quiescent.
- *	- the block epoch number for a on-disk block is the time when it
- *	  was written (thus it's archived "/" has a newer epoch).
  *	- mb*() functions do not raise errors.
  *
  * Locking:
@@ -91,9 +90,18 @@ enum{
 	Rd=0,
 	Wr,
 
+	Dontmk = 0,
+	Mkit,
+
 	Tqlock = 0,
 	Trwlock,
 	Tlock,
+
+	No = 0,
+	Yes,
+
+	/* mtime is ns in creepy, but s in 9p */
+	NSPERSEC = 1000000000ULL,
 };
 
 
@@ -107,6 +115,11 @@ struct Lstat
 };
 
 
+enum
+{
+	DMUSERS = 0x01000000ULL,
+	DMBITS = DMDIR|DMAPPEND|DMEXCL|DMTMP|0777,
+};
 
 #define HOWMANY(x, y)	(((x)+((y)-1))/(y))
 #define ROUNDUP(x, y)	(HOWMANY((x), (y))*(y))
@@ -142,11 +155,14 @@ enum
 				/*...*/
 	DBctl = ~0,		/* DBfile, never on disk. arg for dballoc */
 
-	Dblkhdrsz = 2*BIT64SZ,
-	Nblkgrpsz = (Dblksz - Dblkhdrsz) / BIT64SZ,
+	Daddrsz = BIT64SZ,
+	Dblkhdrsz = BIT64SZ,
+	Nblkgrpsz = (Dblksz - Dblkhdrsz) / Daddrsz,
 	Dblk0addr = 2*Dblksz,
 
 };
+
+typedef u64int daddrt;		/* disk addreses and sizes */
 
 struct Ddatablk
 {
@@ -155,27 +171,31 @@ struct Ddatablk
 
 struct Dptrblk
 {
-	u64int	ptr[1];		/* array of block addresses */
+	daddrt	ptr[1];		/* array of block addresses */
 };
 
 struct Drefblk
 {
-	u64int	ref[1];		/* disk RC or next block in free list */
+	daddrt	ref[1];		/* disk RC or next block in free list */
 };
 
 struct Dattrblk
 {
-	u64int	next;		/* next block used for attribute data */
+	daddrt	next;		/* next block used for attribute data */
 	uchar	attr[1];	/* raw attribute data */
 };
 
-/*
- * directory entry. contents of data blocks in directories.
- * Each block stores only an integral number of Dentries, for simplicity.
- */
-struct Dentry
+struct Dmeta			/* mandatory metadata */
 {
-	u64int	file;		/* file address or 0 when unused */
+	u64int	id;		/* ctime, actually */
+	u64int	mode;
+	u64int	atime;
+	u64int	mtime;
+	u64int	length;
+	u64int	uid;
+	u64int	gid;
+	u64int	muid;
+	/* name\0 */
 };
 
 /*
@@ -190,35 +210,20 @@ struct Dentry
  * The pointer in iptr[n] is an n-indirect data pointer.
  *
  * Directories are also files, but their data is simply an array of
- * Dentries.
+ * disk addresses for files.
+ *
+ * To ensure embed is a multiple of dir entries, we declare it here as [8]
+ * and not as [1].
  */
 struct Dfileblk
 {
 	u64int	asize;		/* attribute size */
-	u64int	aptr;		/* attribute block pointer */
-	u64int	dptr[Ndptr];	/* direct data pointers */
-	u64int	iptr[Niptr];	/* indirect data pointers */
-	uchar	embed[1];	/* embedded attrs and data */
-};
-
-enum
-{
-	FMuid = 0,	/* strings in mandatory attributes */
-	FMgid,
-	FMmuid,
-	FMname,
-	FMnstr,
-};
-
-struct Dmeta			/* mandatory metadata */
-{
-	u64int	id;		/* ctime, actually */
-	u64int	mode;
-	u64int	atime;
-	u64int	mtime;
-	u64int	length;
-	u16int	ssz[FMnstr];
-	/* uid\0gid\0muid\0name\0 */
+	u64int	ndents;		/* # of directory entries, for dirs */
+	daddrt	aptr;		/* attribute block pointer */
+	daddrt	dptr[Ndptr];	/* direct data pointers */
+	daddrt	iptr[Niptr];	/* indirect data pointers */
+	Dmeta;			/* predefined attributes, followed by name */
+	uchar	embed[Daddrsz];	/* embedded attrs and data */
 };
 
 #define	MAGIC	0x6699BCB06699BCB0ULL
@@ -234,11 +239,12 @@ struct Dmeta			/* mandatory metadata */
 struct Dsuperblk
 {
 	u64int	magic;		/* MAGIC */
-	u64int	free;		/* first free block on list  */
-	u64int	eaddr;		/* end of the assigned disk portion */
-	u64int	root;		/* address of /archive in disk */
+	daddrt	free;		/* first free block on list  */
+	daddrt	eaddr;		/* end of the assigned disk portion */
+	daddrt	root;		/* address of /archive in disk */
 	u64int	oddrefs;	/* use odd ref blocks? or even ref blocks? */
 	u64int	ndfree;		/* # of blocks in free list */
+	u64int	maxuid;		/* 1st available uid */
 	u64int	dblksz;		/* only for checking */
 	u64int	nblkgrpsz;	/* only for checking */
 	u64int	dminattrsz;	/* only for checking */
@@ -247,8 +253,6 @@ struct Dsuperblk
 	u64int	dblkdatasz;	/* only for checking */
 	u64int	embedsz;	/* only for checking */
 	u64int	dptrperblk;	/* only for checking */
-	uchar	vac0[24];	/* score for last venti archive + 4pad */
-	uchar	vac1[24];	/* score for previous venti archive + 4pad */
 };
 
 enum
@@ -294,13 +298,15 @@ union Diskblk
 
 /*
  * These are derived.
+ * Embedsz must compensate that embed[] was declared as embed[Daddrsz],
+ * to make it easy for the compiler to keep things aligned on 64 bits.
  */
 enum
 {
 	Dblkdatasz = sizeof(Diskblk) - sizeof(Diskblkhdr),
-	Embedsz	= Dblkdatasz - sizeof(Dfileblk),
-	Dptrperblk = Dblkdatasz / sizeof(u64int),
-	Drefperblk = Dblkdatasz / sizeof(u64int),
+	Embedsz	= Dblkdatasz - sizeof(Dfileblk) + Daddrsz,
+	Dptrperblk = Dblkdatasz / Daddrsz,
+	Drefperblk = Dblkdatasz / Daddrsz,
 };
 
 
@@ -315,31 +321,24 @@ enum
  */
 
 /*
- * File metadata
- */
-struct Fmeta
-{
-	Dmeta;
-	char	*uid;
-	char	*gid;
-	char	*muid;
-	char	*name;
-};
-
-/*
  * On memory file information.
  */
 struct Mfile
 {
 	Mfile*	next;		/* in free list */
 	RWLock;
-	Fmeta;
+
+	char	*uid;		/* reference to the user table */
+	char	*gid;		/* reference to the user table */
+	char	*muid;		/* reference to the user table */
+	char	*name;		/* reference to the disk block */
 
 	Memblk*	melted;		/* next version for this one, if frozen */
 	ulong	lastbno;	/* last accessed block nb within this file */
 	ulong	sequential;	/* access has been sequential */
 
 	int	open;		/* for DMEXCL */
+	int	users;
 	uvlong	raoffset;	/* we did read ahead up to this offset */
 	int	wadone;		/* we did walk ahead here */
 };
@@ -364,7 +363,7 @@ struct Link
 struct Memblk
 {
 	Ref;
-	u64int	addr;			/* block address */
+	daddrt	addr;			/* block address */
 	Memblk	*next;			/* in hash or free list */
 
 	Link;				/* lru / dirty / ref lists */
@@ -372,8 +371,10 @@ struct Memblk
 	Mfile	*mf;			/* DBfile on-memory info. */
 
 	int	type;
+	Lock	dirtylk;
 	int	dirty;			/* must be written */
 	int	frozen;			/* is frozen */
+	int	aflag;			/* part of the "/archive" file? */
 	int	loading;			/* block is being read */
 	int	changed;		/* for freerefs/writerefs */
 	QLock	newlk;			/* only to wait on DBnew blocks */
@@ -409,7 +410,7 @@ struct Fsys
 
 	List	lru;		/* hd: mru; tl: lru */
 	List	mdirty;		/* dirty blocks, not on lru */
-	List	refs;		/* DBref blocks, not in lru nor dirty lists */
+	List	refs;		/* DBref blocks, neither in lru nor dirty lists */
 
 	QLock	mlk;
 	Mfile	*mfree;		/* unused list */
@@ -420,23 +421,26 @@ struct Fsys
 	Memblk	*active;		/* /active */
 	Memblk	*archive;	/* /archive */
 	Memblk	*cons;		/* /cons */
+	Memblk	*stats;		/* /stats */
 	Channel	*consc;		/* of char*; output for /cons */
 
 	Memblk	*fzsuper;	/* frozen super */
 
-	QLock	fzlk;		/* free or reclaim in progress. */
-
 	char	*dev;		/* name for disk */
 	int	fd;		/* of disk */
-	u64int	limit;		/* address for end of disk */
+	daddrt	limit;		/* address for end of disk */
 	usize	ndblk;		/* # of disk blocks in dev */
-
-	int	config;		/* config mode enabled */
 
 	int	nindirs[Niptr];	/* stats */
 	int	nmelts;
 
+	QLock	fzlk;		/* freeze, melt, check, write */
+	RWLock	quiescence;	/* any activity rlocks() this */
+	QLock	policy;		/* fspolicy */
+
 	uchar	*chk;		/* for fscheck() */
+
+	uvlong	wtime;		/* time for last fswrite */
 };
 
 /*
@@ -481,8 +485,29 @@ struct Path
 	int naf;
 };
 
+struct Member
+{
+	Member *next;
+	Usr *u;
+};
+
+struct Usr
+{
+	Usr *nnext;	/* next by name */
+	Usr *inext;	/* next by id */
+
+	int id;
+	int enabled;
+	int allow;
+	Usr *lead;
+	char name[Unamesz];
+	Member *members;
+};
+
 
 #pragma	varargck	type	"H"	Memblk*
+#pragma	varargck	type	"A"	Usr*
+#pragma	varargck	type	"P"	Path*
 
 /* used in debug prints to print just part of huge values */
 #define EP(e)	((e)&0xFFFFFFFFUL)
@@ -492,5 +517,6 @@ typedef int(*Blkf)(Memblk*);
 
 extern Fsys*fs;
 extern uvlong maxfsz;
-extern char*defaultusers;
 extern Alloc mfalloc, pathalloc;
+extern int swreaderr, swwriteerr;
+extern int fatalaborts;

@@ -20,7 +20,7 @@ static Lock	lstatslk;
 static Lstat	none;
 static Lstat	*lstats;
 static int	lstatson;
-int fatalaborts = 1;
+int fatalaborts;
 
 Alloc pathalloc =
 {
@@ -40,12 +40,6 @@ fatal(char *fmt, ...)
 	if(fatalaborts)
 		abort();
 	threadexitsall("fatal");
-}
-
-uvlong
-now(void)
-{
-	return nsec();
 }
 
 void
@@ -76,7 +70,7 @@ dumplockstats(void)
 	lstatson = lon;
 }
 
-Lstat*
+static Lstat*
 getlstat(uintptr pc, int type)
 {
 	Lstat *lst;
@@ -295,3 +289,17 @@ clonepath(Path *p)
 	return p;
 }
 
+int
+pathfmt(Fmt *fmt)
+{
+	Path *p;
+	int i;
+
+	
+	p = va_arg(fmt->args, Path*);
+	if(p == nil)
+		return fmtprint(fmt, "/");
+	for(i = 1; i < p->nf; i++)
+		fmtprint(fmt, "p[%d] = %H", i, p->f[i]);
+	return 0;
+}

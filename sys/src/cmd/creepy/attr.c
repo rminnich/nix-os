@@ -16,8 +16,7 @@
  * Attribute handling
  *
  * BUG: we only support the predefined attributes.
- * Just store/parse a sequence of name[s] sz[2] value[sz]
- * after predefined attributes.
+ *
  */
 
 typedef struct Adef Adef;
@@ -34,10 +33,12 @@ struct Adef
 long wname(Memblk*, void*, long);
 static long rname(Memblk*, void*, long);
 static long rid(Memblk*, void*, long);
-long wid(Memblk*, void*, long);
-long watime(Memblk*, void*, long);
+static long wid(Memblk*, void*, long);
+static long wmode(Memblk*, void*, long);
+static long rmode(Memblk*, void*, long);
+static long watime(Memblk*, void*, long);
 static long ratime(Memblk*, void*, long);
-long wmtime(Memblk*, void*, long);
+static long wmtime(Memblk*, void*, long);
 static long rmtime(Memblk*, void*, long);
 static long wlength(Memblk*, void*, long);
 static long rlength(Memblk*, void*, long);
@@ -61,6 +62,7 @@ static Adef adef[] =
 	{"uid", 0, wuid, ruid, cstring},
 	{"gid", 0, wgid, rgid, cstring},
 	{"muid", 0, wuid, ruid, cstring},
+	{"mode", BIT64SZ, wmode, rmode, cu64int},
 	{"*", 0, nil, rstar, nil},
 };
 
@@ -85,58 +87,28 @@ embedattrsz(Memblk *f)
 }
 
 void
-gmeta(Fmeta *meta, void *buf, ulong nbuf)
+gmeta(Memblk *f, void *buf, ulong nbuf)
 {
-	Dmeta *d;
-	char *p, *x;
+	char *p;
 	int i;
 
-	if(nbuf < sizeof *d)
-		error("metadata buffer too small");
-	d = buf;
-	meta->id = d->id;
-	meta->mode = d->mode;
-	meta->atime = d->atime;
-	meta->mtime = d->mtime;
-	meta->length = d->length;
-
-	if(d->ssz[FMuid] + sizeof *d > nbuf ||
-	   d->ssz[FMgid] + sizeof *d > nbuf ||
-	   d->ssz[FMmuid] + sizeof *d > nbuf ||
-	   d->ssz[FMname] + sizeof *d > nbuf)
-		error("corrupt meta: wrong string size");
-
-	p = (char*)(&d[1]);
-	x = p;
-	for(i = 0; i < nelem(d->ssz); i++){
-		if(x[d->ssz[i]-1] != 0)
-			error("corrupt meta: unterminated string");
-		x += d->ssz[i];
-	}
-
-	meta->uid = p;
-	p += d->ssz[FMuid];
-	meta->gid = p;
-	p += d->ssz[FMgid];
-	meta->muid = p;
-	p += d->ssz[FMmuid];
-	meta->name = p;
+	f->mf->uid = usrname(f->d.uid);
+	f->mf->gid = usrname(f->d.gid);
+	f->mf->muid = usrname(f->d.muid);
+	p = buf;
+	for(i = 0; i < nbuf; i++)
+		if(p[i] == 0)
+			break;
+	if(i == nbuf)
+		error("corrupt meta");
+	f->mf->name = buf;
+	
 }
 
 static ulong
-metasize(Fmeta *meta)
+metasize(Memblk *f)
 {
-	ulong n;
-
-	n = sizeof(Dmeta);
-	n += strlen(meta->uid) + 1;
-	n += strlen(meta->gid) + 1;
-	n += strlen(meta->muid) + 1;
-	n += strlen(meta->name) + 1;
-	/*
-	 * BUG: meta->attr
-	 */
-	return n;
+	return strlen(f->mf->name) + 1;
 }
 
 /*
@@ -146,45 +118,22 @@ metasize(Fmeta *meta)
  * The caller is responsible for ensuring that metadata fits in buf.
  */
 ulong
-pmeta(void *buf, ulong nbuf, Fmeta *meta)
+pmeta(void *buf, ulong nbuf, Memblk *f)
 {
-	Dmeta *d;
-	char *p, *bufp;
+	char *p, *e;
 	ulong sz;
 
-	sz = metasize(meta);
+	sz = metasize(f);
 	if(sz > nbuf)
 		error("attributes are too long");
-	d = buf;
-	bufp = buf;
-	d->id = meta->id;
-	d->mode = meta->mode;
-	d->atime = meta->atime;
-	d->mtime = meta->mtime;
-	d->length = meta->length;
-
-	p = (char*)(&d[1]);
-	d->ssz[FMuid] = strlen(meta->uid) + 1;
-	strcpy(p, meta->uid);
-	meta->uid = p;
-	p += d->ssz[FMuid];
-
-	d->ssz[FMgid] = strlen(meta->gid) + 1;
-	strcpy(p, meta->gid);
-	meta->gid = p;
-	p += d->ssz[FMgid];
-
-	d->ssz[FMmuid] = strlen(meta->muid) + 1;
-	strcpy(p, meta->muid);
-	meta->muid = p;
-	p += d->ssz[FMmuid];
-
-	d->ssz[FMname] = strlen(meta->name) + 1;
-	strcpy(p, meta->name);
-	meta->name = p;
-	p += d->ssz[FMname];
-
-	assert(p - bufp <= sz);	/* can be <, to leave room for growing */
+	p = buf;
+	if(f->mf->name != p)
+		e = strecpy(p, p+nbuf, f->mf->name);
+	else
+		e = p + strlen(p);
+	e++;
+	assert(e-p <= sz);	/* can be <, to leave room for growing */
+	f->mf->name = p;
 	return sz;
 }
 
@@ -260,13 +209,12 @@ wname(Memblk *f, void *buf, long len)
 	old = f->mf->name;
 	f->mf->name = p;
 	maxsz = embedattrsz(f);
-	if(metasize(f->mf) > maxsz){
+	if(metasize(f) > maxsz){
 		f->mf->name = old;
-		fprint(2, "%s: bug: no attribute block implemented\n", argv0);
+		fprint(2, "%s: bug: can't handle DBattr blocks\n", argv0);
 		error("no room to grow metadata");
 	}
-	/* name goes last, we can pack in place */
-	pmeta(f->d.embed, maxsz, f->mf);
+	pmeta(f->d.embed, maxsz, f);
 	return len;
 }
 
@@ -294,31 +242,25 @@ ruid(Memblk *f, void *buf, long len)
 	return rstr(f->mf->uid, buf, len);
 }
 
-static long 
-wuid(Memblk *f, void *buf, long len)
+static u64int
+chkusr(void *buf, long len)
 {
 	char *p;
-	ulong maxsz;
-	Fmeta m;
+	int id;
 
 	p = buf;
 	if(len < 1 || p[len-1] != 0)
 		error("name must end in \\0");
-	maxsz = embedattrsz(f);
-	m = *f->mf;
-	m.uid = buf;
-	m.gid = strdup(m.gid);
-	m.muid = strdup(m.muid);
-	m.name = strdup(m.name);
-	if(metasize(&m) > maxsz){
-		fprint(2, "%s: bug: no attribute block implemented\n", argv0);
-		error("no room to grow metadata");
-	}
-	f->mf->Fmeta = m;
-	pmeta(f->d.embed, maxsz, f->mf);
-	free(m.gid);
-	free(m.muid);
-	free(m.name);
+	id = usrid(buf);
+	if(id < 0)
+		error("unknown user '%s'", buf);
+	return id;
+}
+
+static long 
+wuid(Memblk *f, void *buf, long len)
+{
+	f->d.uid = chkusr(buf, len);
 	return len;
 }
 
@@ -331,28 +273,7 @@ rgid(Memblk *f, void *buf, long len)
 static long 
 wgid(Memblk *f, void *buf, long len)
 {
-	char *p;
-	ulong maxsz;
-	Fmeta m;
-
-	p = buf;
-	if(len < 1 || p[len-1] != 0)
-		error("name must end in \\0");
-	maxsz = embedattrsz(f);
-	m = *f->mf;
-	m.uid = strdup(m.uid);
-	m.gid = buf;
-	m.muid = strdup(m.muid);
-	m.name = strdup(m.name);
-	if(metasize(&m) > maxsz){
-		fprint(2, "%s: bug: no attribute block implemented\n", argv0);
-		error("no room to grow metadata");
-	}
-	f->mf->Fmeta = m;
-	pmeta(f->d.embed, maxsz, f->mf);
-	free(m.uid);
-	free(m.muid);
-	free(m.name);
+	f->d.gid = chkusr(buf, len);
 	return len;
 }
 
@@ -365,41 +286,17 @@ rmuid(Memblk *f, void *buf, long len)
 static long 
 wmuid(Memblk *f, void *buf, long len)
 {
-	char *p;
-	ulong maxsz;
-	Fmeta m;
-
-	p = buf;
-	if(len < 1 || p[len-1] != 0)
-		error("name must end in \\0");
-	maxsz = embedattrsz(f);
-	m = *f->mf;
-	m.uid = strdup(m.uid);
-	m.gid = strdup(m.gid);
-	m.muid = buf;
-	m.name = strdup(m.name);
-	if(metasize(&m) > maxsz){
-		fprint(2, "%s: bug: no attribute block implemented\n", argv0);
-		error("no room to grow metadata");
-	}
-	f->mf->Fmeta = m;
-	pmeta(f->d.embed, maxsz, f->mf);
-	free(m.uid);
-	free(m.gid);
-	free(m.name);
+	f->d.muid = chkusr(buf, len);
 	return len;
 }
 
-long 
+static long 
 wid(Memblk *f, void *buf, long)
 {
 	u64int *p;
-	Dmeta *d;
 
 	p = buf;
-	d = (Dmeta*)f->d.embed;
-	f->mf->id = *p;
-	d->id = *p;
+	f->d.id = *p;
 	return BIT64SZ;
 }
 
@@ -409,20 +306,17 @@ rid(Memblk *f, void *buf, long)
 	u64int *p;
 
 	p = buf;
-	*p = f->mf->id;
+	*p = f->d.id;
 	return BIT64SZ;
 }
 
-long 
+static long 
 watime(Memblk *f, void *buf, long)
 {
 	u64int *p;
-	Dmeta *d;
 
 	p = buf;
-	d = (Dmeta*)f->d.embed;
-	f->mf->atime = *p;
-	d->atime = *p;
+	f->d.atime = *p;
 	return BIT64SZ;
 }
 
@@ -432,20 +326,37 @@ ratime(Memblk *f, void *buf, long)
 	u64int *p;
 
 	p = buf;
-	*p = f->mf->atime;
+	*p = f->d.atime;
 	return BIT64SZ;
 }
 
-long 
+static long 
+wmode(Memblk *f, void *buf, long)
+{
+	u64int *p;
+
+	p = buf;
+	f->d.mode = *p | (f->d.mode&DMUSERS);
+	return BIT64SZ;
+}
+
+static long 
+rmode(Memblk *f, void *buf, long)
+{
+	u64int *p;
+
+	p = buf;
+	*p = f->d.mode & ~DMUSERS;
+	return BIT64SZ;
+}
+
+static long 
 wmtime(Memblk *f, void *buf, long)
 {
 	u64int *p;
-	Dmeta *d;
 
 	p = buf;
-	d = (Dmeta*)f->d.embed;
-	f->mf->mtime = *p;
-	d->mtime = *p;
+	f->d.mtime = *p;
 	return BIT64SZ;
 }
 
@@ -455,21 +366,21 @@ rmtime(Memblk *f, void *buf, long)
 	u64int *p;
 
 	p = buf;
-	*p = f->mf->mtime;
+	*p = f->d.mtime;
 	return BIT64SZ;
 }
 
 static uvlong
-fresize(Memblk *f, uvlong sz)
+resized(Memblk *f, uvlong sz)
 {
 	ulong boff, bno, bend;
 
-	if(f->mf->mode&DMDIR)
+	if(f->d.mode&DMDIR)
 		error("can't resize a directory");
 
 	if(sz > maxfsz)
 		error("max file size exceeded");
-	if(sz >= f->mf->length)
+	if(sz >= f->d.length)
 		return sz;
 	bno = dfbno(f, sz, &boff);
 	if(boff > 0)
@@ -485,12 +396,10 @@ static long
 wlength(Memblk *f, void *buf, long)
 {
 	u64int *p;
-	Dmeta *d;
 
 	p = buf;
-	d = (Dmeta*)f->d.embed;
-	f->mf->length = fresize(f, *p);
-	d->length = *p;
+	f->d.length = *p;
+	resized(f, f->d.length);
 	return BIT64SZ;
 }
 
@@ -500,7 +409,7 @@ rlength(Memblk *f, void *buf, long)
 	u64int *p;
 
 	p = buf;
-	*p = f->mf->length;
+	*p = f->d.length;
 	return BIT64SZ;
 }
 
@@ -567,6 +476,9 @@ dfrattr(Memblk *f, char *name, void *val, long count)
 	return tot;
 }
 
+/*
+ * cond on attribute value
+ */
 void
 dfcattr(Memblk *f, int op, char *name, void *val, long count)
 {
@@ -589,25 +501,31 @@ dfcattr(Memblk *f, int op, char *name, void *val, long count)
 	adef[i].cattr(f, op, buf, nbuf, val, count);
 }
 
+/*
+ * Does not check if the user can't write because of the "write"
+ * user.
+ * Does check if the user is allowed in config mode.
+ */
 void
-dfaccessok(Memblk *f, char *uid, int bits)
+dfaccessok(Memblk *f, int uid, int bits)
 {
 	uint mode;
 
-	if(fs->config)
+	if(allowed(uid))
 		return;
 
 	bits &= 3;
-	mode = f->mf->mode &0777;
+
+	mode = f->d.mode &0777;
 
 	if((mode&bits) == bits)
 		return;
 	mode >>= 3;
 	
-	if(member(f->mf->gid, uid) && (mode&bits) == bits)
+	if(member(f->d.gid, uid) && (mode&bits) == bits)
 		return;
 	mode >>= 3;
-	if(strcmp(f->mf->uid, uid) == 0 && (mode&bits) == bits)
+	if(f->d.uid == uid && (mode&bits) == bits)
 		return;
 	error("permission denied");
 }

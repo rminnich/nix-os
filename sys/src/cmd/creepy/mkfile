@@ -11,10 +11,8 @@ OFILES=\
 	mblk.$O\
 	dblk.$O\
 	fblk.$O\
-	file.$O\
 	attr.$O\
 	fsys.$O\
-	file.$O\
 	tools.$O\
 
 IXOFILES=\

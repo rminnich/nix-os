@@ -65,16 +65,16 @@ fmttab(Fmt *fmt, int t, int c)
 }
 int mbtab;
 static void
-fmtptr(Fmt *fmt, int type, u64int addr, char *tag, int n)
+fmtptr(Fmt *fmt, int type, daddrt addr, char *tag, int n)
 {
 	Memblk *b;
 
 	if(addr == 0)
 		return;
-	b = mbget(type, addr, 0);
+	b = mbget(type, addr, Dontmk);
 	if(b == nil){
 		fmttab(fmt, mbtab, 0);
-		fmtprint(fmt, "  %s[%d] = d%#010ullx <unloaded>\n", tag, n, addr);
+		fmtprint(fmt, "%s[%d] = d%#010ullx <unloaded>\n", tag, n, addr);
 	}else{
 		fmtprint(fmt, "%H", b);
 		mbput(b);
@@ -84,16 +84,16 @@ static void
 dumpdirdata(Fmt *fmt, Memblk *b)
 {
 	long doff;
-	u64int *p;
+	daddrt *p;
 	int i;
 
-	if(b->mf->length == 0 || (b->mf->mode&DMDIR) == 0)
+	if(b->d.length == 0 || (b->d.mode&DMDIR) == 0)
 		return;
 	doff = embedattrsz(b);
 	if(doff < Embedsz){
 		fmttab(fmt, mbtab, 0);
-		p = (u64int*)(b->d.embed+doff);
-		for(i = 0; i < 5 && (uchar*)p < b->d.embed+Embedsz - BIT64SZ; i++)
+		p = (daddrt*)(b->d.embed+doff);
+		for(i = 0; i < 5 && (uchar*)p < b->d.embed+Embedsz - Daddrsz; i++)
 			fmtprint(fmt, "%sd%#010ullx", i?" ":"data: ", EP(*p++));
 		fmtprint(fmt, "\n");
 	}
@@ -154,17 +154,17 @@ mbfmt(Fmt *fmt)
 			fmtprint(fmt, "  asz %#ullx aptr %#ullx",
 				b->d.asize, b->d.aptr);
 		fmttab(fmt, mbtab, 0);
-		fmtprint(fmt, "    %M melted m%#p\n",
-			(ulong)b->mf->mode, b->mf->melted);
+		fmtprint(fmt, "    %M '%s' len %ulld melted m%#p\n",
+			(ulong)b->d.mode, usrname(b->d.uid), b->d.length, b->mf->melted);
 		if(0){
 			fmttab(fmt, mbtab, 0);
 			fmtprint(fmt, "  id %#ullx mode %M mt %#ullx"
-				" sz %#ullx '%s'\n",
-				EP(b->mf->id), (ulong)b->mf->mode,
-				EP(b->mf->mtime), b->mf->length, b->mf->uid);
+				" '%s'\n",
+				EP(b->d.id), (ulong)b->d.mode,
+				EP(b->d.mtime), b->mf->uid);
 		}
 		mbtab++;
-		if(b->mf->mode&DMDIR)
+		if(b->d.mode&DMDIR)
 			dumpdirdata(fmt, b);
 		for(i = 0; i < nelem(b->d.dptr); i++)
 			fmtptr(fmt, DBdata, b->d.dptr[i], "d", i);
@@ -208,7 +208,7 @@ mbfmt(Fmt *fmt)
 void
 ismelted(Memblk *b)
 {
-	if(b != fs->archive && b->frozen)
+	if(b != fs->archive && b->aflag == 0 && b->frozen)
 		fatal("frozen at pc %#p", getcallerpc(&b));
 }
 
@@ -261,6 +261,25 @@ mlinklast(List *l, Memblk *b)
 	xqunlock(l);
 }
 
+List
+mfilter(List *bl, int(*f)(Memblk*))
+{
+	Memblk *b, *bnext;
+	List wl;
+
+	memset(&wl, 0, sizeof wl);
+	xqlock(bl);
+	for(b = bl->hd; b != nil; b = bnext){
+		bnext = b->lnext;
+		if(f(b)){
+			munlink(bl, b, 1);
+			mlinklast(&wl, b);
+		}
+	}
+	xqunlock(bl);
+	return wl;
+}
+
 void
 mlistdump(char *tag, List *l)
 {
@@ -310,6 +329,11 @@ changed(Memblk *b)
 		ismelted(b);
 	if(b->dirty || (b->addr&Fakeaddr) != 0)
 		return;
+	lock(&b->dirtylk);
+	if(b->dirty){
+		unlock(&b->dirtylk);
+		return;
+	}
 	switch(b->type){
 	case DBsuper:
 	case DBref:
@@ -321,16 +345,19 @@ changed(Memblk *b)
 		b->dirty = 1;
 		mlink(&fs->mdirty, b);
 	}
+	unlock(&b->dirtylk);
 }
 
 void
 written(Memblk *b)
 {
+	lock(&b->dirtylk);
 	assert(b->dirty != 0);
 	switch(b->type){
 	case DBsuper:
 	case DBref:
 		b->dirty = 0;
+		unlock(&b->dirtylk);
 		break;
 	default:
 		/*
@@ -340,7 +367,7 @@ written(Memblk *b)
 		 */
 		assert(b->lprev == nil && b->lnext == nil);
 		b->dirty = 0;
-
+		unlock(&b->dirtylk);
 
 		/*
 		 * heuristic: frozen files that have a melted version
@@ -468,10 +495,10 @@ mbfree(Memblk *b)
 		assert(mf->writer == 0 && mf->readers == 0);
 		afree(&mfalloc, mf);
 	}
+	b->addr = 0;
 	b->type = DBfree;
 	b->d.tag = DBfree;
-	b->frozen = b->dirty = 0;
-	b->addr = 0;
+	b->frozen = b->dirty = b->aflag = b->loading = b->changed = 0;
 
 	xqlock(fs);
 	fs->nmused--;
@@ -482,10 +509,20 @@ mbfree(Memblk *b)
 }
 
 Memblk*
-mballoc(u64int addr)
+mballoc(daddrt addr)
 {
 	Memblk *b;
 
+	if(fsmemfree() < Mzerofree){
+		if(canqlock(&fs->lru))
+			qunlock(&fs->lru);
+		else
+			fatal("mballoc: out of blocks and can't fslru()");
+		if(!catcherror()){
+			fslru();
+			noerror();
+		}
+	}
 	b = nil;
 	xqlock(fs);
 	if(fs->free != nil){
@@ -496,6 +533,8 @@ mballoc(u64int addr)
 		b = &fs->blk[fs->nblk++];
 	else{
 		xqunlock(fs);
+		if(dbg['d'])
+			fsdump(1, Mem);
 		fatal("mballoc: no free blocks");
 	}
 	fs->nmused++;
@@ -508,7 +547,7 @@ mballoc(u64int addr)
 }
 
 Memblk*
-mbget(int type, u64int addr, int mkit)
+mbget(int type, daddrt addr, int mkit)
 {
 	Memblk *b;
 	uint hv;

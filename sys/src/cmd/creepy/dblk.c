@@ -20,37 +20,40 @@
 int swreaderr, swwriteerr;
 
 void
-checktag(u64int tag, uint type, u64int addr)
+checktag(u64int tag, uint type, daddrt addr)
 {
 	if(tag != TAG(type, addr)){
-		fprint(2, "%s: bad tag: %#ullx != %#ux d%#ullx pc = %#p\n",
+		fprint(2, "%s: bad tag: %#ullx != %#ux d%#010ullx pc = %#p\n",
 			argv0, tag, type, addr, getcallerpc(&tag));
-abort();
 		error("bad tag");
 	}
 }
 
-void
-okaddr(u64int addr)
+static void
+okaddr(daddrt addr)
 {
-	if((addr&Fakeaddr) == 0 && (addr < Dblksz || addr >= fs->limit))
+	if((addr&Fakeaddr) == 0 && (addr < Dblksz || addr >= fs->limit)){
+		fprint(2, "%s: okaddr: bad address d%#010ullx pc = %#p\n",
+			argv0, addr, getcallerpc(&addr));
+		fatal("okaddr %#ullx", addr);
 		error("okaddr %#ullx", addr);
+	}
 }
 
-void
-okdiskaddr(u64int addr)
+static void
+okdiskaddr(daddrt addr)
 {
 	if((addr&Fakeaddr) != 0  || addr < Dblksz || addr >= fs->limit)
 		fatal("okdiskaddr %#ullx", addr);
 }
 
-void
-dbclear(u64int tag, int type, u64int addr)
+static void
+dbclear(u64int tag, int type, daddrt addr)
 {
 	static Diskblk d;
 	static QLock lk;
 
-	dprint("dbclear type %s d%#ullx\n", tname(type), addr);
+	dWprint("dbclear type %s d%#ullx\n", tname(type), addr);
 	xqlock(&lk);
 	d.tag = tag;
 	if(pwrite(fs->fd, &d, sizeof d, addr) != Dblksz){
@@ -67,7 +70,7 @@ meltedref(Memblk *rb)
 	if(canqlock(&fs->refs))
 		fatal("meltedref rlk");
 	if(rb->frozen){
-		dprint("melted ref dirty=%d\n", rb->dirty);
+		dWprint("melted ref dirty=%d\n", rb->dirty);
 		dbwrite(rb);
 		rb->frozen = 0;
 	}
@@ -87,10 +90,10 @@ meltedref(Memblk *rb)
  * issuing a warning so the user knows.
  */
 
-u64int
+static daddrt
 newblkaddr(void)
 {
-	u64int addr, naddr;
+	daddrt addr, naddr;
 
 	xqlock(fs);
 	if(catcherror()){
@@ -155,23 +158,21 @@ Again:
 	return addr;
 }
 
-u64int
-addrofref(u64int refaddr, int idx)
+daddrt
+addrofref(daddrt refaddr, int idx)
 {
 	return refaddr + idx*Dblksz;
 }
 
-u64int
-refaddr(u64int addr, int *idx)
+static daddrt
+refaddr(daddrt addr, int *idx)
 {
-	u64int bno, refaddr;
+	daddrt bno, refaddr;
 
 	addr -= Dblk0addr;
 	bno = addr/Dblksz;
 	*idx = bno%Nblkgrpsz;
 	refaddr = Dblk0addr + bno/Nblkgrpsz * Nblkgrpsz * Dblksz;
-	if(0)dprint("refaddr d%#ullx = d%#ullx[%d]\n",
-		Dblk0addr + addr, refaddr, *idx);
 	return refaddr;
 }
 
@@ -179,11 +180,11 @@ refaddr(u64int addr, int *idx)
  * db*ref() functions update the on-disk reference counters.
  * memory blocks use Memblk.Ref instead. Beware.
  */
-u64int
-dbaddref(u64int addr, int delta, int set, Memblk **rbp, int *ip)
+static daddrt
+dbaddref(daddrt addr, int delta, int set, Memblk **rbp, int *ip)
 {
 	Memblk *rb;
-	u64int raddr, ref;
+	daddrt raddr, ref;
 	int i;
 
 	if(addr == 0)
@@ -225,22 +226,34 @@ dbaddref(u64int addr, int delta, int set, Memblk **rbp, int *ip)
 	return ref;
 }
 
-u64int
-dbgetref(u64int addr)
+daddrt
+dbgetref(daddrt addr)
 {
 	return dbaddref(addr, 0, 0, nil, nil);
 }
 
 void
-dbsetref(u64int addr, int ref)
+dbsetref(daddrt addr, int ref)
 {
 	dbaddref(addr, 0, ref, nil, nil);
 }
 
-u64int
-dbincref(u64int addr)
+static daddrt
+dbincref(daddrt addr)
 {
 	return dbaddref(addr, +1, 0, nil, nil);
+}
+
+static void
+nodoublefree(daddrt addr)
+{
+	daddrt a;
+
+	if(addr == 0)
+		return;
+	for(a = fs->super->d.free; a != 0; a = dbgetref(a))
+		if(a == addr)
+			fatal("double free for addr d%#ullx", addr);
 }
 
 /*
@@ -253,10 +266,10 @@ dbincref(u64int addr)
  * just to release a reference to it
  * b may be nil if type and addr are given.
  */
-u64int
-dbput(Memblk *b, int type, u64int addr)
+daddrt
+dbput(Memblk *b, int type, daddrt addr)
 {
-	u64int ref;
+	daddrt ref;
 	Memblk *mb, *rb;
 	int i, idx;
 
@@ -265,7 +278,8 @@ dbput(Memblk *b, int type, u64int addr)
 
 	okdiskaddr(addr);
 	ref = dbgetref(addr);
-	dKprint("dbput d%#010ullx dr %#ullx type %s\n", addr, ref, tname(type));
+	dKprint("dbput d%#010ullx dr %#ullx type %s pc=%#p\n",
+		addr, ref, tname(type), getcallerpc(&b));
 	if(ref > 2*Dblksz)
 		fatal("dbput: d%#010ullx: double free", addr);
 
@@ -286,11 +300,11 @@ dbput(Memblk *b, int type, u64int addr)
 		if(type != DBdata)
 			mb = dbget(type, addr);
 		else
-			mb = mbget(type, addr, 0);
+			mb = mbget(type, addr, Dontmk);
 	}
 	if(mb != nil)
 		assert(type == mb->type && addr == mb->addr);
-	dAprint("dbput: ref = 0 %H\n", mb);
+	dKprint("dbput: ref = 0 %H\n", mb);
 
 	if(mb != nil)
 		mbunhash(mb, 0);
@@ -308,20 +322,33 @@ dbput(Memblk *b, int type, u64int addr)
 		break;
 	case DBfile:
 		if(0)dbput(nil, DBattr, mb->d.aptr);
-		for(i = 0; i < nelem(mb->d.dptr); i++)
+		for(i = 0; i < nelem(mb->d.dptr); i++){
 			dbput(nil, DBdata, mb->d.dptr[i]);
-		for(i = 0; i < nelem(mb->d.iptr); i++)
+			mb->d.dptr[i] = 0;
+		}
+		for(i = 0; i < nelem(mb->d.iptr); i++){
 			dbput(nil, DBptr0+i, mb->d.iptr[i]);
+			mb->d.iptr[i] = 0;
+		}
 		break;
 	default:
 		if(type < DBptr0 || type >= DBptr0+Niptr)
 			fatal("dbput: type %d", type);
-		for(i = 0; i < Dptrperblk; i++)
+		for(i = 0; i < Dptrperblk; i++){
 			dbput(nil, mb->type-1, mb->d.ptr[i]);
+			mb->d.ptr[i] = 0;
+		}
 	}
 	noerror();
+
 	if(mb != b)
 		mbput(mb);
+
+	if(dbg['d'])
+		assert(mbget(type, addr, Dontmk) == nil);
+
+	if(dbg['d'])
+		nodoublefree(addr);
 	xqlock(fs);
 	xqlock(&fs->refs);
 	rb->d.ref[idx] = fs->super->d.free;
@@ -335,11 +362,11 @@ dbput(Memblk *b, int type, u64int addr)
 	return ref;
 }
 
-static u64int
+static daddrt
 newfakeaddr(void)
 {
-	static u64int addr = ~0;
-	u64int n;
+	static daddrt addr = ~0;
+	daddrt n;
 
 	xqlock(fs);
 	addr -= Dblksz;
@@ -352,7 +379,7 @@ Memblk*
 dballoc(uint type)
 {
 	Memblk *b;
-	u64int addr;
+	daddrt addr;
 	int ctl;
 
 	ctl = type == DBctl;
@@ -386,7 +413,7 @@ dballoc(uint type)
  * We know the format of all blocks and the type of all file
  * attributes. Those are the integers to convert to fix the bug.
  */
-Memblk*
+static Memblk*
 hosttodisk(Memblk *b)
 {
 	if(!TAGADDROK(b->d.tag, b->addr))
@@ -395,7 +422,7 @@ hosttodisk(Memblk *b)
 	return b;
 }
 
-void
+static void
 disktohost(Memblk *b)
 {
 	static union
@@ -420,7 +447,7 @@ dbwrite(Memblk *b)
 {
 	Memblk *nb;
 	static int nw;
-	u64int addr;
+	daddrt addr;
 
 	if(b->addr&Fakeaddr)
 		fatal("dbwrite: fake addr %H", b);
@@ -435,11 +462,13 @@ dbwrite(Memblk *b)
 	dWprint("dbwrite at d%#010ullx %H\n",addr, b);
 	nb = hosttodisk(b);
 	if(swwriteerr != 0 && ++nw % swwriteerr == 0){
-		fprint(2, "%s: dbwrite: software fault injected\n", argv0);
+		written(b);	/* what can we do? */
 		mbput(nb);
+		fprint(2, "%s: dbwrite: software fault injected\n", argv0);
 		error("dbwrite: sw fault");
 	}
 	if(pwrite(fs->fd, &nb->d, sizeof nb->d, addr) != Dblksz){
+		written(b);	/* what can we do? */
 		mbput(nb);
 		fprint(2, "%s: dbwrite: d%#ullx: %r\n", argv0, b->addr);
 		error("dbwrite: %r");
@@ -456,7 +485,7 @@ dbread(Memblk *b)
 	static int nr;
 	long tot, n;
 	uchar *p;
-	u64int addr;
+	daddrt addr;
 
 	if(b->addr&Fakeaddr)
 		fatal("dbread: fake addr %H", b);
@@ -488,13 +517,13 @@ dbread(Memblk *b)
 }
 
 Memblk*
-dbget(uint type, u64int addr)
+dbget(uint type, daddrt addr)
 {
 	Memblk *b;
 
 	dMprint("dbget %s d%#ullx\n", tname(type), addr);
 	okaddr(addr);
-	b = mbget(type, addr, 1);
+	b = mbget(type, addr, Mkit);
 	if(b == nil)
 		error("i/o error");
 	if(b->loading == 0)
@@ -513,7 +542,7 @@ dbget(uint type, u64int addr)
 	if(type == DBfile){
 		assert(b->mf == nil);
 		b->mf = anew(&mfalloc);
-		gmeta(b->mf, b->d.embed, Embedsz);
+		gmeta(b, b->d.embed, Embedsz);
 	}
 	b->loading = 0;
 	noerror();
@@ -525,13 +554,13 @@ void
 dupdentries(void *p, int n)
 {
 	int i;
-	Dentry *d;
+	daddrt *d;
 
 	d = p;
 	for(i = 0; i < n; i++)
-		if(d[i].file != 0){
-			dprint("add ref on melt d%#ullx\n", d[i].file);
-			dbincref(d[i].file);
+		if(d[i] != 0){
+			dAprint("add ref on dup d%#ullx\n", d[i]);
+			dbincref(d[i]);
 		}
 }
 
@@ -544,8 +573,7 @@ dbdup(Memblk *b)
 {
 	Memblk *nb;
 	int i;
-	Mfile *nm;
-	ulong doff;
+	ulong doff, sz;
 
 	nb = dballoc(b->type);
 	if(catcherror()){
@@ -566,6 +594,7 @@ dbdup(Memblk *b)
 			isrwlocked(b, Rd);
 		nb->d.asize = b->d.asize;
 		nb->d.aptr = b->d.aptr;
+		nb->d.ndents = b->d.ndents;
 		if(nb->d.aptr != 0)
 			dbincref(b->d.aptr);
 		for(i = 0; i < nelem(b->d.dptr); i++){
@@ -578,13 +607,16 @@ dbdup(Memblk *b)
 			if(nb->d.iptr[i] != 0)
 				dbincref(b->d.iptr[i]);
 		}
+		nb->d.Dmeta = b->d.Dmeta;
 		memmove(nb->d.embed, b->d.embed, Embedsz);
-		nm = nb->mf;
-		gmeta(nm, nb->d.embed, Embedsz);
-		if((nm->mode&DMDIR) == 0)
+		gmeta(nb, nb->d.embed, Embedsz);
+		if((nb->d.mode&DMDIR) == 0)
 			break;
 		doff = embedattrsz(nb);
-		dupdentries(nb->d.embed+doff, (Embedsz-doff)/sizeof(Dentry));
+		sz = Embedsz-doff;
+		if(sz > b->d.length)
+			sz = b->d.length;
+		dupdentries(nb->d.embed+doff, sz/Daddrsz);
 		/*
 		 * no race: caller takes care.
 		 */
@@ -599,7 +631,7 @@ dbdup(Memblk *b)
 		for(i = 0; i < Dptrperblk; i++){
 			nb->d.ptr[i] = b->d.ptr[i];
 			if(nb->d.ptr[i] != 0)
-				dbincref(b->d.ptr[i]);
+				dbincref(nb->d.ptr[i]);
 		}
 	}
 	changed(nb);

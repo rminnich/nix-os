@@ -65,7 +65,7 @@ fidunlink(Fid *fid)
 	fid->prev = nil;
 }
 
-int
+static int
 fidfmt(Fmt *fmt)
 {
 	Fid *fid;
@@ -127,7 +127,7 @@ meltfids(void)
 	n = 0;
 	for(fid = fidshd; fid != nil; fid = fid->next)
 		if(canqlock(fid)){
-			if(!fid->archived)
+			if(!fid->archived && fid->p != nil)
 				n += meltpath(fid->p);
 			qunlock(fid);
 		}
@@ -223,11 +223,9 @@ putfid(Fid *fid)
 
 	if(fid == nil || decref(fid) > 0)
 		return;
-	dEprint("clunk fid %X\n", fid);
+	d9print("clunk %X\n", fid);
 	putpath(fid->p);
 	fid->p = nil;
-	free(fid->uid);
-	fid->uid = nil;
 	xrwlock(&fidhashlk, Wr);
 	if(catcherror()){
 		xrwunlock(&fidhashlk, Wr);
@@ -247,7 +245,7 @@ putfid(Fid *fid)
 }
 
 /* keeps addr, does not copy it */
-Cli*
+static Cli*
 newcli(char *addr, int fd, int cfd)
 {
 	Cli *cli;
@@ -291,7 +289,22 @@ fidattach(Fid *fid, char *aname, char *uname)
 {
 	Path *p;
 
-	fid->uid = strdup(uname);
+	fid->uid = usrid(uname);
+
+	/*
+	 * The owner of the process must be able to attach, if only to
+	 * define users and administer the file system.
+	 */
+	if(fid->uid < 0 && strcmp(uname, getuser()) == 0){
+		fprint(2, "%s: owner uid '%s' unknown. attaching as 'elf'\n",
+			argv0, uname);
+		fid->uid = usrid("elf");
+	}
+
+	if(fid->uid < 0){
+		fprint(2, "%s: unknown user '%s'. using 'none'\n", argv0, uname);
+		fid->uid = 1;
+	}
 	p = newpath(fs->root);
 	fid->p = p;
 	if(strcmp(aname, "active") == 0 || strcmp(aname, "main/active") == 0){
@@ -317,14 +330,198 @@ fidclone(Cli *cli, Fid *fid, int no)
 	}
 	nfid = newfid(cli, no);
 	nfid->p = clonepath(fid->p);
-	nfid->uid = strdup(fid->uid);
+	nfid->uid = fid->uid;
 	nfid->archived = fid->archived;
 	nfid->consopen = fid->consopen;
+	nfid->buf = fid->buf;
 	noerror();
 	xqunlock(fid);
 	return nfid;
 }
 
+static Memblk*
+pickarch(Memblk *d, uvlong t)
+{
+	Blksl sl;
+	daddrt *de;
+	uvlong off;
+	int i;
+	uvlong cmtime;
+	daddrt cdaddr;
+	Memblk *f;
+
+	off = 0;
+	cmtime = 0;
+	cdaddr = 0;
+	for(;;){
+		sl = dfslice(d, Dblkdatasz, off, Rd);
+		if(sl.len == 0){
+			assert(sl.b == nil);
+			break;
+		}
+		if(sl.b == nil)
+			continue;
+		if(catcherror()){
+			mbput(sl.b);
+			error(nil);
+		}
+		for(i = 0; i < sl.len/Daddrsz; i++){
+			de = sl.data;
+			de += i;
+			if(*de == 0)
+				continue;
+			f = dbget(DBfile, *de);
+			if(f->d.mtime > cmtime && f->d.mtime < t){
+				cmtime = f->d.mtime;
+				cdaddr = *de;
+			}
+			mbput(f);
+		}
+		noerror();
+		mbput(sl.b);
+		off += sl.len;
+	}
+	if(cdaddr == 0)
+		error("file not found");
+	return dbget(DBfile, cdaddr);
+}
+
+static int
+digs(char **sp, int n)
+{
+	char b[8];
+	char *s;
+
+	s = *sp;
+	if(strlen(s) < n)
+		return 0;
+	assert(n < sizeof b - 1);
+	strecpy(b, b+n+1, *sp);
+	*sp += n;
+	return strtoul(b, nil, 10);
+}
+
+/*
+ * convert symbolic time into a valid /archive wname.
+ * yyyymmddhhmm, yyyymmdd, mmdd, or hh:mm
+ */
+static Memblk*
+archwalk(Memblk *f, char *wname)
+{
+	char *s;
+	Tm *tm;
+	uvlong t;
+	static QLock tmlk;
+	int wl;
+
+	s = wname;
+	qlock(&tmlk);				/* localtime is not reentrant! */
+	tm = localtime(time(nil));
+	wl = strlen(wname);
+	switch(wl){
+	case 12:				/* yyyymmddhhmm */
+	case 8:					/* yyyymmdd */
+		tm->year = digs(&s, 4) - 1900;
+	case 4:					/* mmdd */
+		tm->mon = digs(&s, 2) - 1;
+		tm->mday = digs(&s, 2);
+		if(wl == 8)
+			break;
+		/* else fall */
+	case 5:					/* hh:mm */
+		tm->hour = digs(&s, 2);
+		if(wl == 5 && s[0] != 0)
+			s++;
+		tm->min = digs(&s, 2);
+		break;
+	default:
+		qunlock(&tmlk);
+		error("file not found");
+	}
+	dprint("archwalk to %d/%d/%d %d:%d:%d\n",
+		tm->year, tm->mday, tm->mon, tm->hour, tm->min, tm->sec);
+	t = tm2sec(tm);
+	t *= NSPERSEC;
+	qunlock(&tmlk);
+	return pickarch(f, t);
+}
+
+
+/*
+ * We are at /active/... or /archive/x/...
+ * Walk to /archive/T/... and return it so it's added to the
+ * path by the caller.
+ */
+static Memblk*
+timewalk(Path *p, char *wname, int uid)
+{
+	Memblk *f, *nf, *pf, *arch, *af;
+	int i, isarch;
+
+	if(p->nf < 2 || (p->f[1] == fs->archive && p->nf < 3))
+		error("file not found");
+	assert(p->f[0] == fs->root);
+	isarch = p->f[1] == fs->archive;
+	assert(p->f[1] == fs->active || isarch);
+
+	arch = fs->archive;
+	rwlock(arch, Rd);
+	if(catcherror()){
+		rwunlock(arch, Rd);
+		error(nil);
+	}
+	af = archwalk(arch, wname);
+	noerror();
+	rwunlock(arch, Rd);
+	if(catcherror()){
+		mbput(af);
+		error(nil);
+	}
+	i = 2;
+	if(isarch)
+		i++;
+	f = af;
+	incref(f);
+	nf = nil;
+	for(; i < p->nf; i++){
+		pf = p->f[i];
+		rwlock(f, Rd);
+		rwlock(pf, Rd);
+		if(catcherror()){
+			rwunlock(pf, Rd);
+			rwunlock(f, Rd);
+			mbput(f);
+			error(nil);
+		}
+		dfaccessok(f, uid, AEXEC);
+		nf = dfwalk(f, pf->mf->name, Rd);
+		noerror();
+		rwunlock(pf, Rd);
+		rwunlock(f, Rd);
+		mbput(f);
+		f = nf;
+	}
+	noerror();
+	mbput(af);
+	USED(f);
+	USED(nf);
+
+	if((f->d.mode&DMDIR) == 0){	/* it was not a dir at that time! */
+		mbput(f);
+		error("file not found");
+	}
+	return f;
+}
+
+/*
+ * For walks into /archive, wname may be any time value (ns) or
+ * yyyymmddhhmm, yyyymmdd, mmdd, or hh:mm,
+ * and the walk proceeds to the archived file
+ * with the bigger mtime not greater than the specified time.
+ * If there's no such time, walk reports a file not found error.
+ *
+ * walks using @<symbolic time> lead to the corresponding dir in the archive.
+ */
 void
 fidwalk(Fid *fid, char *wname)
 {
@@ -336,7 +533,7 @@ fidwalk(Fid *fid, char *wname)
 		xqunlock(fid);
 		error(nil);
 	}
-	p = fid->p;
+	p = dflast(&fid->p, fid->p->nf);
 	if(strcmp(wname, ".") == 0)
 		goto done;
 	if(strcmp(wname, "..") == 0){
@@ -351,7 +548,21 @@ fidwalk(Fid *fid, char *wname)
 		error(nil);
 	}
 	dfaccessok(f, fid->uid, AEXEC);
-	nf = dfwalk(f, wname, 0);
+
+	nf = nil;
+	if(catcherror()){
+		if(f == fs->archive)
+			nf = archwalk(f, wname);
+		else if(wname[0] == '@' && f != fs->cons && f != fs->stats)
+			nf = timewalk(p, wname+1, fid->uid);
+		else
+			error(nil);
+		fid->archived = 1;
+	}else{
+		nf = dfwalk(f, wname, Rd);
+		noerror();
+	}
+
 	rwunlock(f, Rd);
 	noerror();
 	p = addelem(&fid->p, nf);
@@ -359,9 +570,10 @@ fidwalk(Fid *fid, char *wname)
 done:
 	f = p->f[p->nf-1];
 	if(isro(f))
-		fid->archived = f != fs->cons;
+		fid->archived = f != fs->cons && f != fs->stats;
 	else if(f == fs->active)
 		fid->archived = 0;
+	dfused(p);
 	noerror();
 	xqunlock(fid);
 }
@@ -385,9 +597,12 @@ fidopen(Fid *fid, int mode)
 	}
 	p = fid->p;
 	f = p->f[p->nf-1];
-	if(mode != OREAD)
+	if(mode != OREAD){
 		if(f == fs->root || f == fs->archive || fid->archived)
 			error("can't write archived or built-in files");
+		if(writedenied(fid->uid))
+			error("user can't write");
+	}
 	amode = 0;
 	if((mode&3) != OREAD || (mode&OTRUNC) != 0)
 		amode |= AWRITE;
@@ -400,34 +615,47 @@ fidopen(Fid *fid, int mode)
 			p = dfmelt(&fid->p, fid->p->nf);
 			f = p->f[p->nf-1];
 		}
-	else
+	else{
+		p = dflast(&fid->p, fid->p->nf);
 		rwlock(f, Rd);
+	}
 	if(catcherror()){
 		rwunlock(f, (amode!=AREAD)?Wr:Rd);
 		error(nil);
 	}
-	fmode = f->mf->mode;
+	fmode = f->d.mode;
 	if(mode != OREAD){
-		if(f != fs->root && p->f[p->nf-2]->mf->mode&DMAPPEND)
+		if(f != fs->root && p->f[p->nf-2]->d.mode&DMAPPEND)
 			error("directory is append only");
 		if((fmode&DMDIR) != 0)
 			error("wrong open mode for a directory");
 	}
 	dfaccessok(f, fid->uid, amode);
 	if(mode&ORCLOSE){
-		if(f == fs->active || f == fs->cons || fid->archived)
+		if(fid->archived || isro(f))
 			error("can't remove an archived or built-in file");
+		if(f->d.mode&DMUSERS)
+			error("can't remove /users");
 		dfaccessok(p->f[p->nf-2], fid->uid, AWRITE);
-	}
-	if(mode&ORCLOSE)
 		fid->rclose++;
+	}
 	if((fmode&DMEXCL) != 0 && f->mf->open)
 		if(f != fs->cons || amode != AWRITE)	/* ok to write cons */
 			error("exclusive use file already open");
-	if((mode&OTRUNC) && f != fs->cons){
+	if((mode&OTRUNC) != 0&& f != fs->cons && f != fs->stats){
 		z = 0;
 		dfwattr(f, "length", &z, sizeof z);
+		if(f->d.mode&DMUSERS){
+			f->d.mode = 0664|DMUSERS;
+			f->d.uid = usrid("adm");
+			f->d.gid = usrid("adm");
+			f->mf->uid = "adm";
+			f->mf->gid = "adm";
+			changed(f);
+		}
 	}
+	if(f == fs->stats)
+		fid->buf = updatestats(mode&OTRUNC);
 	f->mf->open++;
 	fid->omode = mode&3;
 	fid->loff = 0;
@@ -436,7 +664,9 @@ fidopen(Fid *fid, int mode)
 	noerror();
 	rwunlock(f, (amode!=AREAD)?Wr:Rd);
 	if(mode&OTRUNC)
-		dfchanged(p);
+		dfchanged(p, fid->uid);
+	else
+		dfused(p);
 	noerror();
 	xqunlock(fid);
 }
@@ -460,11 +690,18 @@ fidcreate(Fid *fid, char *name, int mode, ulong perm)
 		error("that file name is too creepy");
 	if((perm&DMDIR) != 0 && mode != OREAD)
 		error("wrong open mode for a directory");
+	if(writedenied(fid->uid))
+		error("user can't write");
+	if(fid->archived)
+		error("%P is archived or builtin", fid->p);
+	if((perm&DMBITS) != perm)
+		error("unknown bit set in perm %M %#ulx", perm, perm);
 	p = fid->p;
 	f = p->f[p->nf-1];
-	if(fid->archived)
-		error("can't create in archived or built-in files");
-	if((f->mf->mode&DMDIR) == 0)
+	if(mode&ORCLOSE)
+		if(f->d.mode&DMUSERS)
+			error("can't remove the users file");
+	if((f->d.mode&DMDIR) == 0)
 		error("not a directory");
 	p = dfmelt(&fid->p, fid->p->nf);
 	f = p->f[p->nf-1];
@@ -474,11 +711,21 @@ fidcreate(Fid *fid, char *name, int mode, ulong perm)
 	}
 	dfaccessok(f, fid->uid, AWRITE);
 	if(!catcherror()){
-		mbput(dfwalk(f, name, 0));
+		mbput(dfwalk(f, name, Rd));
 		error("file already exists");
 	}
+
+
 	nf = dfcreate(f, name, fid->uid, perm);
 	p = addelem(&fid->p, nf);
+	if(f == fs->active && strcmp(name, "users") == 0){
+		nf->d.mode = 0664|DMUSERS;
+		nf->d.uid = usrid("adm");
+		nf->d.gid = usrid("adm");
+		nf->mf->uid = "adm";
+		nf->mf->gid = "adm";
+		changed(nf);
+	}
 	decref(nf);
 	nf->mf->open++;
 	noerror();
@@ -488,7 +735,7 @@ fidcreate(Fid *fid, char *name, int mode, ulong perm)
 	fid->lidx = 0;
 	if(mode&ORCLOSE)
 		fid->rclose++;
-	dfchanged(p);
+	dfchanged(p, fid->uid);
 	noerror();
 	xqunlock(fid);
 }
@@ -513,6 +760,23 @@ readdir(Fid *fid, uchar *data, ulong ndata, uvlong, Packmeta pack)
 	return tot;
 }
 
+static long
+strread(char *s, void *data, ulong count, vlong offset)
+{
+	long n;
+
+	n = strlen(s);
+	if(offset >= n)
+		return 0;
+	s += offset;
+	n -= offset;
+	if(count > n)
+		count = n;
+	if(count > 0)
+		memmove(data, s, count);
+	return count;
+}
+
 long
 fidread(Fid *fid, void *data, ulong count, vlong offset, Packmeta pack)
 {
@@ -530,12 +794,19 @@ fidread(Fid *fid, void *data, ulong count, vlong offset, Packmeta pack)
 		error("fid not open for reading");
 	if(offset < 0)
 		error("negative offset");
-	p = fid->p;
+	p = dflast(&fid->p, fid->p->nf);
 	f = p->f[p->nf-1];
 	if(f == fs->cons){
 		noerror();
 		xqunlock(fid);
 		return consread(data, count);
+	}
+	if(f == fs->stats){
+		noerror();
+		assert(fid->buf != nil);
+		count = strread(fid->buf, data, count, offset);
+		xqunlock(fid);
+		return count;
 	}
 	rwlock(f, Rd);
 	noerror();
@@ -544,7 +815,7 @@ fidread(Fid *fid, void *data, ulong count, vlong offset, Packmeta pack)
 		rwunlock(f, Rd);
 		error(nil);
 	}
-	if(f->mf->mode&DMDIR){
+	if(f->d.mode&DMDIR){
 		if(fid->loff != offset)
 			error("non-sequential dir read not supported");
 		count = readdir(fid, data, count, offset, pack);
@@ -553,6 +824,7 @@ fidread(Fid *fid, void *data, ulong count, vlong offset, Packmeta pack)
 		count = dfpread(f, data, count, offset);
 	noerror();
 	rwunlock(f, Rd);
+	dfused(p);
 	return count;
 }
 
@@ -567,6 +839,8 @@ fidwrite(Fid *fid, void *data, ulong count, uvlong *offset)
 		xqunlock(fid);
 		error(nil);
 	}
+	if(writedenied(fid->uid))
+		error("user can't write");
 	if(fid->omode == -1)
 		error("fid not open");
 	if(fid->omode == OREAD)
@@ -578,6 +852,12 @@ fidwrite(Fid *fid, void *data, ulong count, uvlong *offset)
 		noerror();
 		return conswrite(data, count);
 	}
+	if(f == fs->stats){
+		xqunlock(fid);
+		noerror();
+		return count;
+	}
+		
 	p = dfmelt(&fid->p, fid->p->nf);
 	f = p->f[p->nf-1];
 	if(catcherror()){
@@ -588,7 +868,7 @@ fidwrite(Fid *fid, void *data, ulong count, uvlong *offset)
 	noerror();
 	rwunlock(f, Wr);
 
-	dfchanged(p);
+	dfchanged(p, fid->uid);
 	noerror();
 	xqunlock(fid);
 	return count;
@@ -609,9 +889,12 @@ fidclose(Fid *fid)
 	f = p->f[p->nf-1];
 	rwlock(f, Wr);
 	f->mf->open--;
+	if((f->d.mode&DMUSERS) && (fid->omode&3) != OREAD)
+		rwusers(f);
 	rwunlock(f, Wr);
 	fid->omode = -1;
 	if(fid->rclose){
+		dflast(&fid->p, fid->p->nf);
 		p = dfmelt(&fid->p, fid->p->nf-1);
 		fp = p->f[p->nf-2];
 		rwlock(f, Wr);
@@ -624,7 +907,7 @@ fidclose(Fid *fid)
 			noerror();
 		}
 		rwunlock(fp, Wr);
-		dfchanged(p);
+		dfchanged(p, fid->uid);
 	}
 	putpath(fid->p);
 	fid->p = nil;
@@ -644,10 +927,13 @@ fidremove(Fid *fid)
 		xqunlock(fid);
 		error(nil);
 	}
+	if(writedenied(fid->uid))
+		error("user can't write");
 	p = fid->p;
 	f = p->f[p->nf-1];
-	if(fid->archived || f == fs->cons || f == fs->active)
+	if(fid->archived || isro(f))
 		error("can't remove archived or built-in files");
+	dflast(&fid->p, fid->p->nf);
 	p = dfmelt(&fid->p, fid->p->nf-1);
 	fp = p->f[p->nf-2];
 	f = p->f[p->nf-1];
@@ -657,15 +943,17 @@ fidremove(Fid *fid)
 		rwunlock(fp, Wr);
 		error(nil);
 	}
-	if(fp->mf->mode&DMAPPEND)
+	if(fp->d.mode&DMAPPEND)
 		error("directory is append only");
+	if(f->d.mode&DMUSERS)
+		error("can't remove the users file");
 	dfaccessok(fp, fid->uid, AWRITE);
 	fid->omode = -1;
 	dfremove(fp, f);
 	fid->p->nf--;
 	noerror();
 	rwunlock(fp, Wr);
-	dfchanged(fid->p);
+	dfchanged(fid->p, fid->uid);
 	putpath(fid->p);
 	fid->p = nil;
 	noerror();
@@ -699,22 +987,11 @@ replied(Rpc *rpc)
  * that's ok.
  */
 void
-fidrahead(Fid *fid, uvlong offset)
+rahead(Memblk *f, uvlong offset)
 {
-	Path *p;
-	Memblk *f;
 	Mfile *m;
 
-	xqlock(fid);
-	if(catcherror()){
-		xqunlock(fid);
-		error(nil);
-	}
-	p = fid->p;
-	f = p->f[p->nf-1];
 	rwlock(f, Rd);
-	xqunlock(fid);
-	noerror();
 	m = f->mf;
 	if(m->sequential == 0 || m->raoffset > offset + Nahead){
 		rwunlock(f, Rd);
@@ -722,7 +999,8 @@ fidrahead(Fid *fid, uvlong offset)
 	}
 	if(catcherror()){
 		rwunlock(f, Rd);
-		error(nil);
+		fprint(2, "%s: rahead: %r\n", argv0);
+		return;
 	}
 	m->raoffset = offset + Nahead;
 	d9print("rahead d%#ullx off %#ullx\n", f->addr, m->raoffset);
@@ -740,36 +1018,23 @@ fidrahead(Fid *fid, uvlong offset)
  * loaded in memory before further walks/reads.
  */
 void
-fidwahead(Fid *fid)
+wahead(Memblk *f)
 {
-	Path *p;
-	Memblk *f;
 	Mfile *m;
 	int i;
 
-	xqlock(fid);
-	if(catcherror()){
-		xqunlock(fid);
-		error(nil);
-	}
-	p = fid->p;
-	f = p->f[p->nf-1];
 	rwlock(f, Rd);
-	noerror();
-	xqunlock(fid);
-
-	if(catcherror()){
-		rwunlock(f, Rd);
-		error(nil);
-	}
 	m = f->mf;
-	if((m->mode&DMDIR) == 0 || m->wadone){
-		noerror();
+	if((f->d.mode&DMDIR) == 0 || m->wadone){
 		rwunlock(f, Rd);
 		return;
 	}
 	m->wadone = 1;
-	for(i = 0; i < f->mf->length/sizeof(Dentry); i++)
+	if(catcherror()){
+		rwunlock(f, Rd);
+		error(nil);
+	}
+	for(i = 0; i < f->d.length/Daddrsz; i++)
 		mbput(dfchild(f, i));
 	noerror();
 	rwunlock(f, Rd);
@@ -816,7 +1081,7 @@ getremotesys(char *ndir)
 	return sys;
 }
 
-void
+static void
 srv9pix(char *srv, char* (*cliworker)(void *arg, void **aux))
 {
 	Cli *cli;
@@ -832,7 +1097,7 @@ srv9pix(char *srv, char* (*cliworker)(void *arg, void **aux))
 	getworker(cliworker, cli, nil);
 }
 
-void
+static void
 listen9pix(char *addr,  char* (*cliworker)(void *arg, void **aux))
 {
 	Cli *cli;
@@ -879,8 +1144,9 @@ threadmain(int argc, char *argv[])
 		break;
 	default:
 		if(ARGC() >= 'A' && ARGC() <= 'Z' || ARGC() == '9'){
-			dbg['D'] = 1;
+			dbg['d'] = 1;
 			dbg[ARGC()] = 1;
+			fatalaborts = 1;
 		}else
 			usage();
 	}ARGEND;
@@ -895,22 +1161,20 @@ threadmain(int argc, char *argv[])
 	fmtinstall('G', ixcallfmt);
 	fmtinstall('X', fidfmt);
 	fmtinstall('R', rpcfmt);
+	fmtinstall('A', usrfmt);
+	fmtinstall('P', pathfmt);
+
 	errinit(Errstack);
 	if(catcherror())
 		fatal("uncatched error: %r");
 	rfork(RFNAMEG);
-	parseusers(defaultusers);
+	rwusers(nil);
 	fsopen(dev);
 	if(srv != nil)
 		srv9pix(srv, cliworker9p);
 	if(addr != nil)
 		listen9pix(addr, cliworker9p);
 
-	/*
-	 * fsstats();
-	 * ninestats();
-	 * ixstats();
-	 */
 	consinit();
 	noerror();
 	threadexits(nil);

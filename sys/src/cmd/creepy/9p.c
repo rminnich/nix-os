@@ -13,11 +13,9 @@
 #include "net.h"
 #include "fns.h"
 
-
 /*
  * 9p server for creepy
  */
-
 
 static void	rflush(Rpc*), rversion(Rpc*), rauth(Rpc*),
 		rattach(Rpc*), rwalk(Rpc*),
@@ -42,20 +40,20 @@ static void (*fcalls[])(Rpc*) =
 	[Twstat]	rwstat,
 };
 
-void
-ninestats(int clr)
+char*
+ninestats(char *s, char *e, int clr)
 {
 	int i;
 
-	fprint(2, "fids:\t%4uld alloc %4uld free (%4uld bytes)\n",
+	s = seprint(s, e, "fids:\t%4uld alloc %4uld free (%4uld bytes)\n",
 		fidalloc.nalloc, fidalloc.nfree, fidalloc.elsz);
-	fprint(2, "rpcs:\t%4uld alloc %4uld free (%4uld bytes)\n",
+	s = seprint(s, e, "rpcs:\t%4uld alloc %4uld free (%4uld bytes)\n",
 		rpcalloc.nalloc, rpcalloc.nfree, rpcalloc.elsz);
-	fprint(2, "clis:\t%4uld alloc %4uld free (%4uld bytes)\n",
+	s = seprint(s, e, "clis:\t%4uld alloc %4uld free (%4uld bytes)\n",
 		clialloc.nalloc, clialloc.nfree, clialloc.elsz);
 	for(i = 0; i < nelem(fcalls); i++)
 		if(fcalls[i] != nil && ncalls[i] > 0){
-			fprint(2, "%-8s\t%5uld calls\t%11ulld µs\n",
+			s = seprint(s, e, "%-8s\t%5uld calls\t%11ulld µs per call\n",
 				callname[i], ncalls[i],
 				(calltime[i]/ncalls[i])/1000);
 			if(clr){
@@ -63,24 +61,24 @@ ninestats(int clr)
 				calltime[i] = 0;
 			}
 		}
+	return s;
 }
-
 
 static Qid
 mkqid(Memblk *f)
 {
 	Qid q;
 	
-	q.path = f->mf->id;
-	q.vers = f->mf->mtime;
+	q.path = f->d.id;
+	q.vers = f->d.mtime;
 	q.type = 0;
-	if(f->mf->mode&DMDIR)
+	if(f->d.mode&DMDIR)
 		q.type |= QTDIR;
-	if(f->mf->mode&DMTMP)
+	if(f->d.mode&DMTMP)
 		q.type |= QTTMP;
-	if(f->mf->mode&DMAPPEND)
+	if(f->d.mode&DMAPPEND)
 		q.type |= QTAPPEND;
-	if(f->mf->mode&DMEXCL)
+	if(f->d.mode&DMEXCL)
 		q.type |= QTEXCL;
 	if((q.type&QTEXCL) == 0)
 		q.type |= QTCACHE;
@@ -238,15 +236,15 @@ pack9dir(Memblk *f, uchar *buf, int nbuf)
 	nulldir(&d);
 	d.name = f->mf->name;
 	d.qid = mkqid(f);
-	d.mode = f->mf->mode;
-	d.length = f->mf->length;
+	d.mode = f->d.mode;
+	d.length = f->d.length;
 	if(d.mode&DMDIR)
 		d.length = 0;
 	d.uid = f->mf->uid;
 	d.gid = f->mf->gid;
 	d.muid = f->mf->muid;
-	d.atime = f->mf->atime;
-	d.mtime = f->mf->mtime;
+	d.atime = f->d.atime;
+	d.mtime = f->d.mtime / NSPERSEC;
 	return convD2M(&d, buf, nbuf);
 }
 
@@ -302,7 +300,7 @@ rremove(Rpc *rpc)
 	fid = getfid(rpc->cli, rpc->t.fid);
 	rpc->fid = fid;
 	if(catcherror()){
-		d9print("clunking %X\n\n", fid);
+		dEprint("clunking %X:\n\t%r\n", fid);
 		putfid(fid);
 		putfid(fid);
 		rpc->fid = nil;
@@ -311,7 +309,7 @@ rremove(Rpc *rpc)
 
 	fidremove(fid);
 	noerror();
-	d9print("clunking %X\n\n", fid);
+	dEprint("clunking %X\n\n", fid);
 	putfid(fid);
 	putfid(fid);
 	rpc->fid = nil;
@@ -331,7 +329,7 @@ rstat(Rpc *rpc)
 		xqunlock(fid);
 		error(nil);
 	}
-	p = fid->p;
+	p = dflast(&fid->p, fid->p->nf);
 	f = p->f[p->nf-1];
 	rwlock(f, Rd);
 	noerror();
@@ -379,9 +377,11 @@ rwstat(Rpc *rpc)
 		xqunlock(fid);
 		error(nil);
 	}
+	if(writedenied(fid->uid))
+		error("user can't write");
 	p = fid->p;
 	f = p->f[p->nf-1];
-	if(fid->archived || f == fs->cons)
+	if(fid->archived || isro(f))
 		error("can't wstat archived or built-in files");
 	p = dfmelt(&fid->p, fid->p->nf);
 	f = p->f[p->nf-1];
@@ -391,9 +391,14 @@ rwstat(Rpc *rpc)
 		rwunlock(f, Wr);
 		error(nil);
 	}
-	if(sd.length != ~0 && sd.length != f->mf->length){
-		if(f->mf->mode&DMDIR)
+
+	if(f->d.mode&DMUSERS)
+		error("can't wstat the users file");
+	if(sd.length != ~0 && sd.length != f->d.length){
+		if(f->d.mode&DMDIR)
 			error("can't resize a directory");
+		if(sd.length != 0)
+			error("can't truncate to non-zero length");
 		dfaccessok(f, fid->uid, AWRITE);
 	}else
 		sd.length = ~0;
@@ -403,48 +408,91 @@ rwstat(Rpc *rpc)
 			error("can't rename built-in files");
 		dfaccessok(p->f[p->nf-2], fid->uid, AWRITE);
 		if(!catcherror()){
-			mbput(dfwalk(f, sd.name, 0));
+			mbput(dfwalk(f, sd.name, Rd));
 			error("file already exists");
 		}
 	}else
 		sd.name[0] = 0;
 
 	if(sd.uid[0] != 0 && strcmp(sd.uid, f->mf->uid) != 0){
-		if(!fs->config && strcmp(fid->uid, f->mf->uid) != 0)
-			error("only the owner may donate a file");
-		if(!fs->config && !member(sd.uid, fid->uid) != 0)
-			error("you are not in that group");
+		if(!allowed(f->d.uid)){
+			if(fid->uid != f->d.uid && !leader(f->d.gid, fid->uid))
+				error("not the owner or group leader");
+			if(!member(usrid(sd.uid), fid->uid) != 0)
+				error("you are not a member");
+		}
 	}else
 		sd.uid[0] = 0;
+
 	if(sd.gid[0] != 0 && strcmp(sd.gid, f->mf->gid) != 0){
-		if(!fs->config && strcmp(fid->uid, f->mf->uid) != 0)
-			error("only the onwer may change group");
-		if(!fs->config && !member(sd.gid, fid->uid) != 0)
-			error("you are not in that group");
+		/*
+		 * Not std. in 9: leader must be member of the new gid, not
+		 * leader of the new gid.
+		 */
+		if(!allowed(f->d.uid)){
+			if(fid->uid != f->d.uid && !leader(f->d.gid, fid->uid))
+				error("not the owner or group leader");
+			if(!member(usrid(sd.gid), fid->uid) != 0)
+				error("you are not a member");
+		}
 	}else
 		sd.gid[0] = 0;
-	if(sd.mode != ~0 && f->mf->mode != sd.mode){
-		if(!fs->config && strcmp(fid->uid, f->mf->uid) != 0 &&
-		   !member(f->mf->gid, fid->uid) != 0)
-			error("only the onwer or members may change mode");
+
+	/*
+	 * Not std. in 9: muid can be updated if uid is allowed, it's
+	 * ignored otherwise.
+	 */
+	if(sd.muid[0] != 0 && strcmp(sd.muid, f->mf->muid) != 0){
+		if(!allowed(f->d.uid))
+			sd.muid[0] = 0;
+	}else
+		sd.muid[0] = 0;
+
+	if(sd.mode != ~0 && f->d.mode != sd.mode){
+		if((sd.mode&DMBITS) != sd.mode)
+			error("unknown bit set in mode");
+		if(!allowed(f->d.uid))
+			if(fid->uid != f->d.uid && !leader(f->d.gid, fid->uid))
+				error("not the owner or group leader");
+		if((sd.mode&DMDIR) ^ (f->d.mode&DMDIR))
+			error("attempt to change DMDIR");
 	}else
 		sd.mode = ~0;
 
+	/*
+	 * Not std. in 9: allowed users can also set atime.
+	 */
+	if(sd.atime != ~0 && f->d.atime != sd.atime){
+		if(!allowed(f->d.uid))
+			sd.atime = ~0;		/* ignore it */
+	}else
+		sd.atime = ~0;
+
+	if(sd.mtime != ~0 && f->d.mtime != sd.mtime){
+		if(!allowed(f->d.uid))
+			if(fid->uid != f->d.uid && !leader(f->d.gid, fid->uid))
+				error("not the owner or group leader");
+	}else
+		sd.mtime = ~0;
+
+	/*
+	 * Not std. in 9: other non-null fields, if any, are ignored.
+	 */
 	if(sd.length != ~0)
 		wstatint(f, "length", sd.length);
 	if(sd.name[0])
 		wstatstr(f, "name", sd.name);
 	if(sd.uid[0])
-		wstatstr(f, "name", sd.name);
+		wstatstr(f, "uid", sd.uid);
 	if(sd.gid[0])
-		wstatstr(f, "name", sd.name);
+		wstatstr(f, "gid", sd.gid);
+	if(sd.muid[0])
+		wstatstr(f, "muid", sd.muid);
 	if(sd.mode != ~0)
 		wstatint(f, "mode", sd.mode);
-	if(fs->config && sd.atime != ~0)
+	if(sd.atime != ~0)
 		wstatint(f, "atime", sd.atime);
-	if(fs->config && sd.mtime != ~0)
-		wstatint(f, "mtime", sd.mtime);
-	if(fs->config && sd.muid[0] != 0 && strcmp(sd.muid, f->mf->muid) != 0)
+	if(sd.mtime != ~0)
 		wstatint(f, "mtime", sd.mtime);
 
 	noerror();
@@ -456,10 +504,10 @@ rpcworker9p(void *v, void**aux)
 {
 	Rpc *rpc;
 	Cli *cli;
-	Fid *fid;
 	char err[128];
 	long n;
 	int nerr;
+	Memblk *fahead;
 
 	rpc = v;
 	cli = rpc->cli;
@@ -473,32 +521,38 @@ rpcworker9p(void *v, void**aux)
 	nerr = nerrors();
 
 
+	fspolicy();
+
+
 	rpc->r.tag = rpc->t.tag;
 	rpc->r.type = rpc->t.type + 1;
 
+	quiescent(No);
 	if(catcherror()){
+		quiescent(Yes);
 		rpc->r.type = Rerror;
 		rpc->r.ename = err;
 		rerrstr(err, sizeof err);
 	}else{
-		fcalls[rpc->t.type](rpc);	
+		fcalls[rpc->t.type](rpc);
+		quiescent(Yes);	
 		noerror();
 	}
 
-	fid = nil;
-	if(rpc->fid != nil && rpc->fid->ref > 1){
-		/* The fid is not clunked by this rpc; ok to read/walk ahead */
-		fid = rpc->fid;
-		incref(fid);
-	}
+	xqlock(&cli->wlk);
+	fahead = nil;
+	if(rpc->fid != nil && rpc->fid->p != nil)
+		if(rpc->r.type == Rread || rpc->r.type == Rwalk){
+			fahead = rpc->fid->p->f[rpc->fid->p->nf - 1];
+			incref(fahead);
+		}
 	if(catcherror()){
-		if(fid != nil)
-			putfid(fid);
+		mbput(fahead);
+		error(nil);
 	}
 
-	xqlock(&cli->wlk);
 	putfid(rpc->fid);	/* release rpc fid before replying */
-	rpc->fid = nil;
+	rpc->fid = nil;		/* or we might get "fid in use" errors */
 
 	if(rpc->flushed == 0){
 		d9print("-> %F\n", &rpc->r);
@@ -513,18 +567,12 @@ rpcworker9p(void *v, void**aux)
 	ncalls[rpc->t.type]++;
 	xqunlock(&cli->wlk);
 
-	if(fid != nil){
-		switch(rpc->t.type){
-		case Tread:	/* read ahead? */
-			if(rpc->r.type == Rread && rpc->r.count == rpc->t.count)
-				fidrahead(fid, rpc->t.offset + rpc->t.count);
-			break;
-		case Twalk:	/* walk ahead? */
-			if(rpc->r.type == Rwalk)
-				fidwahead(fid);
-			break;
-		}
-		putfid(fid);
+	if(fahead != nil){
+		if(rpc->r.type == Rread)
+			rahead(fahead, rpc->t.offset + rpc->r.count);
+		else if(rpc->r.type == Rwalk)
+			wahead(fahead);
+		mbput(fahead);
 	}
 	noerror();
 
@@ -587,7 +635,6 @@ cliworker9p(void *v, void**aux)
 		cli->nrpcs++;
 		xqunlock(&cli->rpclk);
 
-		fspolicy();
 		if(rpc->t.type == Tflush ||
 		   (Rpcspercli != 0 && cli->nrpcs >= Rpcspercli))
 			rpcworker9p(rpc, aux);
@@ -600,5 +647,3 @@ cliworker9p(void *v, void**aux)
 	dPprint("%s exiting\n", threadgetname());
 	return nil;
 };
-
-

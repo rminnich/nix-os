@@ -31,14 +31,49 @@ static char *fsdir;
 static int verb;
 
 int
-member(char *uid, char *member)
+member(int uid, int member)
 {
-	return strcmp(uid, member);
+	return uid == member;
+}
+
+int
+allowed(int)
+{
+	return 1;
+}
+
+int
+usrid(char*)
+{
+	return 0;
+}
+
+char*
+usrname(int)
+{
+	return getuser();
 }
 
 void
 meltfids(void)
 {
+}
+
+void
+rwusers(Memblk*)
+{
+}
+
+char*
+ninestats(char *s, char*, int)
+{
+	return s;
+}
+
+char*
+ixstats(char *s, char*, int)
+{
+	return s;
 }
 
 /*
@@ -59,14 +94,14 @@ walkpath(Memblk *f, char *elems[], int nelems)
 	}
 	isfile(f);
 	for(i = 0; i < nelems; i++){
-		if((f->mf->mode&DMDIR) == 0)
+		if((f->d.mode&DMDIR) == 0)
 			error("not a directory");
 		rwlock(f, Rd);
 		if(catcherror()){
 			rwunlock(f, Rd);
 			error("walk: %r");
 		}
-		nf = dfwalk(f, elems[i], 0);
+		nf = dfwalk(f, elems[i], Rd);
 		rwunlock(f, Rd);
 		addelem(&p, nf);
 		mbput(nf);
@@ -166,7 +201,7 @@ fsput(int, char *argv[])
 		rwunlock(m, Wr);
 		error(nil);
 	}
-	f = dfcreate(m, fn, d->uid, d->mode&(DMDIR|0777));
+	f = dfcreate(m, fn, usrid(d->uid), d->mode&(DMDIR|0777));
 	noerror();
 	addelem(&p, f);
 	decref(f);	/* kept now in p */
@@ -179,7 +214,8 @@ fsput(int, char *argv[])
 	if((d->mode&DMDIR) == 0){
 		off = 0;
 		for(;;){
-			fslru();
+			if(fsmemfree() < Mminfree)
+				fslru();
 			nr = read(fd, buf, sizeof buf);
 			if(nr <= 0)
 				break;
@@ -219,11 +255,12 @@ fscat(int, char *argv[])
 	}
 	m = f->mf;
 	print("cat %-30s\t%M\t%5ulld\t%s %ulld refs\n",
-		m->name, (ulong)m->mode, m->length, m->uid, dbgetref(f->addr));
-	if((m->mode&DMDIR) == 0){
+		m->name, (ulong)f->d.mode, f->d.length, m->uid, dbgetref(f->addr));
+	if((f->d.mode&DMDIR) == 0){
 		off = 0;
 		for(;;){
-			fslru();
+			if(fsmemfree() < Mminfree)
+				fslru();
 			nr = dfpread(f, buf, sizeof buf, off);
 			if(nr <= 0)
 				break;
@@ -264,11 +301,12 @@ fsget(int, char *argv[])
 	}
 	m = f->mf;
 	print("get %-30s\t%M\t%5ulld\t%s %ulld refs\n",
-		m->name, (ulong)m->mode, m->length, m->uid, dbgetref(f->addr));
-	if((m->mode&DMDIR) == 0){
+		m->name, (ulong)f->d.mode, f->d.length, m->uid, dbgetref(f->addr));
+	if((f->d.mode&DMDIR) == 0){
 		off = 0;
 		for(;;){
-			fslru();
+			if(fsmemfree() < Mminfree)
+				fslru();
 			nr = dfpread(f, buf, sizeof buf, off);
 			if(nr <= 0)
 				break;
@@ -350,13 +388,25 @@ fsrm(int, char *argv[])
 static void
 fsst(int, char**)
 {
-	fsstats(0);
+	fprint(2, "%s\n", updatestats(0));
 }
 
 static void
 fschk(int, char**)
 {
 	fscheck();
+}
+
+static void
+fserr(int, char *argv[])
+{
+	if(*argv[0] == 'r'){
+		swreaderr = atoi(argv[1]);
+		print("sw read err count = %d\n", swreaderr);
+	}else{
+		swwriteerr = atoi(argv[1]);
+		print("sw write err count = %d\n", swwriteerr);
+	}
 }
 
 static void
@@ -384,6 +434,8 @@ static Cmd cmds[] =
 	{"rm",	fsrm,	2, "rm!what"},
 	{"stats", fsst, 1, "stats"},
 	{"check", fschk, 1, "check"},
+	{"rerr", fserr, 2, "rerr!n"},
+	{"werr", fserr, 2, "werr!n"},
 };
 
 void
@@ -410,6 +462,7 @@ threadmain(int argc, char *argv[])
 	}ARGEND;
 	if(argc == 0)
 		usage();
+	fatalaborts = 1;
 	fmtinstall('H', mbfmt);
 	fmtinstall('M', dirmodefmt);
 	errinit(Errstack);
@@ -420,7 +473,7 @@ threadmain(int argc, char *argv[])
 		if(catcherror())
 			fatal("cmd %s: %r", argv[i]);
 		if(verb>1)
-			fsdump(0, 0);
+			fsdump(0, Mem);
 		print("%% %s\n", argv[i]);
 		nargs = gettokens(argv[i], args, Nels, "!");
 		for(j = 0; j < nelem(cmds); j++){
@@ -442,7 +495,7 @@ threadmain(int argc, char *argv[])
 		}
 	}
 	if(verb>1)
-		fsdump(0, 0);
+		fsdump(0, Mem);
 	noerror();
 	exits(nil);
 }
