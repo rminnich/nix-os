@@ -1,16 +1,4 @@
-#include <u.h>
-#include <libc.h>
-#include <thread.h>
-#include <bio.h>
-#include <fcall.h>
-#include <error.h>
-
-#include "conf.h"
-#include "dbg.h"
-#include "dk.h"
-#include "ix.h"
-#include "net.h"
-#include "fns.h"
+#include "all.h"
 
 /*
  * Locking is coarse, only functions used from outside
@@ -42,8 +30,6 @@
 
 /*
  * The uid numbers are irrelevant, they are rewritten.
- * XXX: There's code assuming the positions of these users...
- * search for it and make it search the user if needed or use a global for it.
  */
 static char *defaultusers = 
 	"1:none::\n"
@@ -732,6 +718,12 @@ callow(int argc, char *argv[])
 	xrwunlock(&ulk, Rd);
 }
 
+static void
+cwho(int, char**)
+{
+	consprintclients();
+}
+
 static void chelp(int, char**);
 
 static Cmd cmds[] =
@@ -752,6 +744,7 @@ static Cmd cmds[] =
 	{"reclaim",	creclaim, 1, "reclaim"},
 	{"allow",	callow, 0, "allow [uid]"},
 	{"disallow",	callow, 0, "disallow [uid]"},
+	{"who",		cwho, 1, "who"},
 	{"?",		chelp, 1, "?"},
 };
 

@@ -1,17 +1,4 @@
-#include <u.h>
-#include <libc.h>
-#include <thread.h>
-#include <bio.h>
-#include <fcall.h>
-#include <error.h>
-#include <worker.h>
-
-#include "conf.h"
-#include "dbg.h"
-#include "dk.h"
-#include "ix.h"
-#include "net.h"
-#include "fns.h"
+#include "all.h"
 
 /*
  * ix server for creepy
@@ -520,7 +507,8 @@ rpcworkerix(void *v, void**aux)
 	dPprint("%s started\n", threadgetname());
 
 	do{
-		fspolicy();
+		if(fsmemfree() < Mzerofree || fsdiskfree() < Dzerofree)
+			fspolicy();
 
 		nerr = nerrors();
 		rpc->xr.type = rpc->xt.type + 1;
@@ -571,6 +559,9 @@ rpcworkerix(void *v, void**aux)
 		freeixrpc(rpc);
 	replied(rpc0);
 	freeixrpc(rpc0);
+
+	fspolicy();
+
 	dPprint("%s exiting\n", threadgetname());
 	return nil;
 }

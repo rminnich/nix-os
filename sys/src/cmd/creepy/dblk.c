@@ -1,16 +1,4 @@
-#include <u.h>
-#include <libc.h>
-#include <thread.h>
-#include <bio.h>
-#include <fcall.h>
-#include <error.h>
-
-#include "conf.h"
-#include "dbg.h"
-#include "dk.h"
-#include "ix.h"
-#include "net.h"
-#include "fns.h"
+#include "all.h"
 
 /*
  * disk blocks, built upon memory blocks provided by mblk.c
@@ -75,20 +63,6 @@ meltedref(Memblk *rb)
 		rb->frozen = 0;
 	}
 }
-
-/*
- * BUG: the free list of blocks using entries in the ref blocks
- * shouldn't span all those blocks as it does now. To prevent
- * massive loses of free blocks each DBref block should keep its own
- * little free list, and all blocks with free entries should be linked
- * in the global list.
- * This would keep locality and make it less likely that a failure in the
- * middle of a sync destroyes the entire list.
- *
- * TODO: If there's a bad address in the free list, we fatal.
- * we could throw away the entire free list and continue operation, after
- * issuing a warning so the user knows.
- */
 
 static daddrt
 newblkaddr(void)
@@ -459,12 +433,12 @@ dbwrite(Memblk *b)
 		if(fs->fzsuper->d.oddrefs)
 			addr += Dblksz;
 	}
-	dWprint("dbwrite at d%#010ullx %H\n",addr, b);
+	dWprint("dbwriting at d%#010ullx %H\n",addr, b);
 	nb = hosttodisk(b);
-	if(swwriteerr != 0 && ++nw % swwriteerr == 0){
+	if(swwriteerr != 0 && ++nw > swwriteerr){
 		written(b);	/* what can we do? */
 		mbput(nb);
-		fprint(2, "%s: dbwrite: software fault injected\n", argv0);
+		fprint(2, "%s: WRITE FAULT INJECTED\n", argv0);
 		error("dbwrite: sw fault");
 	}
 	if(pwrite(fs->fd, &nb->d, sizeof nb->d, addr) != Dblksz){
@@ -494,9 +468,9 @@ dbread(Memblk *b)
 	if(b->type == DBref && fs->super->d.oddrefs)
 		addr += Dblksz;
 	for(tot = 0; tot < Dblksz; tot += n){
-		if(swreaderr != 0 && ++nr % swreaderr == 0){
-			fprint(2, "%s: dbread: software fault injected\n", argv0);
-			error("dbwrite: sw fault");
+		if(swreaderr != 0 && ++nr > swreaderr){
+			fprint(2, "%s: READ FAULT INJECTED\n", argv0);
+			error("dbread: sw fault");
 		}
 		n = pread(fs->fd, p+tot, Dblksz-tot, addr + tot);
 		if(n == 0)

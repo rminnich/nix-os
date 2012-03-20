@@ -1,17 +1,4 @@
-#include <u.h>
-#include <libc.h>
-#include <thread.h>
-#include <bio.h>
-#include <fcall.h>
-#include <error.h>
-#include <worker.h>
-
-#include "conf.h"
-#include "dbg.h"
-#include "dk.h"
-#include "ix.h"
-#include "net.h"
-#include "fns.h"
+#include "all.h"
 
 /*
  * 9p server for creepy
@@ -64,11 +51,23 @@ ninestats(char *s, char *e, int clr)
 	return s;
 }
 
+/*
+ * Ok if f is nil, for auth files.
+ */
 static Qid
 mkqid(Memblk *f)
 {
 	Qid q;
-	
+	static uvlong authgen;
+
+	if(f == nil){
+		authgen++;
+		q.type = QTAUTH;
+		q.path = authgen;
+		q.vers = 0;
+		return q;
+	}
+
 	q.path = f->d.id;
 	q.vers = f->d.mtime;
 	q.type = 0;
@@ -122,27 +121,99 @@ rflush(Rpc *rpc)
 }
 
 static void
-rauth(Rpc*)
+rauth(Rpc *rpc)
 {
-	/* BUG */
-	error("no auth required");
+	Fid *fid;
+	static char spec[] = "proto=p9any role=server";
+
+	if(noauth)
+		error("no auth required");
+
+	fid = newfid(rpc->cli, rpc->t.afid);
+	rpc->fid = fid;
+
+	setfiduid(fid, rpc->t.uname);
+
+	fid->omode = ORDWR;
+	fid->afd = open("/mnt/factotum/rpc", ORDWR);
+	if(fid->afd < 0)
+		error("factotum: %r");
+	fid->rpc = auth_allocrpc(fid->afd);
+	if(fid->rpc == nil){
+		close(fid->afd);
+		error("auth rpc: %r");
+	}
+	if(auth_rpc(fid->rpc, "start", spec, strlen(spec)) != ARok){
+		auth_freerpc(fid->rpc);
+		close(fid->afd);
+		error("auth_rpc start failed");
+	}
+	rpc->r.qid = mkqid(nil);
+	d9print("factotum rpc started\n");
+}
+
+static long
+xauthread(Fid *fid, long count, void *data)
+{
+	AuthInfo *ai;
+
+	switch(auth_rpc(fid->rpc, "read", nil, 0)){
+	case ARdone:
+		ai = auth_getinfo(fid->rpc);
+		if(ai == nil)
+			error("authread: info: %r");
+		auth_freeAI(ai);
+		d9print("auth: %s: ok\n", usrname(fid->uid));
+		fid->authok = 1;
+		return 0;
+	case ARok:
+		if(count < fid->rpc->narg)
+			error("authread: count too small");
+		count = fid->rpc->narg;
+		memmove(data, fid->rpc->arg, count);
+		return count;
+	}
+	error("authread: phase error");
+	return -1;
 }
 
 static void
 rattach(Rpc *rpc)
 {
-	Fid *fid;
+	Fid *fid, *afid;
 	Path *p;
 	Memblk *f;
+	char buf[ERRMAX];
 
 	fid = newfid(rpc->cli, rpc->t.fid);
 	rpc->fid = fid;
+	afid = nil;
+	if(!noauth){
+		afid = getfid(rpc->cli, rpc->t.afid);
+		if(catcherror()){
+			putfid(afid);
+			error(nil);
+		}
+		if(afid->rpc == nil)
+			error("afid is not an auth fid");
+		if(afid->authok == 0)
+			xauthread(afid, 0, buf);
+	}
 	fidattach(fid, rpc->t.aname, rpc->t.uname);
+	if(!noauth){
+		if(fid->uid != afid->uid)
+			error("auth uid mismatch");
+		noerror();
+		putfid(afid);
+	}
 	p = fid->p;
 	f = p->f[p->nf-1];
 	rwlock(f, Rd);
 	rpc->r.qid = mkqid(f);
 	rwunlock(f, Rd);
+
+	if(rpc->cli->uid == -1)
+		rpc->cli->uid = rpc->fid->uid;
 }
 
 static void
@@ -201,6 +272,9 @@ ropen(Rpc *rpc)
 	rpc->fid = getfid(rpc->cli, rpc->t.fid);
 	fid = rpc->fid;
 
+	if(fid->rpc != nil)	/* auth fids are always open */
+		return;
+
 	rpc->r.iounit = rpc->cli->msize - IOHDRSZ;
 	fidopen(rpc->fid, rpc->t.mode);
 	f = fid->p->f[fid->p->nf-1];
@@ -218,6 +292,8 @@ rcreate(Rpc *rpc)
 
 	fid = getfid(rpc->cli, rpc->t.fid);
 	rpc->fid = fid;
+	if(fid->rpc != nil)
+		error("create on auth fid");
 
 	fidcreate(fid, rpc->t.name, rpc->t.mode, rpc->t.perm);
 	p = fid->p;
@@ -249,6 +325,20 @@ pack9dir(Memblk *f, uchar *buf, int nbuf)
 }
 
 static void
+authread(Rpc *rpc)
+{
+	Fid *fid;
+
+	fid = rpc->fid;
+	if(fid->rpc == nil)
+		error("authread: not an auth fid");
+	rpc->r.data = (char*)rpc->data;
+	rpc->r.count = xauthread(fid, rpc->t.count, rpc->r.data);
+	putfid(fid);
+	rpc->fid = nil;
+}
+
+static void
 rread(Rpc *rpc)
 {
 	Fid *fid;
@@ -256,12 +346,31 @@ rread(Rpc *rpc)
 
 	fid = getfid(rpc->cli, rpc->t.fid);
 	rpc->fid = fid;
+	if(fid->rpc != nil){
+		authread(rpc);
+		return;
+	}
 	if(rpc->t.count > rpc->cli->msize-IOHDRSZ)
 		rpc->r.count = rpc->cli->msize-IOHDRSZ;
 	rpc->r.data = (char*)rpc->data;
 	off = rpc->t.offset;
 	rpc->r.count = fidread(fid, rpc->r.data, rpc->t.count, off, pack9dir);
 
+}
+
+static void
+authwrite(Rpc *rpc)
+{
+	Fid *fid;
+
+	fid = rpc->fid;
+	if(fid->rpc == nil)
+		error("authwrite: not an auth fid");
+	if(auth_rpc(fid->rpc, "write", rpc->t.data, rpc->t.count) != ARok)
+		error("authwrite: %r");
+	rpc->r.count = rpc->t.count;
+	putfid(fid);
+	rpc->fid = nil;
 }
 
 static void
@@ -274,6 +383,10 @@ rwrite(Rpc *rpc)
 		error("negative offset");
 	fid = getfid(rpc->cli, rpc->t.fid);
 	rpc->fid = fid;
+	if(fid->rpc != nil){
+		authwrite(rpc);
+		return;
+	}
 	off = rpc->t.offset;
 	rpc->r.count = fidwrite(fid, rpc->t.data, rpc->t.count, &off);
 }
@@ -285,7 +398,14 @@ rclunk(Rpc *rpc)
 
 	fid = getfid(rpc->cli, rpc->t.fid);
 	rpc->fid = fid;
-	if(fid->omode != -1)
+	if(fid->rpc != nil){
+		fid->omode = -1;
+		if(fid->rpc != nil)
+			auth_freerpc(fid->rpc);
+		fid->rpc = nil;
+		close(fid->afd);
+		fid->afd = -1;
+	}else if(fid->omode != -1)
 		fidclose(fid);
 	putfid(fid);
 	putfid(fid);
@@ -299,6 +419,8 @@ rremove(Rpc *rpc)
 
 	fid = getfid(rpc->cli, rpc->t.fid);
 	rpc->fid = fid;
+	if(fid->rpc != nil)
+		error("remove on auth fid");
 	if(catcherror()){
 		dEprint("clunking %X:\n\t%r\n", fid);
 		putfid(fid);
@@ -324,6 +446,8 @@ rstat(Rpc *rpc)
 
 	fid = getfid(rpc->cli, rpc->t.fid);
 	rpc->fid = fid;
+	if(fid->rpc != nil)
+		error("stat on auth fid");
 	xqlock(fid);
 	if(catcherror()){
 		xqunlock(fid);
@@ -372,6 +496,8 @@ rwstat(Rpc *rpc)
 		error("convM2D: bad stat");
 	fid = getfid(rpc->cli, rpc->t.fid);
 	rpc->fid = fid;
+	if(fid->rpc != nil)
+		error("wstat on auth fid");
 	xqlock(fid);
 	if(catcherror()){
 		xqunlock(fid);
@@ -521,7 +647,8 @@ rpcworker9p(void *v, void**aux)
 	nerr = nerrors();
 
 
-	fspolicy();
+	if(fsmemfree() < Mzerofree || fsdiskfree() < Dzerofree)
+		fspolicy();
 
 
 	rpc->r.tag = rpc->t.tag;
@@ -578,6 +705,9 @@ rpcworker9p(void *v, void**aux)
 
 	replied(rpc);
 	freerpc(rpc);
+
+	fspolicy();
+
 	dPprint("%s exiting\n", threadgetname());
 
 	if(nerrors() != nerr)

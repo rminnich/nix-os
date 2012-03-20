@@ -28,6 +28,7 @@ HFILES=\
 	fns.h\
 	ix.h\
 	net.h\
+	all.h\
 
 # not ready for install
 BIN=.

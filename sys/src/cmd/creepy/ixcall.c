@@ -1,12 +1,4 @@
-#include	<u.h>
-#include	<libc.h>
-#include	<fcall.h>
-#include <thread.h>
-
-#include "conf.h"
-#include "dk.h"
-#include "ix.h"
-#include "net.h"
+#include "all.h"
 
 static char* cname[CMAX] = 
 {
