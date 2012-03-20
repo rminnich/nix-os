@@ -1,16 +1,4 @@
-#include <u.h>
-#include <libc.h>
-#include <thread.h>
-#include <bio.h>
-#include <fcall.h>
-#include <error.h>
-
-#include "conf.h"
-#include "dbg.h"
-#include "dk.h"
-#include "ix.h"
-#include "net.h"
-#include "fns.h"
+#include "all.h"
 
 /*
  * HUGE warning:
@@ -74,6 +62,11 @@ char*
 ixstats(char *s, char*, int)
 {
 	return s;
+}
+
+void
+countfidrefs(void)
+{
 }
 
 /*
@@ -346,7 +339,11 @@ fsdmp(int, char *argv[])
 static void
 fsdbg(int, char *argv[])
 {
-	dbg['D'] = atoi(argv[1]);
+	char *s;
+
+	memset(dbg, 0, sizeof dbg);
+	for(s = argv[1]; *s; s++)
+		dbg['D'] = dbg[*s] = 1;
 }
 
 static void
@@ -394,7 +391,8 @@ fsst(int, char**)
 static void
 fschk(int, char**)
 {
-	fscheck();
+	if(fscheck() != 0)
+		error("check failed");
 }
 
 static void
@@ -407,6 +405,12 @@ fserr(int, char *argv[])
 		swwriteerr = atoi(argv[1]);
 		print("sw write err count = %d\n", swwriteerr);
 	}
+}
+
+static void
+fspol(int, char**)
+{
+	fspolicy();
 }
 
 static void
@@ -436,6 +440,7 @@ static Cmd cmds[] =
 	{"check", fschk, 1, "check"},
 	{"rerr", fserr, 2, "rerr!n"},
 	{"werr", fserr, 2, "werr!n"},
+	{"pol", fspol, 1, "pol"},
 };
 
 void
@@ -466,12 +471,12 @@ threadmain(int argc, char *argv[])
 	fmtinstall('H', mbfmt);
 	fmtinstall('M', dirmodefmt);
 	errinit(Errstack);
-	if(catcherror())
-		fatal("error: %r");
+	if(catcherror()){
+		fprint(2, "cmd failed: %r\n");
+		threadexitsall("failed");
+	}
 	fsopen(dev);
 	for(i = 0; i < argc; i++){
-		if(catcherror())
-			fatal("cmd %s: %r", argv[i]);
 		if(verb>1)
 			fsdump(0, Mem);
 		print("%% %s\n", argv[i]);
@@ -483,10 +488,8 @@ threadmain(int argc, char *argv[])
 				fprint(2, "usage: %s\n", cmds[j].usage);
 			else
 				cmds[j].f(nargs, args);
-			fspolicy();
 			break;
 		}
-		noerror();
 		if(j == nelem(cmds)){
 			fprint(2, "no such command\n");
 			for(j = 0; j < nelem(cmds); j++)
@@ -497,6 +500,6 @@ threadmain(int argc, char *argv[])
 	if(verb>1)
 		fsdump(0, Mem);
 	noerror();
-	exits(nil);
+	threadexitsall(nil);
 }
 

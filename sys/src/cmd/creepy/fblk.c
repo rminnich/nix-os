@@ -1,16 +1,4 @@
-#include <u.h>
-#include <libc.h>
-#include <thread.h>
-#include <bio.h>
-#include <fcall.h>
-#include <error.h>
-
-#include "conf.h"
-#include "dbg.h"
-#include "dk.h"
-#include "ix.h"
-#include "net.h"
-#include "fns.h"
+#include "all.h"
 
 /*
  * File blocks.
@@ -56,7 +44,7 @@ isdir(Memblk *f)
 
 /* for dfblk only */
 static Memblk*
-getmelted(uint isdir, int isarch, uint type, daddrt *addrp, int *chg)
+getmelted(uint isdir, uint type, daddrt *addrp, int *chg)
 {
 	Memblk *b, *nb;
 
@@ -65,14 +53,11 @@ getmelted(uint isdir, int isarch, uint type, daddrt *addrp, int *chg)
 		b = dballoc(type);
 		*addrp = b->addr;
 		*chg = 1;
-		b->aflag = isarch;
 		return b;
 	}
 
 	b = dbget(type, *addrp);
 	nb = nil;
-	if(isarch)
-		b->frozen = 0;	/* /archive always melted */
 	if(!b->frozen)
 		return b;
 	if(catcherror()){
@@ -103,20 +88,15 @@ getmelted(uint isdir, int isarch, uint type, daddrt *addrp, int *chg)
  * Read-ahead is not considered here. The file only records
  * the last accessed block number, to help the caller do RA.
  *
- * Blocks added to "/archive" are flagged with aflag, as an aid
- * to write them even though "/archive" is never frozen.
  */
 static Memblk*
 dfblk(Memblk *f, ulong bno, int mkit)
 {
 	ulong prev, nblks;
-	int i, idx, nindir, type, isdir, isarch, chg;
+	int i, idx, nindir, type, isdir, chg;
 	Memblk *b, *pb;
 	daddrt *addrp;
 
-	isarch = f == fs->archive;
-	if(isarch)
-		f->frozen = 0;
 	if(mkit)
 		ismelted(f);
 	isdir = (f->d.mode&DMDIR);
@@ -138,12 +118,11 @@ dfblk(Memblk *f, ulong bno, int mkit)
 	 */
 	if(bno < nelem(f->d.dptr)){
 		if(mkit)
-			b = getmelted(isdir, isarch, DBdata, &f->d.dptr[bno], &chg);
+			b = getmelted(isdir, DBdata, &f->d.dptr[bno], &chg);
 		else
 			b = dbget(DBdata, f->d.dptr[bno]);
 		if(chg)
 			changed(f);
-		b->aflag = isarch;
 		return b;
 	}
 	bno -= nelem(f->d.dptr);
@@ -170,10 +149,9 @@ dfblk(Memblk *f, ulong bno, int mkit)
 
 	addrp = &f->d.iptr[i];
 	if(mkit)
-		b = getmelted(isdir, isarch, type, addrp, &chg);
+		b = getmelted(isdir, type, addrp, &chg);
 	else
 		b = dbget(type, *addrp);
-	b->aflag = isarch;
 	if(chg)
 		changed(f);
 	pb = b;
@@ -204,11 +182,9 @@ dfblk(Memblk *f, ulong bno, int mkit)
 		}else{
 			assert(type >= DBdata);
 			if(mkit)
-				b = getmelted(isdir, isarch, type, addrp, &chg);
+				b = getmelted(isdir, type, addrp, &chg);
 			else
 				b = dbget(type, *addrp);
-			b->aflag = isarch;
-
 			if(chg)
 				changed(pb);
 			addrp = &b->d.ptr[idx];
@@ -582,7 +558,7 @@ done:
 /*
  * Return the last version for *fp, wlocked, be it frozen or melted.
  */
-static void
+void
 followmelted(Memblk **fp, int iswr)
 {
 	Memblk *f;
@@ -854,8 +830,8 @@ dfremove(Memblk *p, Memblk *f)
 	noerror();
 	rwunlock(f, Wr);
 	if(!catcherror()){
-		n = dfreclaim(f);
-		dprint("dfreclaim d%#ullx: %lld blks\n", f->addr, n);
+		n = dfput(f);
+		dprint("dfput d%#ullx: %lld blks\n", f->addr, n);
 		noerror();
 	}
 	mbput(f);
@@ -981,7 +957,7 @@ dfdump(Memblk *f, int isdisk)
 		child = dfchild;
 		if(!isdisk)
 			child = mfchild;
-		for(i = 0; i < f->d.length/Daddrsz; i++){
+		for(i = 0; i < f->d.ndents; i++){
 			b = child(f, i);
 			if(b == nil)
 				continue;
@@ -1051,12 +1027,12 @@ countref(daddrt addr)
 	int old;
 
 	idx = addr/Dblksz;
-	old = fs->chk[idx];
-	if(fs->chk[idx] == 0xFE)
+	old = fs->dchk[idx];
+	if(fs->dchk[idx] == 0xFE)
 		fprint(2, "fscheck: d%#010ullx: too many refs, ignoring some\n",
 			addr);
 	else
-		fs->chk[idx]++;
+		fs->dchk[idx]++;
 	return old;
 }
 
@@ -1074,12 +1050,12 @@ countfree(daddrt addr)
 	long i;
 
 	i = addr/Dblksz;
-	if(fs->chk[i] != 0 && fs->chk[i] <= 0xFE)
+	if(fs->dchk[i] != 0 && fs->dchk[i] <= 0xFE)
 		fprint(2, "fscheck: d%#010ullx: free block in use\n", addr);
-	else if(fs->chk[i] == 0xFF)
+	else if(fs->dchk[i] == 0xFF)
 		fprint(2, "fscheck: d%#010ullx: double free\n", addr);
 	else
-		fs->chk[i] = 0xFF;
+		fs->dchk[i] = 0xFF;
 }
 
 void
@@ -1140,8 +1116,6 @@ dfcountrefs(Memblk *f)
 	if(f->d.mode&DMDIR)
 		for(i = 0; i < f->d.length/Daddrsz; i++){
 			b = dfchild(f, i);
-			if(b == nil)
-				continue;
 			if(catcherror()){
 				fprint(2, "fscheck: '%s'  d%#010ullx:"
 					" child[%d]: %r\n",
@@ -1172,14 +1146,14 @@ dfcountrefs(Memblk *f)
  * to look, besides dbdup and dfchdentry.
  */
 int
-dfreclaim(Memblk *f)
+dfput(Memblk *f)
 {
 	int i;
 	Memblk *b;
 	long tot;
 
 	isfile(f);
-	dKprint("dfreclaim %H\n", f);
+	dKprint("dfput %H\n", f);
 	/*
 	 * Remove children if it's the last disk ref before we drop data blocks.
 	 * No new disk refs may be added, so there's no race here.
@@ -1191,12 +1165,10 @@ dfreclaim(Memblk *f)
 			rwunlock(f, Wr);
 			error(nil);
 		}
-		for(i = 0; i < f->d.length/Daddrsz; i++){
+		for(i = 0; i < f->d.ndents; i++){
 			b = dfchild(f, i);
-			if(b == nil)
-				continue;
 			if(!catcherror()){
-				tot += dfreclaim(b);
+				tot += dfput(b);
 				noerror();
 			}
 			mbput(b);

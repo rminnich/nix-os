@@ -8,15 +8,6 @@ enum
 	MiB = KiB * 1024UL,
 	GiB = MiB * 1024UL,
 
-#ifdef TESTING
-	Incr = 2,
-	Fsysmem = 200*KiB,	/* size for in-memory block array */
-
-	/* disk parameters; don't change */
-	Dblksz = 512UL,		/* disk block size */
-	Ndptr = 2,		/* # of direct data pointers */
-	Niptr = 2,		/* # of indirect data pointers */
-#else
 	Incr = 16,
 	Fsysmem = 2*GiB,		/* size for in-memory block array */
 
@@ -24,7 +15,8 @@ enum
 	Dblksz = 16*KiB,		/* disk block size */
 	Ndptr = 8,		/* # of direct data pointers */
 	Niptr = 4,		/* # of indirect data pointers */
-#endif
+
+	Syncival = 60,		/* desired sync intervals (s) */
 
 	Mmaxdirtypcent = 50,	/* Max % of blocks dirty in mem */
 	Mminfree = 50,		/* # blocks when low on mem blocks */
@@ -37,8 +29,8 @@ enum
 	 * Caution: Errstack also limits the max tree depth,
 	 * because of recursive routines (in the worst case).
 	 */
-	Stack = 32*KiB,		/* stack size for threads */
-	Errstack = 64,		/* max # of nested error labels */
+	Stack = 64*KiB,		/* stack size for threads */
+	Errstack = 128,		/* max # of nested error labels */
 	Fhashsz = 7919,		/* size of file hash (plan9 has 35454 files). */
 	Fidhashsz = 97,		/* size of the fid hash size */
 	Uhashsz = 97,
@@ -55,6 +47,5 @@ enum
 	Unamesz = 20,
 	Statsbufsz = 1024,
 
-	Syncival = 60 * 1000,	/* desired sync intervals (ms) */
 };
 

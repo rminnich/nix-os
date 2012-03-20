@@ -1,16 +1,4 @@
-#include <u.h>
-#include <libc.h>
-#include <thread.h>
-#include <bio.h>
-#include <fcall.h>
-#include <error.h>
-
-#include "conf.h"
-#include "dbg.h"
-#include "dk.h"
-#include "ix.h"
-#include "net.h"
-#include "fns.h"
+#include "all.h"
 
 /*
  * memory blocks.
@@ -208,7 +196,7 @@ mbfmt(Fmt *fmt)
 void
 ismelted(Memblk *b)
 {
-	if(b != fs->archive && b->aflag == 0 && b->frozen)
+	if(b->frozen)
 		fatal("frozen at pc %#p", getcallerpc(&b));
 }
 
@@ -426,7 +414,7 @@ mbhash(Memblk *b)
 	xqlock(&fs->fhash[hv]);
 	for(h = &fs->fhash[hv].b; *h != nil; h = &(*h)->next)
 		if((*h)->addr == b->addr){
-			fprint(2, "mbhash: dup blocks\n");
+			fprint(2, "mbhash: dup blocks:\n");
 			fprint(2, "b=> %H\n*h=> %H\n", b, *h);
 			fatal("mbhash: dup");
 		}
@@ -498,7 +486,7 @@ mbfree(Memblk *b)
 	b->addr = 0;
 	b->type = DBfree;
 	b->d.tag = DBfree;
-	b->frozen = b->dirty = b->aflag = b->loading = b->changed = 0;
+	b->frozen = b->dirty = b->loading = b->changed = 0;
 
 	xqlock(fs);
 	fs->nmused--;
@@ -599,5 +587,30 @@ mbput(Memblk *b)
 	dAprint("mbput m%#p pc=%#p\n", b, getcallerpc(&b));
 	if(decref(b) == 0)
 		mbfree(b);
+}
+
+/*
+ * for fscheck
+ */
+int
+mbcountref(Memblk *b)
+{
+	int i, old;
+
+	if(b == nil)
+		return 0;
+	if(b < fs->blk || b >= fs->blk + fs->nablk)
+		fatal("mbcountref: m%#p not in global array", b);
+	i = b - fs->blk;
+	old = fs->mchk[i];
+	if(fs->mchk[i] == 0xFE)
+		fprint(2, "fscheck: m%#p: too many refs, ignoring some\n",
+			b);
+	else
+		fs->mchk[i]++;
+
+	if(old == 0 && b->type == DBfile)
+		mbcountref(b->mf->melted);
+	return old;
 }
 

@@ -4,6 +4,7 @@ typedef struct Drefblk Drefblk;
 typedef struct Dattrblk Dattrblk;
 typedef struct Dfileblk Dfileblk;
 typedef struct Dsuperblk Dsuperblk;
+typedef struct Dsuperdata Dsuperdata;
 typedef union Diskblk Diskblk;
 typedef struct Diskblkhdr Diskblkhdr;
 typedef struct Memblk Memblk;
@@ -235,10 +236,15 @@ struct Dfileblk
  *			...
  * (/ and /active are only memory and never on disk, parts
  * under /active that are on disk are shared with entries in /archive)
+ *
+ * It contains two copies of the information, Both should be identical.
+ * If there are errors while writing this block, the one with the
+ * oldest epoch should be ok.
  */
-struct Dsuperblk
+struct Dsuperdata
 {
 	u64int	magic;		/* MAGIC */
+	u64int	epoch;
 	daddrt	free;		/* first free block on list  */
 	daddrt	eaddr;		/* end of the assigned disk portion */
 	daddrt	root;		/* address of /archive in disk */
@@ -253,6 +259,15 @@ struct Dsuperblk
 	u64int	dblkdatasz;	/* only for checking */
 	u64int	embedsz;	/* only for checking */
 	u64int	dptrperblk;	/* only for checking */
+};
+
+struct Dsuperblk
+{
+	union{
+		Dsuperdata;
+		uchar align[Dblksz/2];
+	};
+	Dsuperdata dup;
 };
 
 enum
@@ -374,7 +389,6 @@ struct Memblk
 	Lock	dirtylk;
 	int	dirty;			/* must be written */
 	int	frozen;			/* is frozen */
-	int	aflag;			/* part of the "/archive" file? */
 	int	loading;			/* block is being read */
 	int	changed;		/* for freerefs/writerefs */
 	QLock	newlk;			/* only to wait on DBnew blocks */
@@ -438,7 +452,7 @@ struct Fsys
 	RWLock	quiescence;	/* any activity rlocks() this */
 	QLock	policy;		/* fspolicy */
 
-	uchar	*chk;		/* for fscheck() */
+	uchar	*mchk, *dchk;	/* for fscheck() */
 
 	uvlong	wtime;		/* time for last fswrite */
 };

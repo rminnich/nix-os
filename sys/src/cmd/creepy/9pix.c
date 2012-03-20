@@ -1,22 +1,11 @@
-#include <u.h>
-#include <libc.h>
-#include <thread.h>
-#include <bio.h>
-#include <fcall.h>
-#include <error.h>
-#include <worker.h>
-
-#include "conf.h"
-#include "dbg.h"
-#include "dk.h"
-#include "ix.h"
-#include "net.h"
-#include "fns.h"
+#include "all.h"
 
 static RWLock fidhashlk;
 static Fid *fidshd, *fidstl;
 static Fid *fidhash[Fidhashsz];
 static uint fidgen;
+
+int noauth;
 
 Alloc fidalloc =
 {
@@ -133,6 +122,22 @@ meltfids(void)
 		}
 	xrwunlock(&fidhashlk, Rd);
 	dprint("meltfids: %d fids advanced\n", n);
+}
+
+void
+countfidrefs(void)
+{
+	Fid *fid;
+	Path *p;
+	int i;
+
+	xrwlock(&fidhashlk, Rd);
+	for(fid = fidshd; fid != nil; fid = fid->next){
+		p = fid->p;
+		for(i = 0; i < p->nf; i++)
+			mbcountref(p->f[i]);
+	}
+	xrwunlock(&fidhashlk, Rd);
 }
 
 Rpc*
@@ -255,6 +260,7 @@ newcli(char *addr, int fd, int cfd)
 	cli->cfd = cfd;
 	cli->addr = addr;
 	cli->ref = 1;
+	cli->uid = -1;
 
 	xqlock(&clientslk);
 	cli->next = clients;
@@ -285,9 +291,21 @@ putcli(Cli *cli)
 }
 
 void
-fidattach(Fid *fid, char *aname, char *uname)
+consprintclients(void)
 {
-	Path *p;
+	Cli *c;
+
+	xqlock(&clientslk);
+	for(c = clients; c != nil; c = c->next)
+		consprint("%s!%s\n", c->addr, usrname(c->uid));
+	xqunlock(&clientslk);
+}
+
+void
+setfiduid(Fid *fid, char *uname)
+{
+	if(uname[0] == 0)
+		error("null uid");
 
 	fid->uid = usrid(uname);
 
@@ -303,8 +321,16 @@ fidattach(Fid *fid, char *aname, char *uname)
 
 	if(fid->uid < 0){
 		fprint(2, "%s: unknown user '%s'. using 'none'\n", argv0, uname);
-		fid->uid = 1;
+		fid->uid = usrid("none");
 	}
+}
+
+void
+fidattach(Fid *fid, char *aname, char *uname)
+{
+	Path *p;
+
+	setfiduid(fid, uname);
 	p = newpath(fs->root);
 	fid->p = p;
 	if(strcmp(aname, "active") == 0 || strcmp(aname, "main/active") == 0){
@@ -747,10 +773,8 @@ readdir(Fid *fid, uchar *data, ulong ndata, uvlong, Packmeta pack)
 	ulong tot, nr;
 
 	d = fid->p->f[fid->p->nf-1];
-	for(tot = 0; tot+2 < ndata; tot += nr){
+	for(tot = 0; tot+2 < ndata && fid->lidx < d->d.ndents; tot += nr){
 		f = dfchild(d, fid->lidx);
-		if(f == nil)
-			break;
 		nr = pack(f, data+tot, ndata-tot);
 		mbput(f);
 		if(nr <= 2)
@@ -1034,7 +1058,7 @@ wahead(Memblk *f)
 		rwunlock(f, Rd);
 		error(nil);
 	}
-	for(i = 0; i < f->d.length/Daddrsz; i++)
+	for(i = 0; i < f->d.ndents; i++)
 		mbput(dfchild(f, i));
 	noerror();
 	rwunlock(f, Rd);
@@ -1142,6 +1166,9 @@ threadmain(int argc, char *argv[])
 	case 'n':
 		addr = EARGF(usage());
 		break;
+	case 'a':
+		noauth = 1;
+		break;
 	default:
 		if(ARGC() >= 'A' && ARGC() <= 'Z' || ARGC() == '9'){
 			dbg['d'] = 1;
@@ -1176,6 +1203,7 @@ threadmain(int argc, char *argv[])
 		listen9pix(addr, cliworker9p);
 
 	consinit();
+	proccreate(fssyncproc, nil, Stack);
 	noerror();
 	threadexits(nil);
 }

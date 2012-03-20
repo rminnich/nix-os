@@ -30,10 +30,15 @@ struct Fid
 	int	archived;
 	int	cflags;		/* OCERR|OCEND */
 	int	consopen;	/* for flush. has /cons open? */
-	char	*uid;
+	int	uid;
 
 	uvlong	loff;		/* last offset, for dir reads */
 	int	lidx;		/* next dir entry index to read */
+	char*	buf;		/* for statsread() */
+
+	int	afd;		/* for afids */
+	int	authok;		/* for afids */
+	AuthRpc *rpc;		/* for afids */
 };
 
 struct Rpc
@@ -86,6 +91,7 @@ struct Cli
 	int fd;
 	int cfd;
 	char *addr;
+	int uid;
 	ulong msize;
 
 	QLock wlk;	/* lock for writing replies to the client */
@@ -105,3 +111,4 @@ extern vlong calltime[];
 extern ulong ncalls[];
 extern char *callname[];
 extern Alloc fidalloc, rpcalloc, clialloc;
+extern int noauth;

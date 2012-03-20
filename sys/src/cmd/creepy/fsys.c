@@ -1,16 +1,4 @@
-#include <u.h>
-#include <libc.h>
-#include <thread.h>
-#include <bio.h>
-#include <fcall.h>
-#include <error.h>
-
-#include "conf.h"
-#include "dbg.h"
-#include "dk.h"
-#include "ix.h"
-#include "net.h"
-#include "fns.h"
+#include "all.h"
 
 /*
  * All the code assumes outofmemoryexits = 1.
@@ -48,7 +36,7 @@ quiescent(int y)
 		xrwunlock(&fs->quiescence, Rd);
 }
 
-static uvlong
+uvlong
 fsdiskfree(void)
 {
 	uvlong nfree;
@@ -188,6 +176,66 @@ fsdump(int full, int disktoo)
 	debug();
 }
 
+static int
+counted(Memblk *b)
+{
+	uint i;
+
+	if(b == nil)
+		return 0;
+	i = b - fs->blk;
+	if(b < fs->blk || b >= fs->blk + fs->nablk)
+		fatal("mbcountref: m%#p not in global array", b);
+	if(fs->mchk[i] == 0xFE && b->ref < (int)0xFE){
+		fprint(2,"fscheck: m%#p: found >%ud != ref %ud\n%H\n",
+			b, fs->mchk[i], b->ref, b);
+		return 1;
+	}else if(fs->mchk[i] < 0xFE && b->ref != fs->mchk[i]){
+		fprint(2,"fscheck: m%#p: found %ud != ref %ud\n%H\n",
+			b, fs->mchk[i], b->ref, b);
+		return 1;
+	}
+	return 0;
+}
+
+static long
+fscheckrefs(void)
+{
+	long nfails;
+	int i;
+	Memblk *b;
+
+	nfails = 0;
+	mbcountref(fs->super);
+	mbcountref(fs->root);
+	mbcountref(fs->active);
+	mbcountref(fs->archive);
+	mbcountref(fs->cons);
+	mbcountref(fs->stats);
+	mbcountref(fs->fzsuper);
+	countfidrefs();
+	for(i = 0; i < nelem(fs->fhash); i++)
+		for(b = fs->fhash[i].b; b != nil; b = b->next)
+			mbcountref(b);
+
+	for(i = 0; i < nelem(fs->fhash); i++)
+		for(b = fs->fhash[i].b; b != nil; b = b->next)
+			nfails += counted(b);
+	nfails += counted(fs->super);
+	nfails += counted(fs->root);
+	nfails += counted(fs->active);
+	nfails += counted(fs->archive);
+	nfails += counted(fs->cons);
+	nfails += counted(fs->stats);
+	nfails += counted(fs->fzsuper);
+
+	if(nfails > 0 && dbg['d']){
+		dprint("fscheckrefs: %ld fails. sleeping\n", nfails);
+		while(1)sleep(5000);
+	}
+	return nfails;
+}
+
 /*
  * Failed checks are reported but not fixed (but for leaked blocks).
  * The user is expected to format the partition and restore contents from venti.
@@ -203,10 +251,13 @@ fscheck(void)
 	xqlock(&fs->fzlk);
 	xrwlock(&fs->quiescence, Wr);
 	nfails = 0;
-	if(fs->chk == nil)
-		fs->chk = mallocz(fs->ndblk, 1);
-	else
-		memset(fs->chk, 0, fs->ndblk);
+	if(fs->dchk == nil){
+		fs->dchk = mallocz(fs->ndblk, 1);
+		fs->mchk = mallocz(fs->nablk, 1);
+	}else{
+		memset(fs->dchk, 0, fs->ndblk);
+		memset(fs->mchk, 0, fs->nablk);
+	}
 	if(catcherror()){
 		xrwunlock(&fs->quiescence, Wr);
 		xqunlock(&fs->fzlk);
@@ -215,7 +266,10 @@ fscheck(void)
 		return nfails;
 	}
 
-	fprint(2, "%s: checking %s...\n", argv0, fs->dev);
+	fprint(2, "%s: checking '%s'...\n", argv0, fs->dev);
+	dprint("mem checks...\n");
+	nfails += fscheckrefs();
+	dprint("disk checks...\n");
 	nfails += dfcountrefs(fs->root);
 	dprint("countfree...\n");
 	dfcountfree();
@@ -223,7 +277,7 @@ fscheck(void)
 	dprint("checks...\n");
 	for(addr = 0; addr < fs->super->d.eaddr; addr += Dblksz){
 		i = addr/Dblksz;
-		if(fs->chk[i] == 0){
+		if(fs->dchk[i] == 0){
 			fprint(2, "fscheck: d%#010ullx: leak\n", addr);
 			if(!catcherror()){
 				dbsetref(addr, fs->super->d.free);
@@ -235,24 +289,28 @@ fscheck(void)
 			}
 			continue;
 		}
-		if(fs->chk[i] == 0xFF)
+		if(fs->dchk[i] == 0xFF)
 			continue;
 		n = dbgetref(addr);
-		if(fs->chk[i] == 0xFE && n < (daddrt)0xFE){
+		if(fs->dchk[i] == 0xFE && n < (daddrt)0xFE){
 			fprint(2, "fscheck: d%#010ullx: found >%ud != ref %ulld\n",
-				addr, fs->chk[i], n);
+				addr, fs->dchk[i], n);
 			nfails++;
 		}
-		if(fs->chk[i] < 0xFE && n != fs->chk[i]){
+		if(fs->dchk[i] < 0xFE && n != fs->dchk[i]){
 			fprint(2, "fscheck: d%#010ullx: found %ud != ref %ulld\n",
-				addr, fs->chk[i], n);
+				addr, fs->dchk[i], n);
 			nfails++;
 		}
 	}
 	xrwunlock(&fs->quiescence, Wr);
 	xqunlock(&fs->fzlk);
 	noerror();
-	fprint(2, "%s: %s check complete\n", argv0, fs->dev);
+	if(nfails > 0 && dbg['d']){
+		dprint("fscheck: %ld fails. sleeping\n", nfails);
+		while(1)sleep(5000);
+	}
+	fprint(2, "%s: '%s' checks %s\n", argv0, fs->dev, nfails?"fail":"pass");
 	return nfails;
 }
 
@@ -315,6 +373,7 @@ static Memblk*
 readsuper(void)
 {
 	Memblk *super;
+	Dsuperdata *d1, *d2;
 
 	if(catcherror()){
 		error("not a creepy disk: %r");
@@ -324,6 +383,13 @@ readsuper(void)
 	super = fs->super;
 	if(super->d.magic != MAGIC)
 		error("bad magic number");
+	d1 = &fs->super->d.Dsuperdata;
+	d2 = &fs->super->d.dup;
+	if(memcmp(d1, d2, sizeof(Dsuperdata)) != 0){
+		fprint(2, "%s: partially written superblock, using old.\n", argv0);
+		if(fs->super->d.dup.epoch < fs->super->d.epoch)
+			fs->super->d.Dsuperdata = fs->super->d.dup;
+	}
 	if(super->d.dblksz != Dblksz)
 		error("bad Dblksz");
 	if(super->d.nblkgrpsz != Nblkgrpsz)
@@ -340,8 +406,40 @@ readsuper(void)
 		error("bad Embedsz");
 	if(super->d.dptrperblk != Dptrperblk)
 		error("bad Dptrperblk");
+
 	noerror();
 	return super;
+}
+
+/*
+ * Ensure /archive is melted, releasing the old one after melting
+ * it when frozen.
+ */
+static void
+meltedarchive(void)
+{
+	Memblk *arch, *oarch;
+	daddrt addr;
+
+	addr = fs->archive->addr;
+	followmelted(&fs->archive, Wr);
+	if(catcherror()){
+		rwunlock(fs->archive, Wr);
+		error(nil);
+	}
+	if(fs->archive->frozen != 0){
+		oarch = fs->archive;
+		arch = dbdup(fs->archive);
+		rwlock(arch, Wr);
+		rwunlock(oarch, Wr);
+		dfchdentry(fs->root, addr, arch->addr, Dontmk);
+		dfput(oarch);
+		mbput(oarch);
+		fs->archive = arch;
+		fs->super->d.root = fs->archive->addr;
+		changed(fs->super);
+	}
+	noerror();
 }
 
 /*
@@ -385,14 +483,15 @@ fsfreeze(void)
 	}
 	oa = fs->active;
 
-	arch = fs->archive;
 	rwlock(fs->root, Wr);
-	rwlock(oa, Wr);
-	rwlock(arch, Wr);
+
 
 	/*
 	 * move active into /archive/<epochnb>.
 	 */
+	meltedarchive();
+	arch = fs->archive;
+	rwlock(oa, Wr);
 	seprint(name, name+sizeof(name), "%ulld", oa->d.mtime);
 	wname(oa, name, strlen(name)+1);
 	dflink(arch, oa);
@@ -401,10 +500,11 @@ fsfreeze(void)
 	 */
 	oa->d.mtime = t0;
 	oa->d.atime = t0;
-	rwunlock(oa, Wr);	/* race */
+	rwunlock(oa, Wr);
 	changed(oa);
 	dffreeze(oa);
 	rwunlock(arch, Wr);
+	dffreeze(arch);
 
 	/* 2. Freeze the on-disk reference counters
 	 * and the state of the super-block.
@@ -462,7 +562,7 @@ writerefs(void)
 static int
 mustwrite(Memblk *b)
 {
-	return b->frozen != 0 || b == fs->archive || b->aflag != 0;
+	return b->frozen != 0;
 }
 
 /*
@@ -497,6 +597,8 @@ writezsuper(void)
 	if(canqlock(&fs->fzlk))
 		fatal("writezsuper: lock");
 	assert(fs->fzsuper != nil);
+	fs->fzsuper->d.epoch = nsec();
+	fs->fzsuper->d.dup = fs->fzsuper->d.Dsuperdata;
 	dbwrite(fs->fzsuper);
 	dprint("writezsuper: %H\n", fs->fzsuper);
 	mbput(fs->fzsuper);
@@ -650,12 +752,25 @@ fsfmt(char *dev)
 	rwlock(fs->root, Wr);
 	fs->active = dfcreate(fs->root, "active", uid, DMDIR|0775);
 	fs->archive = dfcreate(fs->root, "archive", uid, DMDIR|0555);
-	fs->archive->aflag = 1;
 	rwunlock(fs->root, Wr);
 	super->d.root = fs->archive->addr;
 	fssync();
 
 	noerror();
+}
+
+/*
+ * If there are dirty blocks, call the policy once per Syncival.
+ */
+void
+fssyncproc(void*)
+{
+	threadsetname("syncer");
+	errinit(Errstack);
+	for(;;){
+		sleep(Syncival*1000);
+		fspolicy();
+	}
 }
 
 /*
@@ -679,12 +794,13 @@ fsopen(char *dev)
 	xqlock(&fs->fzlk);
 	fs->root = dfcreate(nil, "", uid, DMDIR|0555);
 	arch = dbget(DBfile, fs->super->d.root);
-	arch->aflag = 1;
 	fs->archive = arch;
 	rwlock(fs->root, Wr);
 	rwlock(arch, Wr);
 	last = nil;
-	for(i = 0; (c = dfchild(arch, i)) != nil; i++){
+
+	for(i = 0; i < arch->d.ndents; i++){
+		c = dfchild(arch, i);
 		if(last == nil || last->d.mtime < c->d.mtime){
 			mbput(last);
 			last = c;
@@ -855,32 +971,42 @@ fsreclaim(void)
 	Memblk *arch, *c, *victim;
 	int i;
 	daddrt addr;
-	Blksl sl;
 	long n, tot;
 
 	xqlock(&fs->fzlk);
+	rwlock(fs->root, Wr);
+	if(catcherror()){
+		rwunlock(fs->root, Wr);
+		xqunlock(&fs->fzlk);
+		error(nil);
+	}
 	fprint(2, "%s: %ulld free: reclaiming...\n", argv0, fsdiskfree());
 	if(fs->fzsuper != nil){
 		/*
 		 * we did freeze/reclaim and are still writing, can't reclaim now.
 		 */
+		noerror();
+		rwunlock(fs->root, Wr);
 		xqunlock(&fs->fzlk);
 		fprint(2, "%s: writing, skip reclaim\n", argv0);
 		return 0;
 	}
-
+	meltedarchive();
 	arch = fs->archive;
-	rwlock(arch, Wr);
 	if(catcherror()){
 		rwunlock(arch, Wr);
-		xqunlock(&fs->fzlk);
 		error(nil);
 	}
 	tot = 0;
 	for(;;){
 		dprint("fsreclaim: reclaiming\n");
 		victim = nil;
-		for(i = 0; (c = dfchild(arch, i)) != nil; i++){
+		if(arch->d.ndents < 2){
+			dprint("nothing to reclaim\n");
+			break;
+		}
+		for(i = 0; i < arch->d.ndents; i++){
+			c = dfchild(arch, i);
 			if(victim == nil)
 				victim = c;
 			else if(victim->d.mtime > c->d.mtime){
@@ -890,37 +1016,14 @@ fsreclaim(void)
 				mbput(c);
 
 		}
-		if(i < 2){
-			mbput(victim);
-			dprint("nothing to reclaim\n");
-			break;
-		}
 
 		fprint(2, "%s: reclaiming /archive/%s\n", argv0, victim->mf->name);
 		dprint("victim is %H\n", victim);
-		addr = dfchdentry(arch, victim->addr, 0, Dontmk);
-
-		/*
-		 * Write the new /archive without the file reclaimed, in
-		 * case we fail while reclaiming.
-		 */
-		sl = dfslice(arch, sizeof(u64int), addr, Rd);
-		if(sl.b != nil && sl.b != arch){
-			munlink(&fs->mdirty, sl.b, 0);
-			if(!catcherror()){
-				dbwrite(sl.b);
-				noerror();
-			}
-		}
-		mbput(sl.b);
-		changed(arch);
-		munlink(&fs->mdirty, arch, 0);
-		dbwrite(arch);
-
-		n = dfreclaim(victim);
-		mbput(victim);
-
+		addr = dfchdentry(arch, victim->addr, 0, Mkit);
 		fs->super->d.root = arch->addr;
+		assert(dbgetref(victim->addr) == 1);
+		n = dfput(victim);
+		mbput(victim);
 
 		dprint("fsreclaim: %uld file%s reclaimed\n", n, n?"s":"");
 		tot += n;
@@ -937,7 +1040,9 @@ fsreclaim(void)
 	}else
 		fprint(2, "%s: %uld file%s reclaimed %ulld blocks free\n",
 			argv0, tot, tot?"s":"", fsdiskfree());
+	noerror();
 	rwunlock(arch, Wr);
+	rwunlock(fs->root, Wr);
 	xqunlock(&fs->fzlk);
 	noerror();
 	return tot;
@@ -956,41 +1061,28 @@ fsdirtypcent(void)
 	
 /*
  * Policy for memory and and disk block reclaiming.
- * Should be called from time to time to guarantee that there are free blocks.
+ * Called from the sync proc from time to time and also AFTER each RPC.
  */
 void
 fspolicy(void)
 {
 	int lomem, lodisk, hidirty, longago;
 
-	/*
-	 * XXX: This will call fswrite() while blocking everyone calling
-	 * fspolicy(), including all rpcs.
-	 * 
-	 * That's done so now because the sizes used for testing are a joke,
-	 * so that a single rpc may fill the disk even while another is already
-	 * running the policy!, despite water marks!
-	 *
-	 * Once testing is complete, we should insist on running the policy
-	 * (qlock it) only if we are really low on resources, otherwise, we
-	 * should canqlock or defer it for later (because the most likely
-	 * reason we can't qlock it is that it's already running and perhaps
-	 * writing the frozen fs to disk).
-	 *
-	 * If we forget to make that change, writes will become
-	 * synchronous and that should be considered as a BUG.
-	 * 
-	 */
-	xqlock(&fs->policy);
+	if(!canqlock(&fs->policy)){
+		if(fsmemfree() > Mzerofree && fsdiskfree() > Dzerofree)
+			return;	/* not in a hurry, let's others do it. */
+		qlock(&fs->policy);
+	}
 	if(catcherror()){
-		xqunlock(&fs->policy);
-		fatal("fspolicy: %r");	/* should just print and return */
+		qunlock(&fs->policy);
+		fprint(2, "%s: fspolicy: %r", argv0);
+		return;
 	}
 
 	lomem = fsmemfree() < Mminfree;
 	lodisk = fsdiskfree() < Dminfree;
 	hidirty = fsdirtypcent() > Mmaxdirtypcent;
-	longago = (nsec() - fs->wtime)/1000000UL > Syncival;
+	longago = (nsec() - fs->wtime)/NSPERSEC > Syncival;
 
 	/* Ideal sequence for [lomem lodisk hidirty] might be:
 	 * 111:	lru sync reclaim+sync lru
@@ -1018,11 +1110,12 @@ fspolicy(void)
 	}
 	if(lodisk)
 		fsreclaim();
-	if(lodisk || hidirty || longago)
+
+	if(lodisk || hidirty || (longago && fs->mdirty.n != 0))
 		fssync();
 	if(lomem && hidirty)
 		fslru();
 
-	qunlock(&fs->policy);
 	noerror();
+	qunlock(&fs->policy);
 }
