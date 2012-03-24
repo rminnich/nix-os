@@ -8,7 +8,7 @@
 
 #include	"../port/edf.h"
 #include	<a.out.h>
-#include <trace.h>
+#include 	<trace.h>
 
 
 void
@@ -393,7 +393,6 @@ execac(Ar0* ar0, int flags, char *ufile, char **argv)
 	datalim = BIGPGROUND(textlim+datasz);
 	bsslim = BIGPGROUND(textlim+datasz+bsssz);
 
-
 	/*
 	 * Check the binary header for consistency,
 	 * e.g. the entry point is within the text segment and
@@ -588,6 +587,9 @@ execac(Ar0* ar0, int flags, char *ufile, char **argv)
 	s->flushme = 1;
 	s->fstart = 0;
 	s->flen = hdrsz+textsz;
+ 	if(img->color != up->color){
+ 		up->color = img->color;
+ 	}
 	unlock(img);
 
 	/* Data. Shared. */

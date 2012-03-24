@@ -557,7 +557,7 @@ static void
 preemptfor(Proc *p)
 {
 	ulong delta;
-	uint i, rr;
+	uint i, j, rr;
 	Proc *mup;
 	Mach *mp;
 
@@ -567,8 +567,9 @@ preemptfor(Proc *p)
 	 * round robin otherwise.
 	 */
 	for(rr = 0; rr < 2; rr++)
-		for(i = 0; i < MACHMAX; i++)
-			if((mp = sys->machptr[i]) != nil && mp->online && mp->nixtype == NIXTC){
+		for(i = 0; i < MACHMAX; i++){
+			j = pickcore(p->color, i);
+			if((mp = sys->machptr[j]) != nil && mp->online && mp->nixtype == NIXTC){
 				if(mp == m)
 					continue;
 				/*
@@ -591,6 +592,7 @@ preemptfor(Proc *p)
 					return;
 				}
 			}
+	}
 }
 
 /*
@@ -604,7 +606,7 @@ mach0sched(void)
 	Proc *p;
 	Mach *mp;
 	ulong start, now;
-	int n, i;
+	int n, i, j;
 
 	assert(m->machno == 0);
 	acmodeset(NIXKC);		/* we don't time share any more */
@@ -653,10 +655,12 @@ found:
 		if(mp->proc != nil)
 			goto loop;
 	}else{
-		for(i = 0; i < MACHMAX; i++)
-			if((mp = sys->machptr[i]) != nil && mp->online && mp->nixtype == NIXTC)
+		for(i = 0; i < MACHMAX; i++){
+			j = pickcore(p->color, i);
+			if((mp = sys->machptr[j]) != nil && mp->online && mp->nixtype == NIXTC)
 				if(mp != m && mp->proc == nil)
 					break;
+		}
 		if(i == MACHMAX){
 			preemptfor(p);
 			goto loop;

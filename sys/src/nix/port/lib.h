@@ -181,7 +181,7 @@ extern	long	strtol(char*, char**, int);
 extern	ulong	strtoul(char*, char**, int);
 extern	vlong	strtoll(char*, char**, int);
 extern	uvlong	strtoull(char*, char**, int);
-
+extern	void	qsort(void*, long, long, int (*)(void*, void*));
 /*
  * Syscall data structures
  */

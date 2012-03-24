@@ -125,6 +125,7 @@ void	pcireset(void);
 void	pcisetbme(Pcidev*);
 void	pcisetmwi(Pcidev*);
 int	pcisetpms(Pcidev*, int);
+int	pickcore(int, int);
 void	printcpufreq(void);
 void	putac(Mach*);
 void	runapcore(int);

@@ -14,6 +14,8 @@ typedef struct Msct Msct;
 typedef struct Mdom Mdom;
 typedef struct Apicst Apicst;
 typedef struct Srat Srat;
+typedef struct Slit Slit;
+typedef struct SlEntry SlEntry;
 
 enum
 {
@@ -320,6 +322,18 @@ struct Srat
 			int	clkdom;	/* clock domain */
 		} lx2apic;
 	};
+};
+
+/* System locality information table
+ */
+struct Slit {
+	uvlong rowlen;
+	SlEntry **e;
+};
+
+struct SlEntry {
+	int dom;	/* proximity domain */
+	uint dist;	/* distance to proximity domain */
 };
 
 /* Fixed ACPI description table.

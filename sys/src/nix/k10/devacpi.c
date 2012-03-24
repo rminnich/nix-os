@@ -25,6 +25,7 @@ static Atable* acpitable(uchar*, int);
 static Atable* acpimadt(uchar*, int);
 static Atable* acpimsct(uchar*, int);
 static Atable* acpisrat(uchar*, int);
+static Atable* acpislit(uchar*, int);
 
 #pragma	varargck	type	"G"	Gas*
 
@@ -54,6 +55,7 @@ static Parse ptables[] =
 	"FACP", acpifadt,
 	"APIC",	acpimadt,
 	"SRAT",	acpisrat,
+	"SLIT",	acpislit,
 	"MSCT",	acpimsct,
 	"SSDT", acpitable,
 };
@@ -65,6 +67,7 @@ static Atable*	tfirst;	/* loaded DSDT/SSDT/... tables */
 static Atable*	tlast;	/* pointer to last table */
 static Madt*	apics;	/* APIC info */
 static Srat*	srat;	/* System resource affinity, used by physalloc */
+static Slit*	slit;	/* System locality information table used by the scheduler */
 static Msct*	msct;	/* Maximum system characteristics table */
 static Reg*	reg;	/* region used for I/O */
 static Gpe*	gpes;	/* General purpose events */
@@ -760,6 +763,57 @@ acpisrat(uchar *p, int len)
 	return nil;	/* can be unmapped once parsed */
 }
 
+static void
+dumpslit(Slit *sl)
+{
+	int i;
+	
+	DBG("acpi slit:\n");
+	for(i = 0; i < sl->rowlen*sl->rowlen; i++){
+		DBG("slit: %ux\n", sl->e[i/sl->rowlen][i%sl->rowlen].dist);
+	}
+}
+
+static int
+cmpslitent(void* v1, void* v2)
+{
+	SlEntry *se1, *se2;
+
+	se1 = v1;
+	se2 = v2;
+	return se1->dist - se2->dist;
+}
+
+static Atable*
+acpislit(uchar *p, int len)
+{
+	uchar *pe;
+	int i, j, k;
+	SlEntry *se;
+
+	pe = p + len;
+	slit = malloc(sizeof(*slit));
+	slit->rowlen = l64get(p+36);
+	slit->e = malloc(slit->rowlen*sizeof(SlEntry*));
+	for(i = 0; i < slit->rowlen; i++)
+		slit->e[i] = malloc(sizeof(SlEntry)*slit->rowlen);
+
+	i = 0;
+	for(p += 44; p < pe; p++, i++){
+		j = i/slit->rowlen;
+		k = i%slit->rowlen;
+		se = &slit->e[j][k];
+		se->dom = k;
+		se->dist = *p;
+	}
+	dumpslit(slit);
+	for(i = 0; i < slit->rowlen; i++)
+		qsort(slit->e[i], slit->rowlen, sizeof(slit->e[0][0]), cmpslitent);
+	
+	dumpslit(slit);
+	return nil;	/* can be unmapped once parsed */
+}
+
 uintmem
 acpimblocksize(uintmem addr, int *dom)
 {
@@ -773,6 +827,7 @@ acpimblocksize(uintmem addr, int *dom)
 		}
 	return 0;
 }
+
 
 /*
  * we use mp->machno (or index in Mach array) as the identifier,
@@ -802,6 +857,21 @@ corecolor(int core)
 		}
 	return -1;
 }
+
+
+int
+pickcore(int mycolor, int index)
+{
+	int color;
+	int ncorepercol;
+
+	if(slit == nil)
+		return 0;
+	ncorepercol = MACHMAX/slit->rowlen;
+	color = slit->e[mycolor][index/ncorepercol].dom;
+	return color * ncorepercol + index % ncorepercol;
+}
+
 
 static void
 dumpmadt(Madt *apics)
@@ -1618,6 +1688,7 @@ acpiwrite(Chan *c, void *a, long n, vlong off)
 	free(cb);
 	return n;
 }
+
 
 Dev acpidevtab = {
 	L'α',
