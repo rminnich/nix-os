@@ -124,7 +124,7 @@ int		freebroken(void);
 void		freepte(Segment*, Pte*);
 void		getcolor(ulong, ulong*, ulong*, ulong*);
 char*		getconfenv(void);
-int		getpgszi(ulong);
+int		getpgszi(usize);
 Segment*	getzkseg(void);
 void		gotolabel(Label*);
 int		haswaitq(void*);

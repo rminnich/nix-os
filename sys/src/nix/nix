@@ -1,0 +1,11 @@
+#!/bin/rc
+unmount /sys/include >[2]/dev/null
+unmount /sys/src/libc >[2]/dev/null
+bind -b /usr/glenda/nix-os/sys/include /sys/include
+bind -c /usr/glenda/nix-os/sys/src/libc /sys/src/libc
+cd /usr/glenda/nix-os/sys
+for(d in man/*){
+	unmount /sys/$d >[2]/dev/null
+	bind -b $d /sys/$d
+}
+exit ''
