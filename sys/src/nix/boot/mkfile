@@ -1,0 +1,25 @@
+</$objtype/mkfile
+
+LIB=/$objtype/lib/libventi.a
+
+OFILES=\
+	aux.$O\
+	boot.$O\
+	bootauth.$O\
+	bootcache.$O\
+	bootip.$O\
+	embed.$O\
+	getpasswd.$O\
+	local.$O\
+	nopsession.$O\
+	paq.$O\
+	printstub.$O\
+	sac.$O\
+	settime.$O
+
+NOBUILD=doauthenticate.$O
+
+
+</sys/src/cmd/mksyslib
+
+CFLAGS=$CFLAGS -I.

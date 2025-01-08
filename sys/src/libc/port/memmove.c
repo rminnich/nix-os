@@ -2,7 +2,7 @@
 #include	<libc.h>
 
 void*
-memmove(void *a1, void *a2, ulong n)
+memmove(void *a1, void *a2, usize n)
 {
 	char *s1, *s2;
 
@@ -29,7 +29,7 @@ back:
 }
 
 void*
-memcpy(void *a1, void *a2, ulong n)
+memcpy(void *a1, void *a2, usize n)
 {
 	return memmove(a1, a2, n);
 }
