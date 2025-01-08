@@ -14,7 +14,7 @@ rpc(int fd, int type)
 
 	hdr.type = type;
 	hdr.tag = NOTAG;
-	n = convS2M(&hdr, buf, 128);
+	n = convS2M(&hdr, buf, sizeof(buf));
 	if(write(fd, buf, n) != n)
 		fatal("write rpc");
 
