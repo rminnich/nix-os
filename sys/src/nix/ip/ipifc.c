@@ -391,13 +391,13 @@ ipifcadd(Ipifc *ifc, char **argv, int argc, int tentative, Iplifc *lifcp)
 		/* fall through */
 	case 4:
 		parseip(ip, argv[1]);
-		parseipmask(mask, argv[2]);
+		parseipmask(mask, argv[2], 0);
 		parseip(rem, argv[3]);
 		maskip(rem, mask, net);
 		break;
 	case 3:
 		parseip(ip, argv[1]);
-		parseipmask(mask, argv[2]);
+		parseipmask(mask, argv[2], 0);
 		maskip(ip, mask, rem);
 		maskip(rem, mask, net);
 		break;
@@ -591,7 +591,7 @@ ipifcrem(Ipifc *ifc, char **argv, int argc)
 		return Ebadarg;
 
 	parseip(ip, argv[1]);
-	parseipmask(mask, argv[2]);
+	parseipmask(mask, argv[2], 0);
 	if(argc < 4)
 		maskip(ip, mask, rem);
 	else
