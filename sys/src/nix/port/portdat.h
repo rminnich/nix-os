@@ -1147,8 +1147,6 @@ struct Fastcall {
 	vlong	offset;
 };
 
-
-
 #define DEVDOTDOT -1
 
 #pragma	varargck	type	"I"	uchar*
