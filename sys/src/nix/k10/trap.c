@@ -401,7 +401,7 @@ trap(Ureg* ureg)
 			nmienable();
 			if(m->machno != 0){
 				iprint("cpu%d: PC %#llux\n",
-					m->machno, ureg->ip);
+					m->machno, ureg->pc);
 				for(;;);
 			}
 		}
@@ -471,7 +471,7 @@ dumpgpr(Ureg* ureg)
 	iprint("ureg fs\t%#ux\n", *(unsigned int *)&ureg->ds);
 	iprint("type\t%#llux\n", ureg->type);
 	iprint("error\t%#llux\n", ureg->error);
-	iprint("pc\t%#llux\n", ureg->ip);
+	iprint("pc\t%#llux\n", ureg->pc);
 	iprint("cs\t%#llux\n", ureg->cs);
 	iprint("flags\t%#llux\n", ureg->flags);
 	iprint("sp\t%#llux\n", ureg->sp);
@@ -510,7 +510,7 @@ void
 callwithureg(void (*fn)(Ureg*))
 {
 	Ureg ureg;
-	ureg.ip = getcallerpc(&fn);
+	ureg.pc = getcallerpc(&fn);
 	ureg.sp = PTR2UINT(&fn);
 	fn(&ureg);
 }
@@ -530,7 +530,7 @@ dumpstackwithureg(Ureg* ureg)
 	iprint("dumpstack\n");
 
 	x = 0;
-	x += iprint("ktrace 9%s %#p %#p\n", strrchr(conffile, '/')+1, ureg->ip, ureg->sp);
+	x += iprint("ktrace 9%s %#p %#p\n", strrchr(conffile, '/')+1, ureg->pc, ureg->sp);
 	i = 0;
 	if(up != nil
 //	&& (uintptr)&l >= (uintptr)up->kstack
@@ -577,7 +577,7 @@ debugbpt(Ureg* ureg, void*)
 	if(up == 0)
 		panic("kernel bpt");
 	/* restore pc to instruction that caused the trap */
-	ureg->ip--;
+	ureg->pc--;
 	sprint(buf, "sys: breakpoint");
 	postnote(up, 1, buf, NDebug);
 }
@@ -618,7 +618,7 @@ faultamd64(Ureg* ureg, void*)
 	 */
 	if(up == nil){
 		panic("fault with up == nil; pc %#llux addr %#llux\n",
-			ureg->ip, addr);
+			ureg->pc, addr);
 	}
 	read = !(ureg->error & 2);
 
@@ -656,7 +656,7 @@ userpc(Ureg* ureg)
 {
 	if(ureg == nil)
 		ureg = up->dbgreg;
-	return ureg->ip;
+	return ureg->pc;
 }
 
 /* This routine must save the values of registers the user is not permitted
@@ -692,7 +692,7 @@ setregisters(Ureg* ureg, char* pureg, char* uva, int n)
 void
 setkernur(Ureg* ureg, Proc* p)
 {
-	ureg->ip = p->sched.pc;
+	ureg->pc = p->sched.pc;
 	ureg->sp = p->sched.sp+BY2SE;
 }
 
@@ -705,5 +705,5 @@ dbgpc(Proc *p)
 	if(ureg == 0)
 		return 0;
 
-	return ureg->ip;
+	return ureg->pc;
 }

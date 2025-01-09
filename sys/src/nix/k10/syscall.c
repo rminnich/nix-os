@@ -71,20 +71,20 @@ noted(Ureg* cur, uintptr arg0)
 	switch((int)arg0){
 	case NCONT:
 	case NRSTR:
-		if(!okaddr(nur->ip, BY2SE, 0) || !okaddr(nur->sp, BY2SE, 0)){
+		if(!okaddr(nur->pc, BY2SE, 0) || !okaddr(nur->sp, BY2SE, 0)){
 			qunlock(&up->debug);
 			pprint("suicide: trap in noted pc=%#p sp=%#p\n",
-				nur->ip, nur->sp);
+				nur->pc, nur->sp);
 			pexit("Suicide", 0);
 		}
 		up->ureg = nf->old;
 		qunlock(&up->debug);
 		break;
 	case NSAVE:
-		if(!okaddr(nur->ip, BY2SE, 0) || !okaddr(nur->sp, BY2SE, 0)){
+		if(!okaddr(nur->pc, BY2SE, 0) || !okaddr(nur->sp, BY2SE, 0)){
 			qunlock(&up->debug);
 			pprint("suicide: trap in noted pc=%#p sp=%#p\n",
-				nur->ip, nur->sp);
+				nur->pc, nur->sp);
 			pexit("Suicide", 0);
 		}
 		qunlock(&up->debug);
@@ -144,7 +144,7 @@ notify(Ureg* ureg)
 		l = strlen(note.msg);
 		if(l > ERRMAX-sizeof(" pc=0x0123456789abcdef"))
 			l = ERRMAX-sizeof(" pc=0x0123456789abcdef");
-		sprint(note.msg+l, " pc=%#p", ureg->ip);
+		sprint(note.msg+l, " pc=%#p", ureg->pc);
 	}
 
 	if(note.flag != NUser && (up->notified || up->notify == nil)){
@@ -164,7 +164,7 @@ notify(Ureg* ureg)
 		qunlock(&up->debug);
 		pexit(note.msg, note.flag != NDebug);
 	}
-	if(!okaddr(PTR2UINT(up->notify), sizeof(ureg->ip), 0)){
+	if(!okaddr(PTR2UINT(up->notify), sizeof(ureg->pc), 0)){
 		qunlock(&up->debug);
 		pprint("suicide: bad function address %#p in notify\n",
 			up->notify);
@@ -189,7 +189,7 @@ notify(Ureg* ureg)
 	nf->ip = 0;
 
 	ureg->sp = sp;
-	ureg->ip = PTR2UINT(up->notify);
+	ureg->pc = PTR2UINT(up->notify);
 	up->notified = 1;
 	up->nnote--;
 	memmove(&up->lastnote, &note, sizeof(Note));
@@ -240,7 +240,7 @@ syscall(int badscallnr, Ureg* ureg)
 	up->nsyscall++;
 	up->nqsyscall++;
 	up->insyscall = 1;
-	up->pc = ureg->ip;
+	up->pc = ureg->pc;
 	up->dbgreg = ureg;
 	sp = ureg->sp;
 	startns = 0;
@@ -276,7 +276,7 @@ syscall(int badscallnr, Ureg* ureg)
 	if(!waserror()){
 		if(scallnr >= nsyscall || systab[scallnr].f == nil){
 			pprint("bad sys call number %d pc %#llux\n",
-				scallnr, ureg->ip);
+				scallnr, ureg->pc);
 			postnote(up, 1, "sys: bad sys call", NDebug);
 			error(Ebadarg);
 		}
@@ -390,7 +390,7 @@ sysexecregs(uintptr entry, ulong ssize, ulong nargs)
 
 	ureg = up->dbgreg;
 	ureg->sp = PTR2UINT(sp);
-	ureg->ip = entry;
+	ureg->pc = entry;
 	ureg->type = 64;			/* fiction for acid */
 
 	/*

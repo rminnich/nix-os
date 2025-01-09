@@ -10,11 +10,11 @@ static void
 rpc(int fd, int type)
 {
 	int n, l;
-	char buf[128], *p;
+	uchar buf[128], *p;
 
 	hdr.type = type;
 	hdr.tag = NOTAG;
-	n = convS2M(&hdr, buf);
+	n = convS2M(&hdr, buf, sizeof(buf));
 	if(write(fd, buf, n) != n)
 		fatal("write rpc");
 
@@ -30,7 +30,7 @@ rpc(int fd, int type)
 		p += n;
 		l += n;
 	}
-	if(convM2S(buf, &hdr, n) == 0){
+	if(convM2S(buf, n, &hdr) == 0){
 		print("%ux %ux %ux\n", buf[0], buf[1], buf[2]);
 		fatal("rpc format");
 	}
@@ -48,5 +48,5 @@ void
 nop(int fd)
 {
 	print("nop");
-	rpc(fd, Tnop);
+	/*rpc(fd, Tnop);*/ /* PAL: DANGER - stubbing? */
 }
