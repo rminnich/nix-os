@@ -1,9 +1,9 @@
 #!/bin/rc
 objtype=amd64
 unmount /sys/include >[2]/dev/null
-unmount /sys/src/libc >[2]/dev/null
+unmount /sys/src/libc/9syscall >[2]/dev/null
 bind -b /usr/glenda/nix-os/sys/include /sys/include
-bind -c /usr/glenda/nix-os/sys/src/libc /sys/src/libc
+bind -c /usr/glenda/nix-os/sys/src/libc/9syscall /sys/src/libc/9syscall
 cd /usr/glenda/nix-os/sys
 for(d in man/*){
 	unmount /sys/$d >[2]/dev/null
@@ -12,4 +12,3 @@ for(d in man/*){
 # Set up git.
 cd ..
 git/fs
-exit ''

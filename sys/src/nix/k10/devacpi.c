@@ -8,6 +8,8 @@
 #include "mp.h"
 #include "acpi.h"
 
+extern void qqsort(void *va, long n, long es, int (*cmp)(void*, void*));
+
 /*
  * ACPI 4.0 Support.
  * Still WIP.
@@ -808,7 +810,7 @@ acpislit(uchar *p, int len)
 	}
 	dumpslit(slit);
 	for(i = 0; i < slit->rowlen; i++)
-		qsort(slit->e[i], slit->rowlen, sizeof(slit->e[0][0]), cmpslitent);
+		qqsort(slit->e[i], slit->rowlen, sizeof(slit->e[0][0]), cmpslitent);
 	
 	dumpslit(slit);
 	return nil;	/* can be unmapped once parsed */

@@ -816,7 +816,7 @@ routewrite(Fs *f, Chan *c, char *p, int n)
 		if(cb->nf < 3)
 			error(Ebadarg);
 		parseip(addr, cb->f[1]);
-		parseipmask(mask, cb->f[2]);
+		parseipmask(mask, cb->f[2], 0);
 		if(memcmp(addr, v4prefix, IPv4off) == 0)
 			v4delroute(f, addr+IPv4off, mask+IPv4off, 1);
 		else
@@ -825,7 +825,7 @@ routewrite(Fs *f, Chan *c, char *p, int n)
 		if(cb->nf < 4)
 			error(Ebadarg);
 		parseip(addr, cb->f[1]);
-		parseipmask(mask, cb->f[2]);
+		parseipmask(mask, cb->f[2], 0);
 		parseip(gate, cb->f[3]);
 		tag = "none";
 		if(c != nil){

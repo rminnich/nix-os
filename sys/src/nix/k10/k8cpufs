@@ -117,6 +117,7 @@ dbgflg
 	memory 'm'
 
 amd64 +dev
+	qqsort
 	l32p
 	l64v
 	l64idt

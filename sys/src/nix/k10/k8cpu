@@ -121,6 +121,7 @@ dbgflg
 	mmu		'v'
 
 amd64 +dev
+	qqsort
 	l32p
 	l64v
 	l64idt

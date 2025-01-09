@@ -1,8 +1,11 @@
 /*
+ * PAL: a gross hack for a linker problem
+ */
+/*
  * qsort -- simple quicksort
  */
 
-#include <u.h>
+#include "u.h"
 
 typedef
 struct
@@ -111,7 +114,7 @@ qsorts(char *a, usize n, Sort *p)
 }
 
 void
-qsort(void *va, long n, long es, int (*cmp)(void*, void*))
+qqsort(void *va, long n, long es, int (*cmp)(void*, void*))
 {
 	Sort s;
 
