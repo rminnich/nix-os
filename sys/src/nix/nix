@@ -12,5 +12,3 @@ for(d in man/*){
 # Set up git.
 cd ..
 git/fs
-
-/sys/src/libc/9syscall/sys.h
