@@ -1,6 +1,10 @@
 #include "mem.h"
 #include "amd64l.h"
 
+/* Some definitions cribbed form 9front's l.s to allow cribbing their multiboot header */
+#define	BY2PG		(0x1000ull)		/* bytes per page */
+
+
 MODE $32
 
 #define pFARJMP32(s, o)	BYTE $0xea;		/* far jump to ptr32:16 */\
@@ -16,7 +20,7 @@ MODE $32
  */
 TEXT _protected<>(SB), 1, $-4
 	CLI
-	BYTE $0xe9; LONG $0x00000058;		/* JMP _endofheader */
+	BYTE $0xe9; LONG $(161);		/* JMP _endofheader */
 
 _startofheader:
 	BYTE	$0x90				/* NOP */
@@ -24,8 +28,17 @@ _startofheader:
 
 TEXT _multibootheader<>(SB), 1, $-4		/* must be 4-byte aligned */
 	LONG	$0x1badb002			/* magic */
-	LONG	$0x00000003			/* flags */
-	LONG	$-(0x1badb002 + 0x00000003)	/* checksum */
+	LONG	$0x00010007			/* flags */
+	LONG	$-(0x1badb002 + 0x00010007)	/* checksum */
+	LONG	$_multibootheader<>-KZERO(SB)	/* header_addr */
+	LONG	$_protected<>-KZERO(SB)		/* load_addr */
+	LONG	$edata-KZERO(SB)		/* load_end_addr */
+	LONG	$end-KZERO(SB)			/* bss_end_addr */
+	LONG	$_multibootentry<>-KZERO(SB)	/* entry_addr */
+	LONG	$0				/* mode_type */
+	LONG	$0				/* width */
+	LONG	$0				/* height */
+	LONG	$32				/* depth */
 
 TEXT _gdt32p<>(SB), 1, $-4
 	QUAD	$0x0000000000000000		/* NULL descriptor */
@@ -63,6 +76,30 @@ _endofheader:
 	MOVW	AX, SS
 
 	pFARJMP32(SSEL(SiCS, SsTIGDT|SsRPL0), _warp64<>-KZERO(SB))
+
+/* 
+ * the kernel expects the data segment to be page-aligned
+ * multiboot bootloaders put the data segment right behind text
+ */
+TEXT _multibootentry<>(SB), 1, $-4
+	MOVL	$etext-KZERO(SB), SI
+	MOVL	SI, DI
+	ADDL	$(BY2PG-1), DI
+	ANDL	$~(BY2PG-1), DI
+	MOVL	$edata-KZERO(SB), CX
+	SUBL	DI, CX
+	ADDL	CX, SI
+	ADDL	CX, DI
+	INCL	CX	/* one more for post decrement */
+	STD
+	REP; MOVSB
+	MOVL	BX, multibootptr-KZERO(SB)
+	MOVL	$_protected<>-KZERO(SB), AX
+	JMP*	AX
+
+/* multiboot structure pointer (physical address) */
+TEXT multibootptr(SB), 1, $-4
+	LONG	$0
 
 /*
  * Make the basic page tables for CPU0 to map 0-4MiB physical
