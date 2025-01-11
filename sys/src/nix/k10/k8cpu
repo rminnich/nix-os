@@ -121,7 +121,6 @@ dbgflg
 	mmu		'v'
 
 amd64 +dev
-	qqsort
 	l32p
 	l64v
 	l64idt
@@ -152,6 +151,7 @@ amd64 +dev
 	trap
 	vsvm
 	physalloc
+	qqsort
 
 port
 	alarm
