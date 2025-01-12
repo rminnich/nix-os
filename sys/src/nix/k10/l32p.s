@@ -4,6 +4,9 @@
 /* Some definitions cribbed form 9front's l.s to allow cribbing their multiboot header */
 #define	BY2PG		(0x1000ull)		/* bytes per page */
 
+/* 7 bytes */
+#define WAVE(c) MOVB $c, AL; MOVW $0x3f8, DX; OUTB
+
 
 MODE $32
 
@@ -20,7 +23,7 @@ MODE $32
  */
 TEXT _protected<>(SB), 1, $-4
 	CLI
-	BYTE $0xe9; LONG $(161);		/* JMP _endofheader */
+	BYTE $0xe9; LONG $(0x7e);		/* JMP _endofheader */
 
 _startofheader:
 	BYTE	$0x90				/* NOP */
@@ -64,7 +67,6 @@ TEXT _gdtptr64v<>(SB), 1, $-4
 
 _endofheader:
 	MOVL	AX, BP				/* possible passed-in magic */
-
 	MOVL	$_gdtptr32p<>-KZERO(SB), AX
 	MOVL	(AX), GDTR
 
