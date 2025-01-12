@@ -1,0 +1,9 @@
+#!/bin/sh
+#
+# You must clean up the VMs after running vmx.  We rarely get clean exits, so you have to
+# pay attention.  
+
+vmx -c /dev/cons -w 1024x768 -m plan9.ini /usr/glenda/nix-os/sys/src/nix/k10/9k8cpu	
+# Clean up
+term% echo stop >> '#X/0/ctl'
+term% echo quit >> '#X/0/ctl'
