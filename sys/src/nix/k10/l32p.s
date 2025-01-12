@@ -23,7 +23,7 @@ MODE $32
  */
 TEXT _protected<>(SB), 1, $-4
 	CLI
-	BYTE $0xe9; LONG $(0x7e);		/* JMP _endofheader */
+	BYTE $0xe9; LONG $(0x7c);		/* JMP _endofheader */
 
 _startofheader:
 	BYTE	$0x90				/* NOP */
@@ -66,7 +66,6 @@ TEXT _gdtptr64v<>(SB), 1, $-4
 	QUAD	$_gdt64<>(SB)
 
 _endofheader:
-	MOVL	AX, BP				/* possible passed-in magic */
 	MOVL	$_gdtptr32p<>-KZERO(SB), AX
 	MOVL	(AX), GDTR
 
@@ -84,6 +83,8 @@ _endofheader:
  * multiboot bootloaders put the data segment right behind text
  */
 TEXT _multibootentry<>(SB), 1, $-4
+	MOVL	AX, BP				/* possible passed-in magic */
+			/* BP is the RARG register.  It looks like this is kept all the way to main */
 	MOVL	$etext-KZERO(SB), SI
 	MOVL	SI, DI
 	ADDL	$(BY2PG-1), DI
@@ -263,7 +264,6 @@ _zap0done:
 	PUSHQ	BX				/* multiboot info* */
 	MOVLQZX	RARG, RARG
 	PUSHQ	RARG				/* multiboot magic */
-
 	CALL	main(SB)
 
 TEXT ndnr(SB), 1, $-4				/* no deposit, no return */
