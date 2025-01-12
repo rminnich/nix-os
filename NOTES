@@ -1,0 +1,48 @@
+# Here are some notes for a quick start.
+#
+# The bulk of the work are modifications against some Plan9
+# distribution. So one needs first to get the modifications
+# (at the present presented with a whole (obsolete) distribution.
+#
+# The main repository is for now:
+#
+# https://github.com/rminnich/nix-os
+#
+# So you need to have a copy, a clone, of the main directory or
+# of your fork if you want to send automatically pull requests
+# when you have committed something.
+#
+# We will suppose on the following that you are glenda, in her
+# home dir:
+
+# This is the master site; this could be your clone or you could
+# mount a copy etc.
+#
+git/clone https://github.com/rminnich/nix-os
+
+# Once you get the modification, the first step is to
+# manipulate the namespace in order for changed files to
+# mix with unchanged ones. The 'nix' rc script in
+# sys/src/nix will take care of that:
+
+cd nix-os/sys/src/nix
+nix
+
+# Compilation of boot part. You should better intercept 
+# compiler (i.e. assembler, compiler or linker) warnings
+# and fix things if there are some to fix.
+#
+cd boot
+mk
+
+# Then the rest of the cpu kernel.
+#
+# Same remarks for the following.
+#
+cd ../k10
+mk ../root/nvram
+mk
+
+# You should have now a 9k8cpu kernel to test.
+# Look at Paul Lalonde's sys/src/nix/vmx/vmx
+# rc script to try...
