@@ -1,4 +1,6 @@
 #!/bin/rc
+#
+# To run the resulting kernel see the scripts in ./vmx
 objtype=amd64
 unmount /sys/include >[2]/dev/null
 unmount /sys/src/libc/9syscall >[2]/dev/null
