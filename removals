@@ -1,4 +1,4 @@
-rm -rf 9vx.OSX BUILDING_AMD64 PROCESS bootdisk.img env fd n start9vx tmp
+rm -rf 9vx.OSX BUILDING_AMD64 PROCESS bootdisk.img env fd n start9vx tmp .hgignore
 rm -rf 386
 rm -rf 68000
 rm -rf 68020
@@ -223,6 +223,8 @@ rm -rf sys/src/cmd/vt
 rm -rf sys/src/cmd/vtvacfs
 rm -rf sys/src/cmd/webfs
 rm -rf sys/src/cmd/wikifs
+rm -rf sys/src/cmd/*.c sys/src/cmd/sh.C sys/src/cmd/units.y sys/src/libc/mkfile sys/src/mkfile sys/src/mkfile.proto  sys/src/cmd/bc.y sys/src/cmd/mkfile sys/src/cmd/mklib sys/src/cmd/mkmany sys/src/cmd/mkone sys/src/cmd/mksyslib
+
 rm -rf sys/src/games
 rm -rf sys/src/libc/386/387
 rm -rf sys/src/libc/68020/68881
@@ -240,6 +242,7 @@ rm -rf sys/src/libc/port
 rm -rf sys/src/libc/power
 rm -rf sys/src/libc/sparc
 rm -rf sys/src/libc/thr
+rm -rf sys/src/libdraw
 rm -rf sys/src/libmach
 rm -rf sys/src/libmp
 rm -rf sys/src/libsec
@@ -286,6 +289,6 @@ rm -rf sys/src/libventi
 rm -rf sys/src/libworker
 #rm -rf sys/src/nix
 #rm -rf sys/include
-#rm -rf sys/man
+rm -rf sys/man/vol1.pdf sys/man/vol1.ps.gz sys/man/fonts sys/man/index.html sys/man/mkfile sys/man/preface.html sys/man/preface3.html sys/man/preface4.html sys/man/searchindex
 #rm -rf sys/src
 rm -rf usr
