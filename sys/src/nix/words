@@ -18,3 +18,9 @@ rminnich
 You can reach as at nix A_T lsub.org
 But don't write A_T like that.
 Fri Sep  2 22:03:15 CET 2011
+
+Additional notes starting Mon Jan 13 17:03:51 PST 2025
+This tree has been turned into an overlay on top of 9front.  The things below are open questions from the transition.
+
+1. [PAL] /sys/src/libc/9syscall/ doesn't seem to exist in 9front anymore.  Where does this go?  What were the patches?  We need to redo this work in the right place.
+2.
