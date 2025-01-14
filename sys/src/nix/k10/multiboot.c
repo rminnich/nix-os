@@ -55,6 +55,16 @@ struct MMap {
 	u32int	type;
 };
 
+void
+multibootmemassert(u32int pmbi)
+{
+	Mbi *mbi;
+
+	mbi = KADDR(pmbi);
+	if ((mbi->memupper << 10) + (1<<20) < TMFM)
+		panic("multiboot: Must have at least %0dMB RAM: Only %0d provided\n", TMFM>>20, ((mbi->memupper << 10) + (1<<20))>>20);
+}
+
 int
 multiboot(u32int magic, u32int pmbi, int vflag)
 {

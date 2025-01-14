@@ -98,6 +98,7 @@ int	mmukmapsync(uvlong);
 uintmem	mmuphysaddr(uintptr);
 int	mmuwalk(PTE*, uintptr, int, PTE**, PTE (*)(usize));
 int	multiboot(u32int, u32int, int);
+void	multibootmemassert(u32int pmbi);
 void	ndnr(void);
 uchar	nvramread(int);
 void	nvramwrite(int, uchar);
