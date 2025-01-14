@@ -14,9 +14,6 @@
  *	mmuptcopy (PteSHARED trick?);
  *	calculate and map up to TMFM (conf crap);
  */
-
-#define TMFM		(64*MiB)		/* kernel memory */
-
 #define PPN(x)		((x)&~(PGSZ-1))
 
 void

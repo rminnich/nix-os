@@ -40,6 +40,8 @@
 #define KSTACK		(16*1024)		/* Size of Proc kernel stack */
 #define STACKALIGN(sp)	((sp) & ~(BY2SE-1))	/* bug: assure with alloc */
 
+#define TMFM		(64*MiB)		/* kernel memory */
+
 /*
  * 2M pages
  * these defines must go.

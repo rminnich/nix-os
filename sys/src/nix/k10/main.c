@@ -306,6 +306,7 @@ main(u32int ax, u32int bx)
 	mmuinit();
 
 	ioinit();
+	multibootmemassert(bx); /* This test is so far down because we want panic() to be setup */
 	kbdinit();
 	meminit();
 	confinit();

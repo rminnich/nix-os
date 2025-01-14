@@ -7,8 +7,6 @@
 #define _KADDR(pa)	UINT2PTR(kseg0+((uintptr)(pa)))
 #define _PADDR(va)	PTR2UINT(((uintptr)(va)) - kseg0)
 
-#define TMFM		(64*MiB)
-
 void*
 KADDR(uintptr pa)
 {
