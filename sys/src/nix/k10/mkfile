@@ -84,8 +84,6 @@ pci.$O:		io.h
 sdscsi.$O:	../port/error.h
 
 random.$O:	../port/error.h
-devtube.$O:	../port/tube.h
-syssem.$O: ../port/tube.h
 devacpi.$O: acpi.h
 physalloc.$O: acpi.h
 
