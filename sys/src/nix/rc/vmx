@@ -1,9 +1,27 @@
-#!/bin/sh
+#!/bin/rc
 #
-# You must clean up the VMs after running vmx.  We rarely get clean exits, so you have to
-# pay attention.  
 
-vmx -c /dev/cons -w 1024x768 -m plan9.ini /usr/glenda/nix-os/sys/src/nix/k10/9k8cpu	
+# Extracting the plan9.ini configuration to feed to vmx.
+# It is a the end of this script, commented. You may adjust.
+#
+sed -n '/^##BEGIN_INI/,/^##END_INI/p' /bin/nix/vmx \
+	| sed -e '/^##/d' -e 's/^#//' \
+	>/tmp/$pid.ini
+
+# You must clean up the VMs after running vmx.  We rarely get clean
+# exits, so you have to pay attention.  
+#
+
+vmx -c /dev/cons -w 1024x768 -m /tmp/$pid.ini $home/nix-os/sys/src/nix/k10/9k8cpu	
+
 # Clean up
-term% echo stop >> '#X/0/ctl'
-term% echo quit >> '#X/0/ctl'
+rm -f /tmp/$pid.ini
+echo stop >> '#X/0/ctl'
+echo quit >> '#X/0/ctl'
+
+exit
+
+##BEGIN_INI
+#vgasize=1024x768x16
+#mouseport=ps2
+##END_INI
