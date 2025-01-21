@@ -1,5 +1,6 @@
 #!/bin/rc
 #
+# Arguments passed to the script are passed to the kernel booted.
 
 # Extracting the plan9.ini configuration to feed to vmx.
 # It is a the end of this script, commented. You may adjust.
@@ -12,7 +13,7 @@ sed -n '/^##BEGIN_INI/,/^##END_INI/p' /bin/nix/vmx \
 # exits, so you have to pay attention.  
 #
 
-vmx -c /dev/cons -w 1024x768 -m /tmp/$pid.ini $home/nix-os/sys/src/nix/k10/9k8cpu	
+vmx -c /dev/cons -w 1024x768 -m /tmp/$pid.ini $home/nix-os/sys/src/nix/k10/9k8cpu $*
 
 # Clean up
 rm -f /tmp/$pid.ini

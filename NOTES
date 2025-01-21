@@ -50,4 +50,9 @@ mk
 #
 # To ease testing, there are scripts accessed as nix/some_script:
 
-nix/vmx # Paul Lalonde's script to call (single core) vmx with 9k8cpu
+# Testing with vmx. Do read the man page first, if only to know
+# how to "ungrab" the mouse.
+# Any argument passed to the script is an argument passed to the
+# Nix kernel.
+#
+nix/test_vmx # Paul Lalonde's script to call (single core) vmx wiht 9k8cpu
