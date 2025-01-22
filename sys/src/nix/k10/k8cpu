@@ -27,6 +27,7 @@ misc +dev
 	mp		apic ioapic msi pci sipi
 
 boot cpu
+	local
 
 rootdir
 	bootk8cpu.out boot
