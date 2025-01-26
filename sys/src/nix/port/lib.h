@@ -34,10 +34,11 @@ extern	int	tokenize(char*, char**, int);
 
 enum
 {
-	UTFmax		= 3,		/* maximum bytes per rune */
+	UTFmax		= 4,		/* maximum bytes per rune */
 	Runesync	= 0x80,		/* cannot represent part of a UTF sequence */
 	Runeself	= 0x80,		/* rune and UTF sequences are the same (<) */
 	Runeerror	= 0xFFFD,	/* decoding error in UTF */
+	Runemax		= 0x10FFFF,	/* 21 bit rune */
 };
 
 /*
@@ -45,11 +46,11 @@ enum
  */
 extern	int	runetochar(char*, Rune*);
 extern	int	chartorune(Rune*, char*);
-extern	int	runelen(long);
-extern	int	fullrune(char*, int);
+extern	char*	utfecpy(char *s1, char *es1, char *s2);
+extern	char*	utfrune(char*, long);
 extern	int	utflen(char*);
 extern	int	utfnlen(char*, long);
-extern	char*	utfrune(char*, long);
+extern	int	runelen(long);
 
 /*
  * malloc
