@@ -378,7 +378,7 @@ ziorw(int fd, Zio *io, int nio, usize count, vlong offset, int iswrite)
 	kio = nil;
 
 	io = validaddr(io, sizeof io[0] * nio, 1);
-	DBG("ziorw %d io%#p[%d] %uld %lld\n", fd, io, nio, count, offset);
+	DBG("ziorw %d io%#p[%d] %ulld %lld\n", fd, io, nio, count, offset);
 	if(DBGFLG)
 		for(i = 0; i < nio; i++)
 			print("\tio%#p[%d] = %Z %s\n",

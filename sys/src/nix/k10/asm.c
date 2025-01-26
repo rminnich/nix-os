@@ -393,7 +393,7 @@ asmmeminit(void)
 //  hi = 600*MiB;
 		conf.mem[cx].npage = (hi - lo)/PGSZ;
 		conf.npage += conf.mem[cx].npage;
-		print("cm %d: addr %#llux npage %lud\n",
+		print("cm %d: addr %#llux npage %llud\n",
 			cx, conf.mem[cx].base, conf.mem[cx].npage);
 		cx++;
 #endif /* ConfCrap */
@@ -408,7 +408,7 @@ asmmeminit(void)
 	conf.upages = conf.npage;
 	i = (sys->vmend - sys->vmstart)/PGSZ;		/* close enough */
 	conf.ialloc = (i/2)*PGSZ;
-	print("npage %llud upage %lud kpage %d\n",
+	print("npage %llud upage %llud kpage %d\n",
 		conf.npage, conf.upages, i);
 
 #endif /* ConfCrap */

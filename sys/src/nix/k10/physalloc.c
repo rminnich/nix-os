@@ -72,7 +72,7 @@ seprintphysstats(char *s,  char *e)
 	for(i = 0; i < Ndoms; i++){
 		b = &bal[i];
 		if(b->size > 0)
-			s = seprint(s, e, "%uld/%uld %ulldK color %d blocks avail\n",
+			s = seprint(s, e, "%ulld/%ulld %ulldK color %d blocks avail\n",
 				b->nfree, b->nblocks, b->bminsz/KiB, i);
 	}
 	unlock(&budlock);
@@ -111,7 +111,7 @@ S1:
 		p = l - (1<<l->kval)/b->bminsz;
 	else
 		p = l + (1<<l->kval)/(b->bminsz);
-	DBG("\tbsl: l @ %ld buddy @ %ld\n", l - blocks, p - blocks);
+	DBG("\tbsl: l @ %lld buddy @ %lld\n", l - blocks, p - blocks);
 
 	/*
 	 * Is buddy available?
@@ -159,7 +159,7 @@ S1:
 	 * Now can try to merge this larger block.
 	k++;
 	 */
-	DBG("\tbsl: l @ %ld p @ %ld\n", l - blocks, p - blocks);
+	DBG("\tbsl: l @ %lld p @ %lld\n", l - blocks, p - blocks);
 	if(p < l)
 		l = p;
 	i = l - blocks + INDEX(b,b->memory);
@@ -326,7 +326,7 @@ xphysalloc(Bal *b, u64int size, void *tag)
 		if(p->next != 0)
 			blocks[BLOCK(b,p->next)].prev = i + (UNO<<j)/(b->bminsz);
 		avail[j].next = i + (UNO<<j)/(b->bminsz);
-		DBG("bsr: split @ i %d BLOCK(b,i) %ld j %d next %d (%d) %s\n",
+		DBG("bsr: split @ i %d BLOCK(b,i) %lld j %d next %d (%d) %s\n",
 			i, p - blocks, j, p->next, BLOCK(b,p->next),
 			p->tag?"avail":"used");
 	}
