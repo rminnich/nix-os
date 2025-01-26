@@ -353,7 +353,7 @@ asmmeminit(void)
 		hi = asm->addr+asm->size;
 		/* Convert a range into pages */
 		for(mem = lo; mem < hi; mem = nextmem){
-			nextmem = (mem + PGLSZ(0)) & ~m->pgszmask[0];
+			nextmem = (mem + PGLSZ(0)) & ~(uintmem)m->pgszmask[0];
 
 			/* Try large pages first */
 			for(i = m->npgsz - 1; i >= 0; i--){

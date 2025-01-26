@@ -14,7 +14,7 @@
  *	mmuptcopy (PteSHARED trick?);
  *	calculate and map up to TMFM (conf crap);
  */
-#define PPN(x)		((x)&~(PGSZ-1))
+#define PPN(x)		((x)&~(uintmem)(PGSZ-1))
 
 void
 mmuflushtlb(u64int)
