@@ -1,5 +1,42 @@
 # Here are some notes for a quick start.
 #
+# The state from which Nix is restarted dates from
+# Fri Sep  2 22:03:15 CET 2011
+#
+# The kernel was initially started from the 9k, mainly due to
+# Jim McKie [jmk] with possible contributions from others from
+# Bell Labs.
+#
+# The modified Nix one: k10, was the result including (in nicknames
+# alphabetical order):
+#
+#	esoriano [Enrique Soriano]
+#	forsyth [Charles Forsyth]
+#	jmk [Jim McKie]
+#	nemo [Francisco J. Ballesteros]
+#	npe [Noah Evans]
+#	paurea [Gorka Guardiola Múzquiz]
+#	rminnich [Ron Minnich]	
+#
+# (these are also the authors of the main articles concerning the
+# subject.)
+#
+# This resulting Nix is:
+#	- made of objtype=amd64
+# 	- has 2M pages, and supports 1G pages.
+#
+# The initial version was delivered with a whole (Bell Labs) plan9
+# distribution.
+#
+# Ron Minnich and mainly Paul A. Lalonde have cleaned the distribution
+# so that remains, in fact, what is Nix proper (modifications or
+# additions).
+#
+# The first aim is to resurrect this version, but with a 9front
+# distribution, the most actively developed and used Plan9 "branch".
+#
+# Here are quick notes to get you started:
+#
 # The bulk of the work are modifications against some Plan9
 # distribution. So one needs first to get the modifications
 #
