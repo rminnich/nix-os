@@ -184,7 +184,7 @@ mpparse(PCMP* pcmp, int maxcores)
 	e = ((uchar*)pcmp)+l16get(pcmp->length);
 	while(p < e) switch(*p){
 	default:
-		print("mpparse: unknown PCMP type %d (e-p %#ld)\n", *p, e-p);
+		print("mpparse: unknown PCMP type %d (e-p %#lld)\n", *p, e-p);
 		for(i = 0; p < e; i++){
 			if(i && ((i & 0x0f) == 0))
 				print("\n");
