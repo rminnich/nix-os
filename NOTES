@@ -1,14 +1,14 @@
 # Here are some notes for a quick start.
 #
-# The state from which Nix is restarted dates from
+# The state from which Nix is presently restarted dates from
 # Fri Sep  2 22:03:15 CET 2011
 #
 # The kernel was initially started from the 9k, mainly due to
 # Jim McKie [jmk] with possible contributions from others from
 # Bell Labs.
 #
-# The modified Nix one: k10, was the result including (in nicknames
-# alphabetical order):
+# The modified Nix one: k10, was the result of the work of
+# many others, including (in nicknames alphabetical order):
 #
 #	esoriano [Enrique Soriano]
 #	forsyth [Charles Forsyth]
@@ -22,7 +22,7 @@
 # subject.)
 #
 # This resulting Nix is:
-#	- made of objtype=amd64
+#	- made for objtype=amd64
 # 	- has 2M pages, and supports 1G pages.
 #
 # The initial version was delivered with a whole (Bell Labs) plan9
@@ -38,21 +38,13 @@
 # Here are quick notes to get you started:
 #
 # The bulk of the work are modifications against some Plan9
-# distribution. So one needs first to get the modifications
-#
-# The main repository is for now:
-#
-# https://github.com/rminnich/nix-os
-#
-# So you need to have a copy, a clone, of the main directory or
-# of your fork (exchange are as usual: commit to your branch
-# and then make a Pull Request if you want to get it merged).
+# distribution. Once you're under 9front, you need first to get
+# the modifications by cloning this very repository.
 #
 # We will suppose on the following that you have put the sources
 # in $home/nix-os.
 
-# This is the master site; this could be your clone or you could
-# mount a copy etc.
+# So for example cloning from the master src:
 #
 cd
 git/clone https://github.com/rminnich/nix-os
@@ -65,31 +57,23 @@ git/clone https://github.com/rminnich/nix-os
 cd nix-os/sys/src/nix
 nix
 
-# Compilation of boot part. You should better intercept 
-# compiler (i.e. assembler, compiler or linker) warnings
-# and fix things if needed.
+# The namespace is now set to allow the compilation and,
+# furthermore, rc scripts provided for testing will now be
+# accessible as nix/some_script.
+
+#                   COMPILATION OF THE KERNEL
 #
 cd boot
 mk
-
-# Then the rest of the cpu kernel.
-#
-# Same remarks for the following.
-#
 cd ../k10
 mk ../root/nvram
 mk
 
-# The scripts related to nix have been binded as to be accessed
-# as nix/some_script.
 # You should have now (after the commands above) a 9k8cpu kernel
 # to test.
 #
-# To ease testing, there are scripts accessed as nix/some_script:
-
-# Testing with vmx. Do read the man page first, if only to know
-# how to "ungrab" the mouse.
-# Any argument passed to the script is an argument passed to the
-# Nix kernel.
+# It can be tested under qemu or using 9front vmx with the 
+# Paul Lalonde's script---arguments passed to the script are
+# arguments passed to the kernel by vmx:
 #
-nix/test_vmx # Paul Lalonde's script to call (single core) vmx wiht 9k8cpu
+nix/test_vmx
