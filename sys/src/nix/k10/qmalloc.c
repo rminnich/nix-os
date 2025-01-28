@@ -422,7 +422,7 @@ mallocreadfmt(char* s, char* e)
 		p = seprint(p, e, "rover: %d blocks %ud bytes total\n",
 			i, t*sizeof(Header));
 	}
-	p = seprint(p, e, "total allocated %lud, %ud remaining\n",
+	p = seprint(p, e, "total allocated %llud, %ud remaining\n",
 		(tailptr-tailbase)*sizeof(Header), tailnunits*sizeof(Header));
 
 	for(i = 0; i < nelem(qstats); i++){
@@ -483,7 +483,7 @@ mallocsummary(void)
 		print("rover: %d blocks %ud bytes total\n",
 			i, t*sizeof(Header));
 	}
-	print("total allocated %lud, %ud remaining\n",
+	print("total allocated %llud, %ud remaining\n",
 		(tailptr-tailbase)*sizeof(Header), tailnunits*sizeof(Header));
 
 	for(i = 0; i < nelem(qstats); i++){

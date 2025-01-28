@@ -15,7 +15,7 @@ enum {
 
 	Seconds=	0x00,
 	Minutes=	0x02,
-	Hours=		0x04,
+	Hours=		0x04, 
 	Mday=		0x07,
 	Month=		0x08,
 	Year=		0x09,
@@ -73,7 +73,7 @@ rtcwalk(Chan* c, Chan *nc, char** name, int nname)
 	return devwalk(c, nc, name, nname, rtcdir, nelem(rtcdir), devgen);
 }
 
-static long	 
+static long
 rtcstat(Chan* c, uchar* dp, long n)
 {
 	return devstat(c, dp, n, rtcdir, nelem(rtcdir), devgen);
@@ -103,7 +103,7 @@ rtcclose(Chan*)
 #define GETBCD(o) ((bcdclock[o]&0xf) + 10*(bcdclock[o]>>4))
 
 static long	 
-rtcextract(void)
+_rtctime(void)
 {
 	uchar bcdclock[Nbcd];
 	Rtc rtc;
@@ -159,15 +159,16 @@ rtctime(void)
 	ilock(&nvrtlock);
 
 	/* loop till we get two reads in a row the same */
-	t = rtcextract();
+	t = _rtctime();
 	for(i = 0; i < 100; i++){
-		ot = rtcextract();
+		ot = t;
+		t = _rtctime();
 		if(ot == t)
 			break;
 	}
-	iunlock(&nvrtlock);
-
 	if(i == 100) print("we are boofheads\n");
+
+	iunlock(&nvrtlock);
 
 	return t;
 }
@@ -226,28 +227,27 @@ rtcwrite(Chan* c, void* buf, long n, vlong off)
 	char *a, *start;
 	Rtc rtc;
 	ulong secs;
+	char *cp, sbuf[32];
 	uchar bcdclock[Nbcd];
-	char *cp, *ep;
 	ulong offset = off;
 
 	if(offset!=0)
 		error(Ebadarg);
-
 
 	switch((ulong)c->qid.path){
 	case Qrtc:
 		/*
 		 *  read the time
 		 */
-		cp = ep = buf;
-		ep += n;
-		while(cp < ep){
-			if(*cp>='0' && *cp<='9')
+		if(n >= sizeof(sbuf))
+			error(Ebadarg);
+		strncpy(sbuf, buf, n);
+		sbuf[n] = '\0';
+		for(cp = sbuf; *cp != '\0'; cp++)
+			if(*cp >= '0' && *cp <= '9')
 				break;
-			cp++;
-		}
 		secs = strtoul(cp, 0, 0);
-
+	
 		/*
 		 *  convert to bcd
 		 */

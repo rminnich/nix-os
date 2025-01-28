@@ -2,10 +2,14 @@
 #
 # Arguments passed to the script are passed to the kernel booted.
 
+# The script is supposed to appear as:
+#
+myself='/bin/nix/test_vmx'
+
 # Extracting the plan9.ini configuration to feed to vmx.
 # It is a the end of this script, commented. You may adjust.
 #
-sed -n '/^##BEGIN_INI/,/^##END_INI/p' /bin/nix/vmx \
+sed -n '/^##BEGIN_INI/,/^##END_INI/p' $myself \
 	| sed -e '/^##/d' -e 's/^#//' \
 	>/tmp/$pid.ini
 

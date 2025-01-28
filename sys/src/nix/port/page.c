@@ -90,7 +90,7 @@ getpgszi(usize size)
 	for(si = 0; si < m->npgsz; si++)
 		if(size == m->pgsz[si])
 			return si;
-	print("getpgszi: size %#ulx not found\n", size);
+	print("getpgszi: size %#ullx not found\n", size);
 	return -1;
 }
 
@@ -107,7 +107,7 @@ pgalloc(usize size, int color)
 	}
 	memset(pg, 0, sizeof *pg);
 	if((pg->pa = physalloc(size, &color, pg)) == 0){
-		DBG("pgalloc: physalloc failed: size %#ulx color %d\n", size, color);
+		DBG("pgalloc: physalloc failed: size %#ullx color %d\n", size, color);
 		free(pg);
 		return nil;
 	}

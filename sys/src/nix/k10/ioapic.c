@@ -183,7 +183,7 @@ ioapicdump(void)
 		print("iointr bus %d:\n", i);
 		for(; rbus != nil; rbus = rbus->next){
 			rdt = rbus->rdt;
-			print(" apic %ld devno %#ux (%d %d) intin %d lo %#ux ref %d\n",
+			print(" apic %lld devno %#ux (%d %d) intin %d lo %#ux ref %d\n",
 				rdt->apic-xioapic, rbus->devno, rbus->devno>>2,
 				rbus->devno & 0x03, rdt->intin, rdt->lo, rdt->ref);
 		}
@@ -424,7 +424,7 @@ ioapicintrenable(Vctl* v)
 	 * rather than putting a Lock in each entry.
 	 */
 	lock(rdt->apic);
-	DBG("%T: %ld/%d/%d (%d)\n", v->tbdf, rdt->apic - xioapic, rbus->devno, rdt->intin, devno);
+	DBG("%T: %lld/%d/%d (%d)\n", v->tbdf, rdt->apic - xioapic, rbus->devno, rdt->intin, devno);
 	if((rdt->lo & 0xff) == 0){
 		vecno = nextvec();
 		rdt->lo |= vecno;

@@ -1576,7 +1576,7 @@ scheddump(void)
 	for(rq = &run.runq[Nrq-1]; rq >= run.runq; rq--){
 		if(rq->head == 0)
 			continue;
-		print("run[%ld]:", rq-run.runq);
+		print("run[%lld]:", rq-run.runq);
 		for(p = rq->head; p; p = p->rnext)
 			print(" %d(%lud)", p->pid, m->ticks - p->readytime);
 		print("\n");
